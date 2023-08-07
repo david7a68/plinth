@@ -15,7 +15,10 @@ use windows::{
             GetLastError, HMODULE, HWND, LPARAM, LRESULT, WAIT_FAILED, WAIT_OBJECT_0, WIN32_ERROR,
             WPARAM,
         },
-        Graphics::{DirectComposition::DCompositionWaitForCompositorClock, Gdi::HBRUSH},
+        Graphics::{
+            DirectComposition::DCompositionWaitForCompositorClock,
+            Gdi::{BeginPaint, EndPaint, HBRUSH, PAINTSTRUCT},
+        },
         System::LibraryLoader::GetModuleHandleW,
         UI::WindowsAndMessaging::{
             CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW, GetMessageW,
@@ -23,11 +26,13 @@ use windows::{
             SetWindowLongPtrW, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW,
             CW_USEDEFAULT, GWLP_USERDATA, HICON, HMENU, IDC_ARROW, MSG, PM_NOREMOVE, PM_REMOVE,
             SW_SHOW, WINDOWPOS, WINDOW_EX_STYLE, WM_CLOSE, WM_CREATE, WM_DESTROY, WM_ENTERSIZEMOVE,
-            WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_NCDESTROY, WM_QUIT, WM_TIMER, WM_USER,
+            WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_NCDESTROY, WM_PAINT, WM_QUIT, WM_TIMER,
             WM_WINDOWPOSCHANGED, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
         },
     },
 };
+
+use crate::graphics::Renderer;
 
 pub const MAX_TITLE_LENGTH: usize = 256;
 
@@ -37,7 +42,7 @@ pub struct ScreenSpace;
 const CLASS_NAME: PCWSTR = w!("plinth_window_class");
 
 // Global state
-static WND_CLASS_ATOM: OnceLock<u16> = OnceLock::new();
+static WND_CLASS_ATOM: OnceLock<u16> = OnceLock::new(); // TODO: make thread local?
 
 fn wnd_class_atom_as_pcwstr() -> PCWSTR {
     PCWSTR(WND_CLASS_ATOM.get().unwrap().clone() as usize as *const _)
@@ -125,7 +130,11 @@ impl<'a> WindowSpec<'a> {
     /// Constructs a new window with the specified properties.
     ///
     /// The event handler determines how the window responds to OS events.
-    pub fn build(&self, event_handler: Box<dyn WindowHandler>) -> Window {
+    pub fn build(
+        &self,
+        renderer: Rc<dyn Renderer>,
+        event_handler: Box<dyn WindowHandler>,
+    ) -> Window {
         register_window_class_once();
 
         let title = translate_title(self.title);
@@ -135,6 +144,7 @@ impl<'a> WindowSpec<'a> {
             size: Cell::default(),
             position: Cell::default(),
             event_handler: RefCell::new(event_handler),
+            renderer,
         });
 
         let weak_inner_state = Rc::downgrade(&inner_state);
@@ -200,6 +210,9 @@ struct WindowState {
     hwnd: Cell<HWND>,
     size: Cell<Size2D<i32, ScreenSpace>>,
     position: Cell<Point2D<i32, ScreenSpace>>,
+
+    renderer: Rc<dyn Renderer>,
+    // swapchain:
     event_handler: RefCell<Box<dyn WindowHandler>>,
 }
 
@@ -404,10 +417,7 @@ fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LR
             window.event_handler.borrow_mut().on_close(&mut control);
             Some(0)
         }
-        WM_ERASEBKGND => {
-            tracing::debug!("WM_ERASEBKGND");
-            Some(1)
-        }
+        WM_ERASEBKGND => Some(1),
         WM_WINDOWPOSCHANGED => {
             // Handling this means we don't get a WM_SIZE message
 
@@ -416,6 +426,8 @@ fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LR
             let position = Point2D::new(window_pos.x, window_pos.y);
 
             tracing::debug!("resizing to {}x{}", window_pos.cx, window_pos.cy);
+
+            // use swapchain setsourcesize if possible for better performance
 
             if size != window.size.get() {
                 window.size.set(size);
@@ -437,10 +449,21 @@ fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LR
         }
         WM_ENTERSIZEMOVE => {
             tracing::debug!("WM_ENTERSIZEMOVE");
+            // increment anim_request_count
             Some(0)
         }
         WM_EXITSIZEMOVE => {
             tracing::debug!("WM_EXITSIZEMOVE");
+            // decrement anim_request_count
+            Some(0)
+        }
+        WM_PAINT => {
+            let mut ps = PAINTSTRUCT::default();
+            let _hdc = unsafe { BeginPaint(window.hwnd.get(), &mut ps) };
+
+            // window.event_handler.borrow_mut().on_paint(&mut control);
+
+            unsafe { EndPaint(window.hwnd.get(), &ps) };
             Some(0)
         }
         _ => None,

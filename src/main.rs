@@ -1,7 +1,9 @@
+mod graphics;
 mod window;
 
+use crate::graphics::*;
+use crate::window::*;
 use euclid::{Point2D, Size2D};
-use window::*;
 
 struct AppWindow {}
 
@@ -41,17 +43,21 @@ fn main() {
         .with_max_level(tracing::Level::DEBUG)
         .init();
 
-    let window1 = WindowSpec {
+    let graphics_config = GraphicsConfig { debug_mode: true };
+
+    let renderer = graphics_config.build();
+
+    let _window1 = WindowSpec {
         title: "Oh look, windows!",
         size: Size2D::new(800, 600),
     }
-    .build(Box::new(AppWindow {}));
+    .build(renderer.clone(), Box::new(AppWindow {}));
 
-    let window2 = WindowSpec {
+    let _window2 = WindowSpec {
         title: "Isn't this nice?",
         size: Size2D::new(800, 600),
     }
-    .build(Box::new(AppWindow {}));
+    .build(renderer.clone(), Box::new(AppWindow {}));
 
     EventLoop::run();
 }

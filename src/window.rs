@@ -17,6 +17,7 @@ use windows::{
         },
         Graphics::{
             DirectComposition::DCompositionWaitForCompositorClock,
+            Dxgi::{Common::DXGI_FORMAT_UNKNOWN, IDXGISwapChain2},
             Gdi::{BeginPaint, EndPaint, HBRUSH, PAINTSTRUCT},
         },
         System::LibraryLoader::GetModuleHandleW,
@@ -32,7 +33,7 @@ use windows::{
     },
 };
 
-use crate::graphics::Renderer;
+use crate::graphics::{resize_swapchain, Renderer};
 
 pub const MAX_TITLE_LENGTH: usize = 256;
 
@@ -40,6 +41,12 @@ pub const MAX_TITLE_LENGTH: usize = 256;
 pub struct ScreenSpace;
 
 const CLASS_NAME: PCWSTR = w!("plinth_window_class");
+
+/// Determines how quickly swapchain buffers grow when the window is resized.
+/// This helps to amortize the cost of calling `ResizeBuffers` on every frame.
+/// Once resized, the swapchain is set to the size of the window to conserve
+/// memory.
+const SWAPCHAIN_GROWTH_FACTOR: f32 = 1.2;
 
 // Global state
 static WND_CLASS_ATOM: OnceLock<u16> = OnceLock::new(); // TODO: make thread local?
@@ -117,13 +124,13 @@ pub trait WindowHandler {
 
     fn on_move(&mut self, window: &mut WindowControl, position: Point2D<i32, ScreenSpace>);
 
-    fn on_resize(&mut self, window: &mut WindowControl, size: Size2D<i32, ScreenSpace>);
+    fn on_resize(&mut self, window: &mut WindowControl, size: Size2D<u16, ScreenSpace>);
 }
 
 /// Specifies the properties of a window.
 pub struct WindowSpec<'a> {
     pub title: &'a str,
-    pub size: Size2D<i32, ScreenSpace>,
+    pub size: Size2D<u16, ScreenSpace>,
 }
 
 impl<'a> WindowSpec<'a> {
@@ -143,8 +150,11 @@ impl<'a> WindowSpec<'a> {
             hwnd: Cell::default(),
             size: Cell::default(),
             position: Cell::default(),
-            event_handler: RefCell::new(event_handler),
+            is_resizing: Cell::new(false),
             renderer,
+            swapchain: RefCell::new(None),
+            swapchain_size: Cell::default(),
+            event_handler: RefCell::new(event_handler),
         });
 
         let weak_inner_state = Rc::downgrade(&inner_state);
@@ -159,8 +169,8 @@ impl<'a> WindowSpec<'a> {
                 WS_OVERLAPPEDWINDOW,
                 CW_USEDEFAULT,
                 CW_USEDEFAULT,
-                self.size.width,
-                self.size.height,
+                self.size.width.into(),
+                self.size.height.into(),
                 HWND::default(),
                 HMENU::default(),
                 HMODULE::default(),
@@ -208,11 +218,15 @@ pub struct Window {
 
 struct WindowState {
     hwnd: Cell<HWND>,
-    size: Cell<Size2D<i32, ScreenSpace>>,
+    size: Cell<Size2D<u16, ScreenSpace>>,
     position: Cell<Point2D<i32, ScreenSpace>>,
 
+    is_resizing: Cell<bool>,
+
     renderer: Rc<dyn Renderer>,
-    // swapchain:
+    swapchain: RefCell<Option<IDXGISwapChain2>>,
+    swapchain_size: Cell<Size2D<u16, ScreenSpace>>,
+
     event_handler: RefCell<Box<dyn WindowHandler>>,
 }
 
@@ -406,6 +420,9 @@ fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LR
 
     let ret = match msg {
         WM_CREATE => {
+            let swapchain = window.renderer.create_swapchain(window.hwnd.get());
+            let _ = window.swapchain.replace(Some(swapchain));
+
             window.event_handler.borrow_mut().on_create(&mut control);
             Some(0)
         }
@@ -422,15 +439,58 @@ fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LR
             // Handling this means we don't get a WM_SIZE message
 
             let window_pos = unsafe { &*(lparam.0 as *const WINDOWPOS) };
-            let size = Size2D::new(window_pos.cx, window_pos.cy);
+            let size: Size2D<u16, ScreenSpace> = Size2D::new(window_pos.cx, window_pos.cy)
+                .try_cast()
+                .expect("Window size is negative or larger than u16::MAX");
             let position = Point2D::new(window_pos.x, window_pos.y);
 
-            tracing::debug!("resizing to {}x{}", window_pos.cx, window_pos.cy);
-
-            // use swapchain setsourcesize if possible for better performance
-
             if size != window.size.get() {
+                tracing::debug!("resizing to {}x{}", size.width, size.height);
+
                 window.size.set(size);
+
+                let swp = window.swapchain.borrow();
+                let swapchain = swp.as_ref().unwrap();
+
+                if window.is_resizing.get() {
+                    // While the user is resizing the window by dragging the
+                    // corners, we want to avoid resizing the swapchain as much
+                    // as possible because `ResizeBuffers` is slow. To that end,
+                    // we make use of `SetSourceSize` as much as we can. This
+                    // means that resizing requires a clean-up step, which is
+                    // done in `WM_EXITSIZEMOVE`.
+
+                    let swapchain_size = window.swapchain_size.get();
+
+                    if size.width > swapchain_size.width || size.height > swapchain_size.height {
+                        // If the window is growing in size, resize the
+                        // swapchain to be larger than the window, to hopefully
+                        // amortize the cost of `ResizeBuffers`.
+
+                        let new_size = (size.to_f32() * SWAPCHAIN_GROWTH_FACTOR)
+                            .min(Size2D::splat(u16::MAX as f32))
+                            .cast();
+
+                        tracing::debug!(
+                            "growing swapchain to {}x{}",
+                            new_size.width,
+                            new_size.height
+                        );
+
+                        resize_swapchain(swapchain, Some(new_size));
+                        window.swapchain_size.set(new_size);
+                    }
+
+                    unsafe {
+                        swapchain
+                            .SetSourceSize(size.width.into(), size.height.into())
+                            .unwrap();
+                    }
+                } else {
+                    resize_swapchain(swapchain, None);
+                    window.swapchain_size.set(size);
+                }
+
                 window
                     .event_handler
                     .borrow_mut()
@@ -438,6 +498,8 @@ fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LR
             }
 
             if position != window.position.get() {
+                tracing::debug!("moving to {},{}", position.x, position.y);
+
                 window.position.set(position);
                 window
                     .event_handler
@@ -450,11 +512,26 @@ fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LR
         WM_ENTERSIZEMOVE => {
             tracing::debug!("WM_ENTERSIZEMOVE");
             // increment anim_request_count
+
+            window.is_resizing.set(true);
             Some(0)
         }
         WM_EXITSIZEMOVE => {
             tracing::debug!("WM_EXITSIZEMOVE");
             // decrement anim_request_count
+
+            window.is_resizing.set(false);
+
+            if window.size.get() != window.swapchain_size.get() {
+                let size = window.size.get();
+
+                let swp = window.swapchain.borrow();
+                let swapchain = swp.as_ref().unwrap();
+
+                resize_swapchain(swapchain, None);
+                window.swapchain_size.set(size);
+            }
+
             Some(0)
         }
         WM_PAINT => {
@@ -464,6 +541,11 @@ fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LR
             // window.event_handler.borrow_mut().on_paint(&mut control);
 
             unsafe { EndPaint(window.hwnd.get(), &ps) };
+
+            // remember to use sync interval of 0 when resizing
+
+            // swapchain present1 is more efficient for partial updates
+
             Some(0)
         }
         _ => None,

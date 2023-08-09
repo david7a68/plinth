@@ -32,7 +32,7 @@ impl WindowHandler for AppWindow {
         // todo
     }
 
-    fn on_resize(&mut self, _window: &mut WindowControl, _size: Size2D<i32, ScreenSpace>) {
+    fn on_resize(&mut self, _window: &mut WindowControl, _size: Size2D<u16, ScreenSpace>) {
         // todo
     }
 }
@@ -53,11 +53,11 @@ fn main() {
     }
     .build(renderer.clone(), Box::new(AppWindow {}));
 
-    let _window2 = WindowSpec {
-        title: "Isn't this nice?",
-        size: Size2D::new(800, 600),
-    }
-    .build(renderer.clone(), Box::new(AppWindow {}));
+    // let _window2 = WindowSpec {
+    //     title: "Isn't this nice?",
+    //     size: Size2D::new(800, 600),
+    // }
+    // .build(renderer.clone(), Box::new(AppWindow {}));
 
     EventLoop::run();
 }

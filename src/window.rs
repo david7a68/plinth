@@ -17,7 +17,7 @@ use windows::{
         },
         Graphics::{
             DirectComposition::DCompositionWaitForCompositorClock,
-            Dxgi::{Common::DXGI_FORMAT_UNKNOWN, IDXGISwapChain2},
+            Dxgi::IDXGISwapChain2,
             Gdi::{BeginPaint, EndPaint, HBRUSH, PAINTSTRUCT},
         },
         System::LibraryLoader::GetModuleHandleW,

@@ -123,10 +123,6 @@ pub trait GraphicsContext {
     /// Internal function, used to downcast to a concrete type.
     fn to_any(&mut self) -> &mut dyn Any;
 
-    fn begin(&mut self);
-
-    fn end(&mut self);
-
     fn set_render_target(&mut self, target: &Image);
 
     fn clear(&mut self, color: [f32; 4]);
@@ -393,13 +389,17 @@ impl Renderer for Dx12Renderer {
             Box::new(context)
         });
 
-        context.begin();
+        context
+            .to_any()
+            .downcast_mut::<Dx12GraphicsContext>()
+            .unwrap()
+            .begin();
+
         context
     }
 
     fn submit_graphics_context(&self, mut context: Box<dyn GraphicsContext>) -> SubmissionId {
         let gc: &mut Dx12GraphicsContext = context.to_any().downcast_mut().unwrap();
-
         gc.end();
 
         let command_list = gc.command_list.cast().unwrap();
@@ -456,12 +456,6 @@ impl Dx12GraphicsContext {
             render_target: None,
         }
     }
-}
-
-impl GraphicsContext for Dx12GraphicsContext {
-    fn to_any(&mut self) -> &mut dyn Any {
-        self
-    }
 
     fn begin(&mut self) {
         self.render_target = None;
@@ -471,6 +465,12 @@ impl GraphicsContext for Dx12GraphicsContext {
 
     fn end(&mut self) {
         unsafe { self.command_list.Close() }.unwrap();
+    }
+}
+
+impl GraphicsContext for Dx12GraphicsContext {
+    fn to_any(&mut self) -> &mut dyn Any {
+        self
     }
 
     fn set_render_target(&mut self, target: &Image) {

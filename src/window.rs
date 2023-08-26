@@ -16,10 +16,8 @@ use windows::{
             WIN32_ERROR, WPARAM,
         },
         Graphics::{
-            Direct3D12::{D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET},
             DirectComposition::DCompositionWaitForCompositorClock,
-            Dxgi::IDXGISwapChain3,
-            Gdi::{BeginPaint, EndPaint, HBRUSH, PAINTSTRUCT},
+            Gdi::{BeginPaint, EndPaint, InvalidateRect, HBRUSH, PAINTSTRUCT},
         },
         System::LibraryLoader::GetModuleHandleW,
         UI::WindowsAndMessaging::{
@@ -27,14 +25,15 @@ use windows::{
             GetClientRect, GetMessageW, GetWindowLongPtrW, LoadCursorW, PeekMessageW,
             PostQuitMessage, RegisterClassExW, SetWindowLongPtrW, ShowWindow, TranslateMessage,
             CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HICON, HMENU,
-            IDC_ARROW, MSG, PM_NOREMOVE, PM_REMOVE, SW_SHOW, WINDOWPOS, WINDOW_EX_STYLE, WM_CLOSE,
-            WM_CREATE, WM_DESTROY, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_NCDESTROY,
-            WM_PAINT, WM_QUIT, WM_TIMER, WM_WINDOWPOSCHANGED, WNDCLASSEXW, WS_OVERLAPPEDWINDOW,
+            IDC_ARROW, MSG, PM_NOREMOVE, PM_REMOVE, SW_SHOW, WINDOWPOS, WM_CLOSE, WM_CREATE,
+            WM_DESTROY, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_NCDESTROY, WM_PAINT,
+            WM_QUIT, WM_TIMER, WM_WINDOWPOSCHANGED, WNDCLASSEXW, WS_EX_NOREDIRECTIONBITMAP,
+            WS_OVERLAPPEDWINDOW,
         },
     },
 };
 
-use crate::graphics::{Renderer, Swapchain};
+use crate::graphics::{self, ResizeOp, Swapchain};
 
 pub const MAX_TITLE_LENGTH: usize = 256;
 
@@ -141,7 +140,7 @@ impl<'a> WindowSpec<'a> {
     /// The event handler determines how the window responds to OS events.
     pub fn build(
         &self,
-        renderer: Rc<dyn Renderer>,
+        graphics: Rc<RefCell<graphics::Device>>,
         event_handler: Box<dyn WindowHandler>,
     ) -> Window {
         register_window_class_once();
@@ -153,7 +152,7 @@ impl<'a> WindowSpec<'a> {
             content_size: Cell::default(),
             position: Cell::default(),
             is_resizing: Cell::new(false),
-            renderer,
+            graphics,
             swapchain: RefCell::new(None),
             swapchain_size: Cell::default(),
             event_handler: RefCell::new(event_handler),
@@ -172,7 +171,7 @@ impl<'a> WindowSpec<'a> {
 
         let hwnd = unsafe {
             CreateWindowExW(
-                WINDOW_EX_STYLE::default(),
+                WS_EX_NOREDIRECTIONBITMAP,
                 // Use the atom for later comparison. This way we don't have to
                 // compare c-style strings.
                 wnd_class_atom_as_pcwstr(),
@@ -236,7 +235,7 @@ struct WindowState {
 
     is_resizing: Cell<bool>,
 
-    renderer: Rc<dyn Renderer>,
+    graphics: Rc<RefCell<graphics::Device>>,
     swapchain: RefCell<Option<Swapchain>>,
 
     /// The size of the swapchain (may be larger than the window size).
@@ -411,7 +410,10 @@ unsafe extern "system" fn wndproc_trampoline(
 
         if msg == WM_NCDESTROY {
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
-            Rc::from_raw(window_state);
+
+            let ws = Rc::from_raw(window_state);
+            ws.graphics.borrow_mut().flush();
+            std::mem::drop(ws);
 
             NUM_WINDOWS.with(|n| n.set(n.get() - 1));
 
@@ -435,7 +437,7 @@ fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LR
 
     let ret = match msg {
         WM_CREATE => {
-            let swapchain = window.renderer.create_swapchain(window.hwnd.get());
+            let swapchain = window.graphics.borrow().create_swapchain(window.hwnd.get());
             let _ = window.swapchain.replace(Some(swapchain));
 
             let content_size = {
@@ -483,16 +485,18 @@ fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LR
             if content_size != window.content_size.get() {
                 tracing::debug!("resizing to {}x{}", content_size.width, content_size.height);
 
-                let swp = window.swapchain.borrow();
-                let swapchain = swp.as_ref().unwrap();
+                let mut swp = window.swapchain.borrow_mut();
+                let swapchain = swp.as_mut().unwrap();
 
-                window.renderer.resize_swapchain(
-                    swapchain,
-                    content_size,
-                    window.is_resizing.get().then_some(SWAPCHAIN_GROWTH_FACTOR),
-                );
+                window.graphics.borrow_mut().flush();
+
+                swapchain.resize(ResizeOp::Flex {
+                    size: content_size,
+                    flex: SWAPCHAIN_GROWTH_FACTOR,
+                });
 
                 window.content_size.set(content_size);
+
                 window
                     .event_handler
                     .borrow_mut()
@@ -516,6 +520,7 @@ fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LR
             // increment anim_request_count
 
             window.is_resizing.set(true);
+
             Some(0)
         }
         WM_EXITSIZEMOVE => {
@@ -525,51 +530,38 @@ fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LR
             window.is_resizing.set(false);
 
             if window.content_size.get() != window.swapchain_size.get() {
+                tracing::debug!("boo!");
                 let size = window.content_size.get();
 
-                let swp = window.swapchain.borrow();
-                let swapchain = swp.as_ref().unwrap();
+                let mut swp = window.swapchain.borrow_mut();
+                let swapchain = swp.as_mut().unwrap();
 
-                window.renderer.resize_swapchain_auto(swapchain);
+                swapchain.resize(ResizeOp::Auto);
                 window.swapchain_size.set(size);
+
+                unsafe { InvalidateRect(window.hwnd.get(), None, false) };
             }
 
             Some(0)
         }
         WM_PAINT => {
+            tracing::trace!("WM_PAINT");
+
             let mut ps = PAINTSTRUCT::default();
             let _hdc = unsafe { BeginPaint(window.hwnd.get(), &mut ps) };
-
-            let swp = window.swapchain.borrow();
-            let swapchain = swp.as_ref().unwrap();
-
-            let (target, target_idx) = window.renderer.get_back_buffer(swapchain);
-            let mut graphics = window.renderer.new_graphics_context();
-            // window.event_handler.borrow_mut().on_paint(&mut control);
-
-            graphics.set_render_target(target);
-
-            graphics.image_barrier(
-                target,
-                D3D12_RESOURCE_STATE_PRESENT,
-                D3D12_RESOURCE_STATE_RENDER_TARGET,
-            );
-
-            graphics.clear([1.0, 1.0, 0.0, 1.0]);
-
-            graphics.image_barrier(
-                target,
-                D3D12_RESOURCE_STATE_RENDER_TARGET,
-                D3D12_RESOURCE_STATE_PRESENT,
-            );
-
-            let submission = window.renderer.submit_graphics_context(graphics);
-
             unsafe { EndPaint(window.hwnd.get(), &ps) };
 
-            window.renderer.present(swapchain);
+            let mut swp = window.swapchain.borrow_mut();
+            let swapchain = swp.as_mut().unwrap();
 
-            // window.renderer.wait(submission);
+            let mut graphics = window.graphics.borrow_mut();
+
+            let (target, _target_idx) = swapchain.get_back_buffer();
+
+            let canvas = graphics.create_canvas(target);
+            // window.event_handler.borrow_mut().on_paint(&mut canvas);
+            graphics.draw_canvas(canvas);
+            swapchain.present();
 
             Some(0)
         }

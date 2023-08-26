@@ -1,6 +1,8 @@
 mod graphics;
 mod window;
 
+use std::{cell::RefCell, rc::Rc};
+
 use crate::graphics::*;
 use crate::window::*;
 use euclid::{Point2D, Size2D};
@@ -45,13 +47,13 @@ fn main() {
 
     let graphics_config = GraphicsConfig { debug_mode: true };
 
-    let renderer = graphics_config.build();
+    let graphics = Rc::new(RefCell::new(graphics::Device::new(&graphics_config)));
 
     let _window1 = WindowSpec {
         title: "Oh look, windows!",
         size: Size2D::new(800, 600),
     }
-    .build(renderer.clone(), Box::new(AppWindow {}));
+    .build(graphics.clone(), Box::new(AppWindow {}));
 
     // let _window2 = WindowSpec {
     //     title: "Isn't this nice?",

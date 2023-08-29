@@ -36,7 +36,7 @@ use windows::{
                 },
                 CreateDXGIFactory2, DXGIGetDebugInterface1, IDXGIDebug, IDXGIFactory2,
                 IDXGISwapChain3, DXGI_CREATE_FACTORY_DEBUG, DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_ALL,
-                DXGI_DEBUG_RLO_IGNORE_INTERNAL, DXGI_PRESENT_RESTART, DXGI_RGBA, DXGI_SCALING_NONE,
+                DXGI_DEBUG_RLO_IGNORE_INTERNAL, DXGI_RGBA, DXGI_SCALING_NONE,
                 DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
                 DXGI_USAGE_RENDER_TARGET_OUTPUT,
             },
@@ -153,8 +153,6 @@ impl Dx12Swapchain {
             tracing::info!("recreated swapchain images");
         }
 
-        unsafe { self.handle.Present(0, DXGI_PRESENT_RESTART) }.unwrap();
-
         match op {
             ResizeOp::Auto => resize_swapchain(device, self, Size2D::zero()),
             ResizeOp::Fixed { size } => resize_swapchain(device, self, size.cast()),
@@ -186,7 +184,7 @@ impl Dx12Swapchain {
     }
 
     pub fn present(&self) {
-        unsafe { self.handle.Present(1, 0) }.unwrap();
+        unsafe { self.handle.Present(0, 0) }.unwrap();
     }
 
     fn get_images(swapchain: &IDXGISwapChain3, device: &Dx12Device) -> [Image; 2] {
@@ -279,7 +277,6 @@ impl Dx12Device {
                 unsafe {
                     dxgi_debug.ReportLiveObjects(
                         DXGI_DEBUG_ALL,
-                        // DXGI_DEBUG_RLO_DETAIL | DXGI_DEBUG_RLO_IGNORE_INTERNAL,
                         DXGI_DEBUG_RLO_ALL | DXGI_DEBUG_RLO_IGNORE_INTERNAL,
                     )
                 }

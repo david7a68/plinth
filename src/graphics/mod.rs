@@ -46,7 +46,7 @@ impl Device {
 
         command_list.image_barrier(target, ResourceState::Present, ResourceState::RenderTarget);
         command_list.set_render_target(target);
-        command_list.clear([1.0, 0.0, 0.0, 1.0]);
+        command_list.clear([1.0, 1.0, 1.0, 1.0]);
 
         Canvas {
             target,

@@ -25,9 +25,9 @@ use windows::{
             GetClientRect, GetMessageW, GetWindowLongPtrW, LoadCursorW, PeekMessageW,
             PostQuitMessage, RegisterClassExW, SetWindowLongPtrW, ShowWindow, TranslateMessage,
             CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HICON, HMENU,
-            IDC_ARROW, MSG, PM_NOREMOVE, PM_REMOVE, SW_SHOW, WINDOWPOS, WM_CLOSE, WM_CREATE,
-            WM_DESTROY, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_NCDESTROY, WM_PAINT,
-            WM_QUIT, WM_TIMER, WM_WINDOWPOSCHANGED, WNDCLASSEXW, WS_EX_NOREDIRECTIONBITMAP,
+            IDC_ARROW, MSG, PM_NOREMOVE, PM_REMOVE, SW_SHOW, WM_CLOSE, WM_CREATE, WM_DESTROY,
+            WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_NCDESTROY, WM_PAINT, WM_QUIT,
+            WM_TIMER, WM_WINDOWPOSCHANGED, WNDCLASSEXW, WS_EX_NOREDIRECTIONBITMAP,
             WS_OVERLAPPEDWINDOW,
         },
     },
@@ -467,52 +467,6 @@ fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LR
         WM_ERASEBKGND => Some(1),
         WM_WINDOWPOSCHANGED => {
             // Handling this means we don't get a WM_SIZE message
-
-            let window_pos = unsafe { &*(lparam.0 as *const WINDOWPOS) };
-
-            let position = Point2D::new(window_pos.x, window_pos.y);
-
-            let content_size = {
-                let mut client_rect = RECT::default();
-                unsafe {
-                    GetClientRect(window.hwnd.get(), &mut client_rect);
-                }
-                Size2D::new(client_rect.right, client_rect.bottom)
-                    .try_cast::<u16>()
-                    .expect("Window size is negative or larger than u16::MAX")
-            };
-
-            if content_size != window.content_size.get() {
-                tracing::debug!("resizing to {}x{}", content_size.width, content_size.height);
-
-                let mut swp = window.swapchain.borrow_mut();
-                let swapchain = swp.as_mut().unwrap();
-
-                window.graphics.borrow_mut().flush();
-
-                swapchain.resize(ResizeOp::Flex {
-                    size: content_size,
-                    flex: SWAPCHAIN_GROWTH_FACTOR,
-                });
-
-                window.content_size.set(content_size);
-
-                window
-                    .event_handler
-                    .borrow_mut()
-                    .on_resize(&mut control, content_size);
-            }
-
-            if position != window.position.get() {
-                tracing::debug!("moving to {},{}", position.x, position.y);
-
-                window.position.set(position);
-                window
-                    .event_handler
-                    .borrow_mut()
-                    .on_move(&mut control, position);
-            }
-
             Some(0)
         }
         WM_ENTERSIZEMOVE => {
@@ -551,10 +505,41 @@ fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LR
             let _hdc = unsafe { BeginPaint(window.hwnd.get(), &mut ps) };
             unsafe { EndPaint(window.hwnd.get(), &ps) };
 
+            let content_size = {
+                let mut client_rect = RECT::default();
+                unsafe {
+                    GetClientRect(window.hwnd.get(), &mut client_rect);
+                }
+                Size2D::new(client_rect.right, client_rect.bottom)
+                    .try_cast::<u16>()
+                    .expect("Window size is negative or larger than u16::MAX")
+            };
+
             let mut swp = window.swapchain.borrow_mut();
             let swapchain = swp.as_mut().unwrap();
-
             let mut graphics = window.graphics.borrow_mut();
+
+            if content_size != window.content_size.get() {
+                tracing::debug!("resizing to {}x{}", content_size.width, content_size.height);
+
+                graphics.flush();
+
+                if window.is_resizing.get() {
+                    swapchain.resize(ResizeOp::Flex {
+                        size: content_size,
+                        flex: SWAPCHAIN_GROWTH_FACTOR,
+                    });
+                } else {
+                    swapchain.resize(ResizeOp::Auto);
+                }
+
+                window.content_size.set(content_size);
+
+                window
+                    .event_handler
+                    .borrow_mut()
+                    .on_resize(&mut control, content_size);
+            }
 
             let (target, _target_idx) = swapchain.get_back_buffer();
 

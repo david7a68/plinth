@@ -1,52 +1,123 @@
 mod graphics;
 mod window;
 
-use std::{cell::RefCell, rc::Rc};
-
 use crate::graphics::*;
 use crate::window::*;
-use euclid::{Point2D, Size2D};
+use euclid::Size2D;
+
+/// Determines how quickly swapchain buffers grow when the window is resized.
+/// This helps to amortize the cost of calling `ResizeBuffers` on every frame.
+/// Once resized, the swapchain is set to the size of the window to conserve
+/// memory.
+const SWAPCHAIN_GROWTH_FACTOR: f32 = 1.2;
 
 struct AppWindow {
-    handle: Option<WindowHandle>,
+    handle: WindowHandle,
+    swapchain: Swapchain,
+
+    is_resizing: bool,
+    content_size: Size2D<u16, ScreenSpace>,
 }
 
 impl AppWindow {
-    fn new() -> Self {
-        Self { handle: None }
-    }
-}
+    pub fn new(device: &graphics::Device, handle: WindowHandle) -> Self {
+        let swapchain = device.create_swapchain(handle.hwnd());
+        let content_size = handle.content_size();
 
-impl WindowHandler for AppWindow {
-    fn on_create(&mut self, window: WindowHandle) {
-        window.show();
-        self.handle = Some(window);
-    }
+        handle.show();
 
-    fn on_destroy(&mut self) {
-        // todo
-    }
-
-    fn on_close(&mut self) {
-        if let Some(handle) = self.handle.take() {
-            handle.destroy();
+        Self {
+            handle,
+            swapchain,
+            is_resizing: false,
+            content_size,
         }
     }
 
-    fn on_show(&mut self) {
-        // todo
+    pub fn close(&mut self) {
+        self.handle.destroy();
     }
 
-    fn on_hide(&mut self) {
-        // todo
+    pub fn destroy(&mut self, device: &mut graphics::Device) {
+        device.flush();
     }
 
-    fn on_move(&mut self, _position: Point2D<i32, ScreenSpace>) {
-        // todo
+    pub fn begin_resize(&mut self) {
+        self.is_resizing = true;
     }
 
-    fn on_resize(&mut self, _size: Size2D<u16, ScreenSpace>) {
-        // todo
+    pub fn end_resize(&mut self) {
+        self.is_resizing = false;
+    }
+
+    pub fn paint(&mut self, device: &mut graphics::Device, size: Size2D<u16, ScreenSpace>) {
+        if self.content_size != size {
+            if self.is_resizing {
+                self.swapchain.resize(ResizeOp::Flex {
+                    size: size,
+                    flex: SWAPCHAIN_GROWTH_FACTOR,
+                });
+            } else {
+                self.swapchain.resize(ResizeOp::Auto);
+            }
+
+            self.content_size = size;
+        }
+
+        let (image, _) = self.swapchain.get_back_buffer();
+        let canvas = device.create_canvas(image);
+        device.draw_canvas(canvas);
+        self.swapchain.present();
+    }
+}
+
+struct DummySink {
+    device: graphics::Device,
+    window: Option<AppWindow>,
+}
+
+impl DummySink {
+    fn new(device: graphics::Device) -> Self {
+        Self {
+            device,
+            window: None,
+        }
+    }
+
+    fn new_id(&mut self) -> WindowId {
+        WindowId(0)
+    }
+}
+
+impl EventSink for DummySink {
+    fn send(&mut self, window: WindowId, event: Event) {
+        match event {
+            Event::Create(handle) => {
+                self.window = Some(AppWindow::new(&self.device, handle));
+            }
+            Event::Close => {
+                self.window.as_mut().unwrap().close();
+            }
+            Event::Destroy => {
+                self.window.as_mut().unwrap().destroy(&mut self.device);
+                let _ = self.window.take();
+            }
+            Event::ResizeBegin => {
+                self.window.as_mut().unwrap().begin_resize();
+            }
+            Event::ResizeEnd => {
+                self.window.as_mut().unwrap().end_resize();
+            }
+            Event::Paint(size) => {
+                self.window.as_mut().unwrap().paint(&mut self.device, size);
+            }
+        }
+    }
+}
+
+impl Drop for DummySink {
+    fn drop(&mut self) {
+        self.device.flush();
     }
 }
 
@@ -58,19 +129,16 @@ fn main() {
 
     let graphics_config = GraphicsConfig { debug_mode: true };
 
-    let graphics = Rc::new(RefCell::new(graphics::Device::new(&graphics_config)));
+    let graphics = graphics::Device::new(&graphics_config);
 
-    let _window1 = WindowSpec {
-        title: "Oh look, windows!",
-        size: Size2D::new(800, 600),
-    }
-    .build(graphics.clone(), Box::new(AppWindow::new()));
+    let mut sink = DummySink::new(graphics);
+    let id = sink.new_id();
 
-    // let _window2 = WindowSpec {
-    //     title: "Isn't this nice?",
-    //     size: Size2D::new(800, 600),
-    // }
-    // .build(renderer.clone(), Box::new(AppWindow {}));
-
-    EventLoop::run();
+    EventLoop::run(sink, || {
+        let _window1 = WindowSpec {
+            title: "Oh look, windows!",
+            size: Size2D::new(800, 600),
+        }
+        .build(id);
+    });
 }

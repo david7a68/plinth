@@ -5,35 +5,27 @@ use std::{
 };
 
 use arrayvec::ArrayVec;
-use euclid::{Point2D, Size2D};
-use smallvec::SmallVec;
+use euclid::Size2D;
+
 use windows::{
     core::PCWSTR,
     w,
     Win32::{
-        Foundation::{
-            GetLastError, HMODULE, HWND, LPARAM, LRESULT, RECT, WAIT_FAILED, WAIT_OBJECT_0,
-            WIN32_ERROR, WPARAM,
-        },
-        Graphics::{
-            DirectComposition::DCompositionWaitForCompositorClock,
-            Gdi::{BeginPaint, EndPaint, InvalidateRect, HBRUSH, PAINTSTRUCT},
-        },
+        Foundation::{GetLastError, HMODULE, HWND, LPARAM, LRESULT, RECT, WPARAM},
+        Graphics::Gdi::{BeginPaint, EndPaint, HBRUSH, PAINTSTRUCT},
         System::LibraryLoader::GetModuleHandleW,
         UI::WindowsAndMessaging::{
             AdjustWindowRect, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
             GetClientRect, GetMessageW, GetWindowLongPtrW, LoadCursorW, PeekMessageW, PostMessageW,
             PostQuitMessage, RegisterClassExW, SetWindowLongPtrW, ShowWindow, ShowWindowAsync,
             TranslateMessage, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA,
-            HICON, HMENU, IDC_ARROW, MSG, PM_NOREMOVE, PM_REMOVE, SW_SHOW, WM_CLOSE, WM_CREATE,
-            WM_DESTROY, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_NCDESTROY, WM_PAINT,
-            WM_QUIT, WM_TIMER, WM_USER, WM_WINDOWPOSCHANGED, WNDCLASSEXW,
-            WS_EX_NOREDIRECTIONBITMAP, WS_OVERLAPPEDWINDOW,
+            HICON, HMENU, IDC_ARROW, MSG, PM_NOREMOVE, SW_SHOW, WM_CLOSE, WM_CREATE, WM_DESTROY,
+            WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_NCDESTROY, WM_PAINT, WM_TIMER,
+            WM_USER, WM_WINDOWPOSCHANGED, WNDCLASSEXW, WS_EX_NOREDIRECTIONBITMAP,
+            WS_OVERLAPPEDWINDOW,
         },
     },
 };
-
-use crate::graphics::{self, ResizeOp, Swapchain};
 
 pub const MAX_TITLE_LENGTH: usize = 256;
 
@@ -41,12 +33,6 @@ pub const MAX_TITLE_LENGTH: usize = 256;
 pub struct ScreenSpace;
 
 const CLASS_NAME: PCWSTR = w!("plinth_window_class");
-
-/// Determines how quickly swapchain buffers grow when the window is resized.
-/// This helps to amortize the cost of calling `ResizeBuffers` on every frame.
-/// Once resized, the swapchain is set to the size of the window to conserve
-/// memory.
-const SWAPCHAIN_GROWTH_FACTOR: f32 = 1.2;
 
 const UM_DESTROY_WINDOW: u32 = WM_USER;
 
@@ -59,6 +45,7 @@ fn wnd_class_atom_as_pcwstr() -> PCWSTR {
 
 thread_local! {
     static NUM_WINDOWS: Cell<usize> = const { Cell::new(0) };
+    static EVENT_SINK: RefCell<Option<Box<dyn EventSink>>> = RefCell::default();
 }
 
 /// Registers the window class for the application.
@@ -97,36 +84,20 @@ fn register_window_class_once() {
     });
 }
 
-/// Interface for per-window event handling.
-///
-/// The design of this interface takes a reference to a 'WindowControl' object
-/// in order to maintain the unitary nature of the window object (as opposed to
-/// `Clone`able handles). This reduces the likelihood of confusing one handle
-/// for another, low as it might be, and gives the implementation a little bit
-/// more flexibility.
-///
-/// ### Implementation Notes:
-///
-/// Model                          | Dangling Handles? | Dispatch Mechanism                         | Per-Window State
-/// -------------------------------|-------------------|--------------------------------------------|-----------------
-/// `Clone`able handles            | Yes               | Dynamic (`WindowHandler`)                  | `Rc<RefCell<>>`
-/// Global event handler           | No                | Static (`match Event`)                     | `HashMap<WindowHandle, T>`
-/// `trait WindowControl`          | No                | Dynamic (`WindowHandler`, `WindowControl`) | `impl WindowHandler`
-/// `struct WindowControl` (this)  | No                | Dynamic (`WindowHandler`)                  | `impl WindowHandler`
-pub trait WindowHandler {
-    fn on_create(&mut self, window: WindowHandle);
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WindowId(pub u64);
 
-    fn on_destroy(&mut self);
+pub trait EventSink {
+    fn send(&mut self, window: WindowId, event: Event);
+}
 
-    fn on_close(&mut self);
-
-    fn on_show(&mut self);
-
-    fn on_hide(&mut self);
-
-    fn on_move(&mut self, position: Point2D<i32, ScreenSpace>);
-
-    fn on_resize(&mut self, size: Size2D<u16, ScreenSpace>);
+pub enum Event {
+    Create(WindowHandle),
+    Destroy,
+    Close,
+    ResizeBegin,
+    ResizeEnd,
+    Paint(Size2D<u16, ScreenSpace>),
 }
 
 /// Specifies the properties of a window.
@@ -140,11 +111,7 @@ impl<'a> WindowSpec<'a> {
     /// Constructs a new window with the specified properties.
     ///
     /// The event handler determines how the window responds to OS events.
-    pub fn build(
-        &self,
-        graphics: Rc<RefCell<graphics::Device>>,
-        event_handler: Box<dyn WindowHandler>,
-    ) -> WindowHandle {
+    pub fn build(&self, source_id: WindowId) -> WindowHandle {
         register_window_class_once();
 
         let title = translate_title(self.title);
@@ -153,13 +120,8 @@ impl<'a> WindowSpec<'a> {
         let handle_weak = Rc::downgrade(&handle);
 
         let inner_state = Box::new(WindowState {
+            id: source_id,
             hwnd: handle,
-            content_size: Cell::default(),
-            is_resizing: Cell::new(false),
-            graphics,
-            swapchain: RefCell::new(None),
-            swapchain_size: Cell::default(),
-            event_handler: RefCell::new(event_handler),
         });
 
         let mut rect = RECT {
@@ -228,6 +190,28 @@ pub struct WindowHandle {
 }
 
 impl WindowHandle {
+    pub fn hwnd(&self) -> HWND {
+        if let Some(inner) = self.inner.upgrade() {
+            inner.get()
+        } else {
+            panic!("Window was destroyed")
+        }
+    }
+
+    pub fn content_size(&self) -> Size2D<u16, ScreenSpace> {
+        if let Some(inner) = self.inner.upgrade() {
+            let mut client_rect = RECT::default();
+            unsafe {
+                GetClientRect(inner.get(), &mut client_rect);
+            }
+            Size2D::new(client_rect.right, client_rect.bottom)
+                .try_cast::<u16>()
+                .expect("Window size is negative or larger than u16::MAX")
+        } else {
+            panic!("Window was destroyed")
+        }
+    }
+
     pub fn show(&self) {
         if let Some(inner) = self.inner.upgrade() {
             let hwnd = inner.get();
@@ -244,20 +228,8 @@ impl WindowHandle {
 }
 
 struct WindowState {
+    id: WindowId,
     hwnd: Rc<Cell<HWND>>,
-
-    /// The size of the content area (excluding borders and title bar).
-    content_size: Cell<Size2D<u16, ScreenSpace>>,
-
-    is_resizing: Cell<bool>,
-
-    graphics: Rc<RefCell<graphics::Device>>,
-    swapchain: RefCell<Option<Swapchain>>,
-
-    /// The size of the swapchain (may be larger than the window size).
-    swapchain_size: Cell<Size2D<u16, ScreenSpace>>,
-
-    event_handler: RefCell<Box<dyn WindowHandler>>,
 }
 
 pub struct EventLoop {}
@@ -268,7 +240,16 @@ impl EventLoop {
     ///
     /// All windows must be created on the same thread that runs the event loop,
     /// or they will not receive events.
-    pub fn run() {
+    pub fn run<S: EventSink + Sized + 'static>(
+        event_sink: S,
+        mut init_with_event_loop: impl FnMut(),
+    ) {
+        EVENT_SINK.with(|s| {
+            s.borrow_mut().replace(Box::new(event_sink));
+        });
+
+        init_with_event_loop();
+
         loop {
             let mut msg = MSG::default();
 
@@ -277,67 +258,28 @@ impl EventLoop {
             // than it can process them.
             unsafe { PeekMessageW(&mut msg, None, WM_TIMER, WM_TIMER, PM_NOREMOVE) };
 
-            // if all windows are closed, exit the event loop
+            let result = unsafe { GetMessageW(&mut msg, None, 0, 0) };
 
-            if true {
-                // Continuous mode. This triggers on every tick of the
-                // compositor clock. Useful for animations and media playback.
-
-                // Process all pending messages.
-                while unsafe { PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE) }.as_bool() {
-                    if msg.message == WM_QUIT {
-                        return;
-                    }
-
-                    unsafe {
-                        TranslateMessage(&msg);
-                        DispatchMessageW(&msg);
-                    }
+            match result.0 {
+                -1 => {
+                    panic!(
+                        "Failed to get message, error code: {}",
+                        result.ok().unwrap_err()
+                    );
                 }
-
-                // handle scheduled presentation
-
-                let wait_result = unsafe { DCompositionWaitForCompositorClock(None, u32::MAX) };
-
-                match WIN32_ERROR(wait_result) {
-                    WAIT_OBJECT_0 => {
-                        // the compositor clock has ticked
-                        continue;
-                    }
-                    WAIT_FAILED => {
-                        panic!(
-                            "Failed to wait for compositor clock, error code: {}",
-                            unsafe { GetLastError() }.0
-                        );
-                    }
-                    _ => {
-                        break;
-                    }
+                0 => {
+                    // WM_QUIT
+                    break;
                 }
-            } else {
-                // Input mode. This only triggers on events like user input or
-                // scheduled timers. Useful for conserving power.
-
-                let result = unsafe { GetMessageW(&mut msg, None, 0, 0) };
-
-                match result.0 {
-                    -1 => {
-                        panic!(
-                            "Failed to get message, error code: {}",
-                            result.ok().unwrap_err()
-                        );
-                    }
-                    0 => {
-                        // WM_QUIT
-                        break;
-                    }
-                    _ => unsafe {
-                        TranslateMessage(&msg);
-                        DispatchMessageW(&msg);
-                    },
-                }
+                _ => unsafe {
+                    TranslateMessage(&msg);
+                    DispatchMessageW(&msg);
+                },
             }
         }
+
+        // Allow the event sink to be dropped.
+        EVENT_SINK.with(|s| s.borrow_mut().take());
     }
 }
 
@@ -360,10 +302,9 @@ unsafe extern "system" fn wndproc_trampoline(
             return DefWindowProcW(hwnd, msg, wparam, lparam);
         }
 
-        // SAFETY: This cast must match the type of Box::into_raw().
         let window_state = (*create_struct).lpCreateParams as *mut WindowState;
-        (*window_state).hwnd.set(hwnd);
 
+        (*window_state).hwnd.set(hwnd);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, window_state as _);
 
         NUM_WINDOWS.with(|n| n.set(n.get() + 1));
@@ -385,9 +326,7 @@ unsafe extern "system" fn wndproc_trampoline(
         if msg == WM_NCDESTROY {
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
 
-            let ws = Box::from_raw(window_state);
-            ws.graphics.borrow_mut().flush();
-            std::mem::drop(ws);
+            let _ = Box::from_raw(window_state);
 
             NUM_WINDOWS.with(|n| n.set(n.get() - 1));
 
@@ -409,78 +348,22 @@ unsafe extern "system" fn wndproc_trampoline(
 fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let ret = match msg {
         WM_CREATE => {
-            let swapchain = window.graphics.borrow().create_swapchain(window.hwnd.get());
-            let _ = window.swapchain.replace(Some(swapchain));
-
-            let content_size = {
-                let mut client_rect = RECT::default();
-                unsafe {
-                    GetClientRect(window.hwnd.get(), &mut client_rect);
-                }
-                Size2D::new(client_rect.right, client_rect.bottom)
-                    .try_cast::<u16>()
-                    .expect("Window size is negative or larger than u16::MAX")
-            };
-
-            window.content_size.set(content_size);
-            window.swapchain_size.set(content_size);
-
             let handle = WindowHandle {
                 inner: Rc::downgrade(&window.hwnd),
             };
-
-            window.event_handler.borrow_mut().on_create(handle);
-            Some(0)
+            Some((0, Some(Event::Create(handle))))
         }
         UM_DESTROY_WINDOW => {
             unsafe { DestroyWindow(window.hwnd.get()) };
-            Some(0)
+            Some((0, None))
         }
-        WM_DESTROY => {
-            window.event_handler.borrow_mut().on_destroy();
-            Some(0)
-        }
-        WM_CLOSE => {
-            window.event_handler.borrow_mut().on_close();
-            Some(0)
-        }
-        WM_ERASEBKGND => Some(1),
-        WM_WINDOWPOSCHANGED => {
-            // Handling this means we don't get a WM_SIZE message
-            Some(0)
-        }
-        WM_ENTERSIZEMOVE => {
-            tracing::debug!("WM_ENTERSIZEMOVE");
-            // increment anim_request_count
-
-            window.is_resizing.set(true);
-
-            Some(0)
-        }
-        WM_EXITSIZEMOVE => {
-            tracing::debug!("WM_EXITSIZEMOVE");
-            // decrement anim_request_count
-
-            window.is_resizing.set(false);
-
-            if window.content_size.get() != window.swapchain_size.get() {
-                tracing::debug!("boo!");
-                let size = window.content_size.get();
-
-                let mut swp = window.swapchain.borrow_mut();
-                let swapchain = swp.as_mut().unwrap();
-
-                swapchain.resize(ResizeOp::Auto);
-                window.swapchain_size.set(size);
-
-                unsafe { InvalidateRect(window.hwnd.get(), None, false) };
-            }
-
-            Some(0)
-        }
+        WM_DESTROY => Some((0, Some(Event::Destroy))),
+        WM_CLOSE => Some((0, Some(Event::Close))),
+        WM_ERASEBKGND => Some((1, None)),
+        WM_WINDOWPOSCHANGED => Some((0, None)), // Swallows WM_SIZE
+        WM_ENTERSIZEMOVE => Some((0, Some(Event::ResizeBegin))),
+        WM_EXITSIZEMOVE => Some((0, Some(Event::ResizeEnd))),
         WM_PAINT => {
-            tracing::trace!("WM_PAINT");
-
             let mut ps = PAINTSTRUCT::default();
             let _hdc = unsafe { BeginPaint(window.hwnd.get(), &mut ps) };
             unsafe { EndPaint(window.hwnd.get(), &ps) };
@@ -495,42 +378,16 @@ fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LR
                     .expect("Window size is negative or larger than u16::MAX")
             };
 
-            let mut swp = window.swapchain.borrow_mut();
-            let swapchain = swp.as_mut().unwrap();
-            let mut graphics = window.graphics.borrow_mut();
-
-            if content_size != window.content_size.get() {
-                tracing::debug!("resizing to {}x{}", content_size.width, content_size.height);
-
-                graphics.flush();
-
-                if window.is_resizing.get() {
-                    swapchain.resize(ResizeOp::Flex {
-                        size: content_size,
-                        flex: SWAPCHAIN_GROWTH_FACTOR,
-                    });
-                } else {
-                    swapchain.resize(ResizeOp::Auto);
-                }
-
-                window.content_size.set(content_size);
-
-                window.event_handler.borrow_mut().on_resize(content_size);
-            }
-
-            let (target, _target_idx) = swapchain.get_back_buffer();
-
-            let canvas = graphics.create_canvas(target);
-            // window.event_handler.borrow_mut().on_paint(&mut canvas);
-            graphics.draw_canvas(canvas);
-            swapchain.present();
-
-            Some(0)
+            Some((0, Some(Event::Paint(content_size))))
         }
         _ => None,
     };
 
-    if let Some(ret) = ret {
+    if let Some((ret, event)) = ret {
+        if let Some(event) = event {
+            EVENT_SINK.with(|s| s.borrow_mut().as_mut().unwrap().send(window.id, event));
+        }
+
         return LRESULT(ret);
     } else {
         unsafe { DefWindowProcW(window.hwnd.get(), msg, wparam, lparam) }

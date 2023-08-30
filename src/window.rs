@@ -22,13 +22,13 @@ use windows::{
         System::LibraryLoader::GetModuleHandleW,
         UI::WindowsAndMessaging::{
             AdjustWindowRect, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-            GetClientRect, GetMessageW, GetWindowLongPtrW, LoadCursorW, PeekMessageW,
-            PostQuitMessage, RegisterClassExW, SetWindowLongPtrW, ShowWindow, TranslateMessage,
-            CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HICON, HMENU,
-            IDC_ARROW, MSG, PM_NOREMOVE, PM_REMOVE, SW_SHOW, WM_CLOSE, WM_CREATE, WM_DESTROY,
-            WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_NCDESTROY, WM_PAINT, WM_QUIT,
-            WM_TIMER, WM_WINDOWPOSCHANGED, WNDCLASSEXW, WS_EX_NOREDIRECTIONBITMAP,
-            WS_OVERLAPPEDWINDOW,
+            GetClientRect, GetMessageW, GetWindowLongPtrW, LoadCursorW, PeekMessageW, PostMessageW,
+            PostQuitMessage, RegisterClassExW, SetWindowLongPtrW, ShowWindow, ShowWindowAsync,
+            TranslateMessage, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA,
+            HICON, HMENU, IDC_ARROW, MSG, PM_NOREMOVE, PM_REMOVE, SW_SHOW, WM_CLOSE, WM_CREATE,
+            WM_DESTROY, WM_ENTERSIZEMOVE, WM_ERASEBKGND, WM_EXITSIZEMOVE, WM_NCDESTROY, WM_PAINT,
+            WM_QUIT, WM_TIMER, WM_USER, WM_WINDOWPOSCHANGED, WNDCLASSEXW,
+            WS_EX_NOREDIRECTIONBITMAP, WS_OVERLAPPEDWINDOW,
         },
     },
 };
@@ -47,6 +47,8 @@ const CLASS_NAME: PCWSTR = w!("plinth_window_class");
 /// Once resized, the swapchain is set to the size of the window to conserve
 /// memory.
 const SWAPCHAIN_GROWTH_FACTOR: f32 = 1.2;
+
+const UM_DESTROY_WINDOW: u32 = WM_USER;
 
 // Global state
 static WND_CLASS_ATOM: OnceLock<u16> = OnceLock::new(); // TODO: make thread local?
@@ -112,19 +114,19 @@ fn register_window_class_once() {
 /// `trait WindowControl`          | No                | Dynamic (`WindowHandler`, `WindowControl`) | `impl WindowHandler`
 /// `struct WindowControl` (this)  | No                | Dynamic (`WindowHandler`)                  | `impl WindowHandler`
 pub trait WindowHandler {
-    fn on_create(&mut self, window: &mut WindowControl);
+    fn on_create(&mut self, window: WindowHandle);
 
-    fn on_destroy(&mut self, window: &mut WindowControl);
+    fn on_destroy(&mut self);
 
-    fn on_close(&mut self, window: &mut WindowControl);
+    fn on_close(&mut self);
 
-    fn on_show(&mut self, window: &mut WindowControl);
+    fn on_show(&mut self);
 
-    fn on_hide(&mut self, window: &mut WindowControl);
+    fn on_hide(&mut self);
 
-    fn on_move(&mut self, window: &mut WindowControl, position: Point2D<i32, ScreenSpace>);
+    fn on_move(&mut self, position: Point2D<i32, ScreenSpace>);
 
-    fn on_resize(&mut self, window: &mut WindowControl, size: Size2D<u16, ScreenSpace>);
+    fn on_resize(&mut self, size: Size2D<u16, ScreenSpace>);
 }
 
 /// Specifies the properties of a window.
@@ -142,23 +144,23 @@ impl<'a> WindowSpec<'a> {
         &self,
         graphics: Rc<RefCell<graphics::Device>>,
         event_handler: Box<dyn WindowHandler>,
-    ) -> Window {
+    ) -> WindowHandle {
         register_window_class_once();
 
         let title = translate_title(self.title);
 
-        let inner_state = Rc::new(WindowState {
-            hwnd: Cell::default(),
+        let handle = Rc::default();
+        let handle_weak = Rc::downgrade(&handle);
+
+        let inner_state = Box::new(WindowState {
+            hwnd: handle,
             content_size: Cell::default(),
-            position: Cell::default(),
             is_resizing: Cell::new(false),
             graphics,
             swapchain: RefCell::new(None),
             swapchain_size: Cell::default(),
             event_handler: RefCell::new(event_handler),
         });
-
-        let weak_inner_state = Rc::downgrade(&inner_state);
 
         let mut rect = RECT {
             left: 0,
@@ -184,7 +186,7 @@ impl<'a> WindowSpec<'a> {
                 HWND::default(),
                 HMENU::default(),
                 HMODULE::default(),
-                Some(Rc::into_raw(inner_state) as *mut _),
+                Some(Box::into_raw(inner_state).cast()),
             )
         };
 
@@ -199,9 +201,7 @@ impl<'a> WindowSpec<'a> {
 
         unsafe { ShowWindow(hwnd, SW_SHOW) };
 
-        Window {
-            inner: weak_inner_state,
-        }
+        WindowHandle { inner: handle_weak }
     }
 }
 
@@ -219,19 +219,35 @@ fn translate_title(title: &str) -> ArrayVec<u16, { MAX_TITLE_LENGTH + 1 }> {
     title
 }
 
-pub struct Window {
+#[derive(Clone)]
+pub struct WindowHandle {
     // This is a weak reference to the window state, which is owned by the OS.
     // Since the OS will never destroy the window without our input, this should
     // be safe. If it isn't, the program will panic.
-    inner: Weak<WindowState>,
+    inner: Weak<Cell<HWND>>,
+}
+
+impl WindowHandle {
+    pub fn show(&self) {
+        if let Some(inner) = self.inner.upgrade() {
+            let hwnd = inner.get();
+            unsafe { ShowWindowAsync(hwnd, SW_SHOW) };
+        }
+    }
+
+    pub fn destroy(&self) {
+        if let Some(inner) = self.inner.upgrade() {
+            let hwnd = inner.get();
+            unsafe { PostMessageW(hwnd, UM_DESTROY_WINDOW, None, None) };
+        }
+    }
 }
 
 struct WindowState {
-    hwnd: Cell<HWND>,
+    hwnd: Rc<Cell<HWND>>,
 
     /// The size of the content area (excluding borders and title bar).
     content_size: Cell<Size2D<u16, ScreenSpace>>,
-    position: Cell<Point2D<i32, ScreenSpace>>,
 
     is_resizing: Cell<bool>,
 
@@ -242,48 +258,6 @@ struct WindowState {
     swapchain_size: Cell<Size2D<u16, ScreenSpace>>,
 
     event_handler: RefCell<Box<dyn WindowHandler>>,
-}
-
-impl WindowState {
-    fn control(&self) -> WindowControl {
-        WindowControl {
-            hwnd: self.hwnd.get(),
-            deferred: SmallVec::new(),
-        }
-    }
-}
-
-/// Operations which would cause a recursive call to `WindowHandler` methods.
-///
-/// These get deferred until the window handler returns. Notably, this still
-/// causes a recursive call to `wndproc`.
-enum DeferredOp {
-    Show,
-    Destroy,
-}
-
-pub struct WindowControl {
-    hwnd: HWND,
-    deferred: SmallVec<[DeferredOp; 4]>,
-}
-
-impl WindowControl {
-    pub fn show(&mut self) {
-        self.deferred.push(DeferredOp::Show);
-    }
-
-    pub fn destroy(&mut self) {
-        self.deferred.push(DeferredOp::Destroy);
-    }
-
-    fn execute_deferred(mut self) {
-        for op in self.deferred.drain(..) {
-            match op {
-                DeferredOp::Show => unsafe { ShowWindow(self.hwnd, SW_SHOW) },
-                DeferredOp::Destroy => unsafe { DestroyWindow(self.hwnd) },
-            };
-        }
-    }
 }
 
 pub struct EventLoop {}
@@ -386,8 +360,8 @@ unsafe extern "system" fn wndproc_trampoline(
             return DefWindowProcW(hwnd, msg, wparam, lparam);
         }
 
-        // SAFETY: This cast must match the type of Rc::into_raw().
-        let window_state = (*create_struct).lpCreateParams as *const WindowState;
+        // SAFETY: This cast must match the type of Box::into_raw().
+        let window_state = (*create_struct).lpCreateParams as *mut WindowState;
         (*window_state).hwnd.set(hwnd);
 
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, window_state as _);
@@ -400,8 +374,8 @@ unsafe extern "system" fn wndproc_trampoline(
         );
     }
 
-    // SAFETY: This cast must match the type of Rc::into_raw().
-    let window_state = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const WindowState;
+    // SAFETY: This cast must match the type of Box::into_raw().
+    let window_state = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *mut WindowState;
 
     if window_state.is_null() {
         return DefWindowProcW(hwnd, msg, wparam, lparam);
@@ -411,7 +385,7 @@ unsafe extern "system" fn wndproc_trampoline(
         if msg == WM_NCDESTROY {
             SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
 
-            let ws = Rc::from_raw(window_state);
+            let ws = Box::from_raw(window_state);
             ws.graphics.borrow_mut().flush();
             std::mem::drop(ws);
 
@@ -433,8 +407,6 @@ unsafe extern "system" fn wndproc_trampoline(
 }
 
 fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    let mut control = window.control();
-
     let ret = match msg {
         WM_CREATE => {
             let swapchain = window.graphics.borrow().create_swapchain(window.hwnd.get());
@@ -453,15 +425,23 @@ fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LR
             window.content_size.set(content_size);
             window.swapchain_size.set(content_size);
 
-            window.event_handler.borrow_mut().on_create(&mut control);
+            let handle = WindowHandle {
+                inner: Rc::downgrade(&window.hwnd),
+            };
+
+            window.event_handler.borrow_mut().on_create(handle);
+            Some(0)
+        }
+        UM_DESTROY_WINDOW => {
+            unsafe { DestroyWindow(window.hwnd.get()) };
             Some(0)
         }
         WM_DESTROY => {
-            window.event_handler.borrow_mut().on_destroy(&mut control);
+            window.event_handler.borrow_mut().on_destroy();
             Some(0)
         }
         WM_CLOSE => {
-            window.event_handler.borrow_mut().on_close(&mut control);
+            window.event_handler.borrow_mut().on_close();
             Some(0)
         }
         WM_ERASEBKGND => Some(1),
@@ -535,10 +515,7 @@ fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LR
 
                 window.content_size.set(content_size);
 
-                window
-                    .event_handler
-                    .borrow_mut()
-                    .on_resize(&mut control, content_size);
+                window.event_handler.borrow_mut().on_resize(content_size);
             }
 
             let (target, _target_idx) = swapchain.get_back_buffer();
@@ -554,7 +531,6 @@ fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LR
     };
 
     if let Some(ret) = ret {
-        control.execute_deferred();
         return LRESULT(ret);
     } else {
         unsafe { DefWindowProcW(window.hwnd.get(), msg, wparam, lparam) }

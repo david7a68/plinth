@@ -125,6 +125,9 @@ impl Dx12Swapchain {
             device.wait_for_idle();
 
             {
+                #[cfg(feature = "profile")]
+                let _s = tracing_tracy::client::span!("free swapchain images");
+
                 let mut rt = device.render_target_descriptor_heap.borrow_mut();
                 let images = swapchain.images.take().unwrap();
 
@@ -137,20 +140,17 @@ impl Dx12Swapchain {
                 std::mem::drop(images);
             }
 
-            tracing::info!("dropped swapchain images");
-
             unsafe {
+                #[cfg(feature = "profile")]
+                let _s = tracing_tracy::client::span!("resize buffers");
+
                 swapchain
                     .handle
                     .ResizeBuffers(0, size.width, size.height, DXGI_FORMAT_UNKNOWN, 0)
             }
             .unwrap();
 
-            tracing::info!("resized swapchain");
-
             swapchain.images = Some(Dx12Swapchain::get_images(&swapchain.handle, device));
-
-            tracing::info!("recreated swapchain images");
         }
 
         match op {
@@ -177,9 +177,6 @@ impl Dx12Swapchain {
     pub fn get_back_buffer(&self) -> (&Image, u32) {
         let index = unsafe { self.handle.GetCurrentBackBufferIndex() };
         let image = &(self.images.as_ref().unwrap())[index as usize];
-
-        tracing::debug!("drawing to backbuffer index: {}", index);
-
         (image, index)
     }
 
@@ -187,6 +184,7 @@ impl Dx12Swapchain {
         unsafe { self.handle.Present(0, 0) }.unwrap();
     }
 
+    #[tracing::instrument(skip(swapchain, device))]
     fn get_images(swapchain: &IDXGISwapChain3, device: &Dx12Device) -> [Image; 2] {
         let image0: ID3D12Resource = unsafe { swapchain.GetBuffer(0) }.unwrap();
         let view0 = device
@@ -326,6 +324,7 @@ impl Dx12Device {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub fn wait_for_idle(&self) {
         self.graphics_queue.wait_idle();
     }
@@ -539,6 +538,7 @@ impl Queue {
     }
 
     /// Causes the CPU to wait until the given submission has completed.
+    #[tracing::instrument(skip(self))]
     pub fn wait(&self, submission: SubmissionId) {
         if self.is_done(submission) {
             return;
@@ -555,6 +555,7 @@ impl Queue {
     }
 
     /// Causes the CPU to wait until all submissions have completed.
+    #[tracing::instrument(skip(self))]
     pub fn wait_idle(&self) {
         // We have to increment the fence value before waiting, because DXGI may
         // submit work to the queue on our behalf when we call `Present`.
@@ -576,6 +577,7 @@ impl Queue {
         SubmissionId(self.num_completed.get())
     }
 
+    #[tracing::instrument(skip(self))]
     pub fn submit(&self, commands: &ID3D12CommandList) -> SubmissionId {
         unsafe { self.queue.ExecuteCommandLists(&[Some(commands.clone())]) };
         self.increment()

@@ -1,7 +1,6 @@
 use std::{
     cell::{Cell, RefCell},
-    rc::{Rc, Weak},
-    sync::OnceLock,
+    sync::{Arc, OnceLock, Weak},
 };
 
 use arrayvec::ArrayVec;
@@ -88,6 +87,8 @@ fn register_window_class_once() {
 pub struct WindowId(pub u64);
 
 pub trait EventSink {
+    fn new_window(&mut self) -> WindowId;
+
     fn send(&mut self, window: WindowId, event: Event);
 }
 
@@ -111,16 +112,16 @@ impl<'a> WindowSpec<'a> {
     /// Constructs a new window with the specified properties.
     ///
     /// The event handler determines how the window responds to OS events.
-    pub fn build(&self, source_id: WindowId) -> WindowHandle {
+    pub fn build(&self) -> WindowHandle {
         register_window_class_once();
 
         let title = translate_title(self.title);
 
-        let handle = Rc::default();
-        let handle_weak = Rc::downgrade(&handle);
+        let handle = Arc::default();
+        let handle_weak = Arc::downgrade(&handle);
 
         let inner_state = Box::new(WindowState {
-            id: source_id,
+            id: EVENT_SINK.with(|s| s.borrow_mut().as_mut().unwrap().new_window()),
             hwnd: handle,
         });
 
@@ -186,70 +187,58 @@ pub struct WindowHandle {
     // This is a weak reference to the window state, which is owned by the OS.
     // Since the OS will never destroy the window without our input, this should
     // be safe. If it isn't, the program will panic.
-    inner: Weak<Cell<HWND>>,
+    inner: Weak<OnceLock<HWND>>,
 }
 
 impl WindowHandle {
     pub fn hwnd(&self) -> HWND {
         if let Some(inner) = self.inner.upgrade() {
-            inner.get()
+            inner.get().unwrap().clone()
         } else {
             panic!("Window was destroyed")
         }
     }
 
     pub fn content_size(&self) -> Size2D<u16, ScreenSpace> {
-        if let Some(inner) = self.inner.upgrade() {
-            let mut client_rect = RECT::default();
-            unsafe {
-                GetClientRect(inner.get(), &mut client_rect);
-            }
-            Size2D::new(client_rect.right, client_rect.bottom)
-                .try_cast::<u16>()
-                .expect("Window size is negative or larger than u16::MAX")
-        } else {
-            panic!("Window was destroyed")
-        }
+        let hwnd = self.hwnd();
+        let mut client_rect = RECT::default();
+        unsafe { GetClientRect(hwnd, &mut client_rect) };
+        Size2D::new(client_rect.right, client_rect.bottom)
+            .try_cast::<u16>()
+            .expect("Window size is negative or larger than u16::MAX")
     }
 
     pub fn show(&self) {
-        if let Some(inner) = self.inner.upgrade() {
-            let hwnd = inner.get();
-            unsafe { ShowWindowAsync(hwnd, SW_SHOW) };
-        }
+        unsafe { ShowWindowAsync(self.hwnd(), SW_SHOW) };
     }
 
     pub fn destroy(&self) {
-        if let Some(inner) = self.inner.upgrade() {
-            let hwnd = inner.get();
-            unsafe { PostMessageW(hwnd, UM_DESTROY_WINDOW, None, None) };
-        }
+        unsafe { PostMessageW(self.hwnd(), UM_DESTROY_WINDOW, None, None) };
     }
 }
 
 struct WindowState {
     id: WindowId,
-    hwnd: Rc<Cell<HWND>>,
+    hwnd: Arc<OnceLock<HWND>>,
 }
 
 pub struct EventLoop {}
 
 impl EventLoop {
+    pub fn new<S: EventSink + Sized + 'static>(event_sink: S) -> Self {
+        EVENT_SINK.with(|s| {
+            s.borrow_mut().replace(Box::new(event_sink));
+        });
+
+        Self {}
+    }
+
     /// Hijacks the current thread to run the event loop. The thread will
     /// terminate once all windows are destroyed.
     ///
     /// All windows must be created on the same thread that runs the event loop,
     /// or they will not receive events.
-    pub fn run<S: EventSink + Sized + 'static>(
-        event_sink: S,
-        mut init_with_event_loop: impl FnMut(),
-    ) {
-        EVENT_SINK.with(|s| {
-            s.borrow_mut().replace(Box::new(event_sink));
-        });
-
-        init_with_event_loop();
-
+    pub fn run(&self) {
         loop {
             let mut msg = MSG::default();
 
@@ -277,7 +266,11 @@ impl EventLoop {
                 },
             }
         }
+    }
+}
 
+impl Drop for EventLoop {
+    fn drop(&mut self) {
         // Allow the event sink to be dropped.
         EVENT_SINK.with(|s| s.borrow_mut().take());
     }
@@ -304,7 +297,7 @@ unsafe extern "system" fn wndproc_trampoline(
 
         let window_state = (*create_struct).lpCreateParams as *mut WindowState;
 
-        (*window_state).hwnd.set(hwnd);
+        let _ = (*window_state).hwnd.set(hwnd);
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, window_state as _);
 
         NUM_WINDOWS.with(|n| n.set(n.get() + 1));
@@ -345,11 +338,12 @@ unsafe extern "system" fn wndproc_trampoline(
     }
 }
 
+#[tracing::instrument(skip(window, wparam, lparam), name = "wndproc")]
 fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let ret = match msg {
         WM_CREATE => {
             let handle = WindowHandle {
-                inner: Rc::downgrade(&window.hwnd),
+                inner: Arc::downgrade(&window.hwnd),
             };
             Some((0, Some(Event::Create(handle))))
         }

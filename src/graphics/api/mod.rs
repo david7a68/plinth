@@ -52,6 +52,7 @@ pub(super) enum ImageImpl {
     Dx12(Dx12Image),
 }
 
+#[derive(Debug)]
 pub enum ResizeOp {
     Auto,
     Fixed {
@@ -80,6 +81,7 @@ impl Swapchain {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub fn resize(&mut self, op: ResizeOp) {
         match &mut self.swapchain {
             SwapchainImpl::Dx12(swapchain) => {
@@ -96,6 +98,7 @@ impl Swapchain {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub fn present(&self) {
         match &self.swapchain {
             SwapchainImpl::Dx12(swapchain) => swapchain.present(),
@@ -190,6 +193,7 @@ impl Device {
         }
     }
 
+    #[tracing::instrument(skip(self, command_list))]
     pub fn submit_graphics_command_list(&self, command_list: &GraphicsCommandList) -> SubmissionId {
         match &*self.device {
             DeviceImpl::Dx12(device) => {

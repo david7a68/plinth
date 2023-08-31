@@ -36,6 +36,7 @@ impl Device {
         Swapchain::new(&self.device, window)
     }
 
+    #[tracing::instrument(skip(self, target))]
     pub fn create_canvas<'a>(&mut self, target: &'a Image) -> Canvas<'a> {
         self.recycle_graphics_in_flight();
 
@@ -54,6 +55,7 @@ impl Device {
         }
     }
 
+    #[tracing::instrument(skip(self, canvas))]
     pub fn draw_canvas(&mut self, mut canvas: Canvas) {
         canvas.command_list.image_barrier(
             canvas.target,
@@ -72,6 +74,7 @@ impl Device {
         });
     }
 
+    #[tracing::instrument(skip(self))]
     fn recycle_graphics_in_flight(&mut self) {
         let last_completed = self.device.most_recently_completed_submission();
 

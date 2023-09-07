@@ -13,7 +13,7 @@ use windows::{
     w,
     Win32::{
         Foundation::{GetLastError, HMODULE, HWND, LPARAM, LRESULT, RECT, WPARAM},
-        Graphics::Gdi::{BeginPaint, EndPaint, HBRUSH, PAINTSTRUCT},
+        Graphics::Gdi::{BeginPaint, EndPaint, InvalidateRect, HBRUSH, PAINTSTRUCT},
         System::LibraryLoader::GetModuleHandleW,
         UI::WindowsAndMessaging::{
             AdjustWindowRect, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
@@ -159,6 +159,7 @@ pub(super) fn build_window(spec: WindowSpec, state: super::WindowState) -> Windo
     WindowHandle { hwnd: handle_weak }
 }
 
+#[derive(Clone)]
 pub struct WindowHandle {
     // Use Weak so what we know when the window has been destroyed.
     hwnd: Weak<OnceLock<HWND>>,
@@ -194,6 +195,12 @@ impl WindowHandle {
     pub fn destroy(&self) -> Result<(), WindowError> {
         let hwnd = self.hwnd()?;
         unsafe { PostMessageW(hwnd, UM_DESTROY_WINDOW, None, None) };
+        Ok(())
+    }
+
+    pub fn request_redraw(&self) -> Result<(), WindowError> {
+        let hwnd = self.hwnd()?;
+        unsafe { InvalidateRect(hwnd, None, false) };
         Ok(())
     }
 }
@@ -297,6 +304,7 @@ unsafe extern "system" fn wndproc_trampoline(
     }
 }
 
+#[tracing::instrument(skip(window, wparam, lparam))]
 fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_CREATE => {

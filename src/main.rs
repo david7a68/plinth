@@ -1,36 +1,105 @@
 mod graphics;
+mod render;
 mod shell;
-mod window;
+mod vsync;
 
 use euclid::Size2D;
 
+use graphics::{GraphicsConfig, ResizeOp};
+use render::{RenderThread, WindowId};
+use shell::{WindowEventHandler, WindowHandle};
 #[cfg(feature = "profile")]
 use tracing_tracy::client::{plot, span_location};
 
-#[derive(Default)]
-struct Window {
-    handle: Option<shell::WindowHandle>,
+struct AppWindow {
+    state: AppWindowState,
+    render_proxy: render::RenderThreadProxy,
+    first_paint: bool,
+    is_resizing: bool,
 }
 
-impl Window {
-    pub fn new() -> Self {
-        Self::default()
+enum AppWindowState {
+    New,
+    Usable { id: WindowId, handle: WindowHandle },
+}
+
+impl AppWindow {
+    fn new(render_proxy: render::RenderThreadProxy) -> Self {
+        Self {
+            state: AppWindowState::New,
+            render_proxy,
+            first_paint: true,
+            is_resizing: false,
+        }
     }
 }
 
-impl shell::WindowEventHandler for Window {
+impl WindowEventHandler for AppWindow {
+    #[tracing::instrument(skip(self))]
     fn on_event(&mut self, event: shell::WindowEvent) {
         match event {
-            shell::WindowEvent::Create(handle) => self.handle = Some(handle),
-            shell::WindowEvent::CloseRequest => self.handle.as_ref().unwrap().destroy().unwrap(),
+            shell::WindowEvent::Create(handle) => {
+                self.state = AppWindowState::Usable {
+                    id: self.render_proxy.new_window(handle.clone()),
+                    handle,
+                };
+            }
+            shell::WindowEvent::CloseRequest => {
+                let AppWindowState::Usable { id: _, handle } = &self.state else {
+                    panic!("Window close request on non-usable window")
+                };
+
+                handle.destroy().unwrap();
+            }
             shell::WindowEvent::Destroy => {
-                tracing::info!("Window destroyed");
+                let AppWindowState::Usable { id, handle: _ } = &self.state else {
+                    panic!("Window destroy on non-usable window")
+                };
+
+                self.render_proxy.destroy_window(*id);
+            }
+            shell::WindowEvent::BeginResize => {
+                let AppWindowState::Usable { id, handle: _ } = &self.state else {
+                    panic!("Window resize on non-usable window")
+                };
+
+                self.render_proxy.disable_vsync(*id);
+                self.is_resizing = true;
             }
             shell::WindowEvent::Resize(size) => {
-                tracing::info!("Window resized to {:?}", size);
+                let AppWindowState::Usable { id, handle: _ } = &self.state else {
+                    panic!("Window resize on non-usable window")
+                };
+
+                if self.is_resizing {
+                    self.render_proxy
+                        .resize_window(*id, ResizeOp::Flex { size, flex: 1.2 })
+                } else {
+                    self.render_proxy.resize_window(*id, ResizeOp::Auto);
+                }
+            }
+            shell::WindowEvent::EndResize => {
+                let AppWindowState::Usable { id, handle: _ } = &self.state else {
+                    panic!("Window resize on non-usable window")
+                };
+
+                self.render_proxy.resize_window(*id, ResizeOp::Auto);
+                self.render_proxy.enable_vsync(*id);
+                self.is_resizing = false;
             }
             shell::WindowEvent::Repaint => {
-                tracing::info!("Window repainted");
+                let AppWindowState::Usable { id, handle: _ } = &self.state else {
+                    panic!("Window repaint on non-usable window")
+                };
+
+                if self.first_paint {
+                    self.first_paint = false;
+                    self.render_proxy.enable_vsync(*id);
+                } else if self.is_resizing {
+                    self.render_proxy.force_draw(*id);
+
+                    // cannot invalidate window here, else we end up in an infinite loop
+                }
             }
         }
     }
@@ -52,12 +121,32 @@ fn main() {
         .with_max_level(tracing::Level::DEBUG)
         .init();
 
+    let (_render_thread, render_proxy) = RenderThread::spawn(GraphicsConfig { debug_mode: false });
+
     let event_loop = shell::EventLoop::new();
 
-    let window = shell::WindowBuilder::new()
+    let _window = shell::WindowBuilder::new()
         .with_title("Hello, world!")
         .with_content_size(Size2D::new(800, 600))
-        .with_event_handler(Window::new())
+        .with_event_handler(AppWindow::new(render_proxy.clone()))
+        .build();
+
+    let _window = shell::WindowBuilder::new()
+        .with_title("Hello, world!")
+        .with_content_size(Size2D::new(800, 600))
+        .with_event_handler(AppWindow::new(render_proxy.clone()))
+        .build();
+
+    let _window = shell::WindowBuilder::new()
+        .with_title("Hello, world!")
+        .with_content_size(Size2D::new(800, 600))
+        .with_event_handler(AppWindow::new(render_proxy.clone()))
+        .build();
+
+    let _window = shell::WindowBuilder::new()
+        .with_title("Hello, world!")
+        .with_content_size(Size2D::new(800, 600))
+        .with_event_handler(AppWindow::new(render_proxy))
         .build();
 
     event_loop.run();

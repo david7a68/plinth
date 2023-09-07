@@ -45,7 +45,7 @@ use windows::{
     },
 };
 
-use crate::window::ScreenSpace;
+use crate::shell::ScreenSpace;
 
 use super::{GraphicsConfig, Image, ResizeOp, ResourceState, SubmissionId};
 

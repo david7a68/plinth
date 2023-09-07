@@ -3,7 +3,7 @@ use std::rc::Rc;
 use euclid::Size2D;
 use windows::Win32::Foundation::HWND;
 
-use crate::window::ScreenSpace;
+use crate::shell::ScreenSpace;
 
 use dx12::{Dx12Device, Dx12GraphicsCommandList, Dx12Image, Dx12Swapchain};
 
@@ -86,7 +86,8 @@ impl Swapchain {
         match &mut self.swapchain {
             SwapchainImpl::Dx12(swapchain) => {
                 let DeviceImpl::Dx12(device) = &*self.device else {
-                    panic!()};
+                    panic!()
+                };
                 swapchain.resize(device, op);
             }
         }

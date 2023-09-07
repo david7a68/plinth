@@ -1,6 +1,6 @@
 mod win32;
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 
 use euclid::Size2D;
 use windows::Win32::Foundation::HWND;
@@ -14,8 +14,26 @@ pub enum WindowEvent {
     Create(WindowHandle),
     CloseRequest,
     Destroy,
+    // Show,
+    // Hide,
+    BeginResize,
     Resize(Size2D<u16, ScreenSpace>),
+    EndResize,
     Repaint,
+}
+
+impl std::fmt::Debug for WindowEvent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Create(_) => f.debug_tuple("Create").finish(),
+            Self::CloseRequest => write!(f, "CloseRequest"),
+            Self::Destroy => write!(f, "Destroy"),
+            Self::BeginResize => write!(f, "BeginResize"),
+            Self::Resize(arg0) => f.debug_tuple("Resize").field(arg0).finish(),
+            Self::EndResize => write!(f, "EndResize"),
+            Self::Repaint => write!(f, "Repaint"),
+        }
+    }
 }
 
 pub trait WindowEventHandler: Send {
@@ -82,6 +100,7 @@ impl WindowBuilder {
     }
 }
 
+#[derive(Clone)]
 pub struct WindowHandle {
     handle: win32::WindowHandle,
 }
@@ -102,6 +121,10 @@ impl WindowHandle {
     pub fn destroy(&self) -> Result<(), WindowError> {
         self.handle.destroy()
     }
+
+    pub fn request_redraw(&self) -> Result<(), WindowError> {
+        self.handle.request_redraw()
+    }
 }
 
 pub struct EventLoop {
@@ -121,7 +144,6 @@ impl EventLoop {
 }
 
 struct WindowState {
-    in_modal_loop: Cell<bool>,
     event_handler: RefCell<Box<dyn WindowEventHandler>>,
     // input events should be batched together, but resize events need to be handled synchronously...
 }
@@ -129,7 +151,6 @@ struct WindowState {
 impl WindowState {
     fn new(event_handler: Box<dyn WindowEventHandler>) -> Self {
         Self {
-            in_modal_loop: Cell::new(false),
             event_handler: RefCell::new(event_handler),
         }
     }
@@ -153,9 +174,9 @@ impl WindowState {
     }
 
     fn on_resize_begin(&self) {
-        // disable vsync and force updates to be handled by the main thread
-
-        tracing::info!("Window resize begin");
+        self.event_handler
+            .borrow_mut()
+            .on_event(WindowEvent::BeginResize);
     }
 
     fn on_resize(&self, size: Size2D<u16, ScreenSpace>) {
@@ -165,9 +186,9 @@ impl WindowState {
     }
 
     fn on_resize_end(&self) {
-        // re-enable vsync and allow updates to be handled by the render thread
-
-        tracing::info!("Window resize end");
+        self.event_handler
+            .borrow_mut()
+            .on_event(WindowEvent::EndResize);
     }
 
     fn on_paint(&self) {

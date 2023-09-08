@@ -1,9 +1,10 @@
+mod api;
+pub mod thread;
+
 use std::collections::VecDeque;
 
 use smallvec::SmallVec;
 use windows::Win32::Foundation::HWND;
-
-mod api;
 
 use api::GraphicsCommandList;
 pub use api::{GraphicsConfig, Image, ResizeOp, SubmissionId, Swapchain};
@@ -56,7 +57,7 @@ impl Device {
     }
 
     #[tracing::instrument(skip(self, canvas))]
-    pub fn draw_canvas(&mut self, mut canvas: Canvas) {
+    pub fn draw_canvas(&mut self, mut canvas: Canvas) -> SubmissionId {
         canvas.command_list.image_barrier(
             canvas.target,
             ResourceState::RenderTarget,
@@ -72,6 +73,8 @@ impl Device {
             command_list: canvas.command_list,
             submission_id,
         });
+
+        submission_id
     }
 
     #[tracing::instrument(skip(self))]

@@ -1,4 +1,4 @@
-use std::rc::Rc;
+use std::sync::Arc;
 
 use euclid::Size2D;
 use windows::Win32::Foundation::HWND;
@@ -65,7 +65,7 @@ pub enum ResizeOp {
 }
 
 pub struct Swapchain {
-    device: Rc<DeviceImpl>,
+    device: Arc<DeviceImpl>,
     swapchain: SwapchainImpl,
 }
 
@@ -100,9 +100,9 @@ impl Swapchain {
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn present(&self) {
-        match &self.swapchain {
-            SwapchainImpl::Dx12(swapchain) => swapchain.present(),
+    pub fn present(&mut self, submission_id: SubmissionId) {
+        match &mut self.swapchain {
+            SwapchainImpl::Dx12(swapchain) => swapchain.present(submission_id),
         }
     }
 }
@@ -172,12 +172,12 @@ enum GraphicsCommandListImpl {
 }
 
 pub struct Device {
-    device: Rc<DeviceImpl>,
+    device: Arc<DeviceImpl>,
 }
 
 impl Device {
     pub(super) fn new(config: &GraphicsConfig) -> Self {
-        let device = Rc::new(DeviceImpl::Dx12(Dx12Device::new(config)));
+        let device = Arc::new(DeviceImpl::Dx12(Dx12Device::new(config)));
 
         Self { device }
     }

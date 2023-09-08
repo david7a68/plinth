@@ -1,19 +1,19 @@
 mod graphics;
-mod render;
 mod shell;
-mod vsync;
 
 use euclid::Size2D;
 
-use graphics::{GraphicsConfig, ResizeOp};
-use render::{RenderThread, WindowId};
+use graphics::{
+    thread::{RenderThread, RenderThreadProxy, WindowId},
+    GraphicsConfig, ResizeOp,
+};
 use shell::{WindowEventHandler, WindowHandle};
 #[cfg(feature = "profile")]
 use tracing_tracy::client::{plot, span_location};
 
 struct AppWindow {
     state: AppWindowState,
-    render_proxy: render::RenderThreadProxy,
+    render_proxy: RenderThreadProxy,
     first_paint: bool,
     is_resizing: bool,
 }
@@ -24,7 +24,7 @@ enum AppWindowState {
 }
 
 impl AppWindow {
-    fn new(render_proxy: render::RenderThreadProxy) -> Self {
+    fn new(render_proxy: RenderThreadProxy) -> Self {
         Self {
             state: AppWindowState::New,
             render_proxy,
@@ -71,12 +71,12 @@ impl WindowEventHandler for AppWindow {
                     panic!("Window resize on non-usable window")
                 };
 
-                if self.is_resizing {
-                    self.render_proxy
-                        .resize_window(*id, ResizeOp::Flex { size, flex: 1.2 })
-                } else {
-                    self.render_proxy.resize_window(*id, ResizeOp::Auto);
-                }
+                let op = self
+                    .is_resizing
+                    .then_some(ResizeOp::Flex { size, flex: 1.2 })
+                    .unwrap_or(ResizeOp::Auto);
+
+                self.render_proxy.resize_window(*id, op);
             }
             shell::WindowEvent::EndResize => {
                 let AppWindowState::Usable { id, handle: _ } = &self.state else {

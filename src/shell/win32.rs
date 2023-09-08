@@ -314,6 +314,7 @@ fn wndproc(window: &WindowState, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LR
                 },
             };
 
+            window.size.set(handle.content_size().unwrap());
             window.state.on_create(handle);
             LRESULT(0)
         }

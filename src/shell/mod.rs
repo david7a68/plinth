@@ -36,12 +36,12 @@ impl std::fmt::Debug for WindowEvent {
     }
 }
 
-pub trait WindowEventHandler: Send {
+pub trait WindowEventHandler {
     fn on_event(&mut self, event: WindowEvent);
 }
 
 // Todo: Does this cause double indirection?
-impl<F: FnMut(WindowEvent) + Send + 'static> WindowEventHandler for F {
+impl<F: FnMut(WindowEvent) + 'static> WindowEventHandler for F {
     fn on_event(&mut self, event: WindowEvent) {
         (self)(event);
     }

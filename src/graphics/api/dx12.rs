@@ -1,7 +1,11 @@
-use std::cell::{Cell, RefCell};
+use std::{
+    cell::Cell,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
 use arrayvec::ArrayVec;
 use euclid::Size2D;
+use parking_lot::Mutex;
 use windows::{
     core::{ComInterface, PCSTR},
     w,
@@ -36,9 +40,9 @@ use windows::{
                 },
                 CreateDXGIFactory2, DXGIGetDebugInterface1, IDXGIDebug, IDXGIFactory2,
                 IDXGISwapChain3, DXGI_CREATE_FACTORY_DEBUG, DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_ALL,
-                DXGI_DEBUG_RLO_IGNORE_INTERNAL, DXGI_RGBA, DXGI_SCALING_NONE,
-                DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
-                DXGI_USAGE_RENDER_TARGET_OUTPUT,
+                DXGI_DEBUG_RLO_IGNORE_INTERNAL, DXGI_PRESENT_DO_NOT_SEQUENCE, DXGI_PRESENT_RESTART,
+                DXGI_RGBA, DXGI_SCALING_NONE, DXGI_SWAP_CHAIN_DESC1,
+                DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT,
             },
         },
         System::Threading::{CreateEventW, WaitForSingleObject, INFINITE},
@@ -54,6 +58,8 @@ pub const MAX_RENDER_TARGETS: usize = 32;
 pub struct Dx12Swapchain {
     handle: IDXGISwapChain3,
     images: Option<[Image; 2]>,
+    was_resized: bool,
+    last_present: Option<SubmissionId>,
 }
 
 impl Dx12Swapchain {
@@ -77,7 +83,7 @@ impl Dx12Swapchain {
 
         let swapchain = unsafe {
             device.dxgi_factory.CreateSwapChainForHwnd(
-                &device.graphics_queue.queue,
+                &device.graphics_queue.queue.lock().0,
                 window,
                 &swapchain_desc,
                 None,
@@ -109,10 +115,11 @@ impl Dx12Swapchain {
         }
 
         let images = Self::get_images(&swapchain, device);
-
         Self {
             handle: swapchain,
             images: Some(images),
+            was_resized: false,
+            last_present: None,
         }
     }
 
@@ -122,20 +129,23 @@ impl Dx12Swapchain {
             swapchain: &mut Dx12Swapchain,
             size: Size2D<u32, ScreenSpace>,
         ) {
-            device.wait_for_idle();
+            if let Some(last_present) = swapchain.last_present {
+                device.wait_until(last_present);
+            }
 
             {
                 #[cfg(feature = "profile")]
                 let _s = tracing_tracy::client::span!("free swapchain images");
 
-                let mut rt = device.render_target_descriptor_heap.borrow_mut();
                 let images = swapchain.images.take().unwrap();
-
                 let image0: &Dx12Image = (&images[0]).try_into().unwrap();
-                rt.deallocate(image0.render_target_view);
-
                 let image1: &Dx12Image = (&images[1]).try_into().unwrap();
-                rt.deallocate(image1.render_target_view);
+
+                {
+                    let mut rt = device.render_target_descriptor_heap.lock();
+                    rt.deallocate(image0.render_target_view);
+                    rt.deallocate(image1.render_target_view);
+                }
 
                 std::mem::drop(images);
             }
@@ -172,6 +182,8 @@ impl Dx12Swapchain {
                 unsafe { self.handle.SetSourceSize(size.width, size.height) }.unwrap();
             }
         }
+
+        self.was_resized = true;
     }
 
     pub fn get_back_buffer(&self) -> (&Image, u32) {
@@ -180,25 +192,27 @@ impl Dx12Swapchain {
         (image, index)
     }
 
-    pub fn present(&self) {
-        unsafe { self.handle.Present(0, 0) }.unwrap();
+    pub fn present(&mut self, submission_id: SubmissionId) {
+        let flags = if self.was_resized {
+            self.was_resized = false;
+            DXGI_PRESENT_RESTART
+        } else {
+            0
+        };
+
+        unsafe { self.handle.Present(1, flags) }.unwrap();
+        self.last_present = Some(submission_id);
     }
 
     #[tracing::instrument(skip(swapchain, device))]
     fn get_images(swapchain: &IDXGISwapChain3, device: &Dx12Device) -> [Image; 2] {
         let image0: ID3D12Resource = unsafe { swapchain.GetBuffer(0) }.unwrap();
-        let view0 = device
-            .render_target_descriptor_heap
-            .borrow_mut()
-            .allocate()
-            .unwrap();
-
         let image1: ID3D12Resource = unsafe { swapchain.GetBuffer(1) }.unwrap();
-        let view1 = device
-            .render_target_descriptor_heap
-            .borrow_mut()
-            .allocate()
-            .unwrap();
+
+        let (view0, view1) = {
+            let mut rt = device.render_target_descriptor_heap.lock();
+            (rt.allocate().unwrap(), rt.allocate().unwrap())
+        };
 
         unsafe {
             image0.SetName(w!("Backbuffer 0")).unwrap();
@@ -223,6 +237,8 @@ impl Dx12Swapchain {
     }
 }
 
+unsafe impl Send for Dx12Swapchain {}
+
 pub struct Dx12Image {
     handle: ID3D12Resource,
     render_target_view: D3D12_CPU_DESCRIPTOR_HANDLE,
@@ -243,7 +259,7 @@ pub struct Dx12Device {
     device: ID3D12Device,
 
     graphics_queue: Queue,
-    render_target_descriptor_heap: RefCell<SimpleDescriptorHeap<MAX_RENDER_TARGETS>>,
+    render_target_descriptor_heap: Mutex<SimpleDescriptorHeap<MAX_RENDER_TARGETS>>,
 }
 
 impl Dx12Device {
@@ -310,7 +326,7 @@ impl Dx12Device {
 
         let graphics_queue = Queue::new(&device, D3D12_COMMAND_LIST_TYPE_DIRECT);
 
-        let render_target_descriptor_heap = RefCell::new(SimpleDescriptorHeap::new(
+        let render_target_descriptor_heap = Mutex::new(SimpleDescriptorHeap::new(
             &device,
             D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
             false,
@@ -329,6 +345,11 @@ impl Dx12Device {
         self.graphics_queue.wait_idle();
     }
 
+    #[tracing::instrument(skip(self))]
+    pub fn wait_until(&self, submission: SubmissionId) {
+        self.graphics_queue.wait(submission);
+    }
+
     pub fn most_recently_completed_submission(&self) -> SubmissionId {
         self.graphics_queue.last_completed()
     }
@@ -338,6 +359,9 @@ impl Dx12Device {
         self.graphics_queue.submit(&cmd_list)
     }
 }
+
+unsafe impl Send for Dx12Device {}
+unsafe impl Sync for Dx12Device {}
 
 pub struct Dx12GraphicsCommandList {
     command_list: ID3D12GraphicsCommandList,
@@ -504,11 +528,10 @@ impl<const COUNT: usize> SimpleDescriptorHeap<COUNT> {
 ///
 /// Based on the implementation described here: <https://alextardif.com/D3D11To12P1.html>
 struct Queue {
-    queue: ID3D12CommandQueue,
+    queue: Mutex<(ID3D12CommandQueue, u64)>,
     fence: ID3D12Fence,
-    fence_event: HANDLE,
-    num_submitted: Cell<u64>,
-    num_completed: Cell<u64>,
+    fence_event: Mutex<HANDLE>,
+    num_completed: AtomicU64,
 }
 
 impl Queue {
@@ -529,11 +552,10 @@ impl Queue {
         unsafe { fence.Signal(0) }.unwrap();
 
         Self {
-            queue,
+            queue: Mutex::new((queue, 0)),
             fence,
-            fence_event,
-            num_submitted: Cell::new(0),
-            num_completed: Cell::new(0),
+            fence_event: Mutex::new(fence_event),
+            num_completed: AtomicU64::new(0),
         }
     }
 
@@ -544,14 +566,35 @@ impl Queue {
             return;
         }
 
-        unsafe {
-            self.fence
-                .SetEventOnCompletion(submission.0, self.fence_event)
-                .expect("out of memory");
-            WaitForSingleObject(self.fence_event, INFINITE);
+        {
+            // TODO: this would be faster if we could use an event per thread.
+
+            let event = {
+                #[cfg(feature = "profile")]
+                let _s = tracing_tracy::client::span!("wait for lock");
+
+                self.fence_event.lock()
+            };
+
+            unsafe {
+                self.fence
+                    .SetEventOnCompletion(submission.0, *event)
+                    .expect("out of memory");
+            }
+
+            unsafe {
+                #[cfg(feature = "profile")]
+                let _s = tracing_tracy::client::span!("wait for fence event");
+
+                WaitForSingleObject(*event, INFINITE);
+            }
         }
 
-        self.num_completed.set(submission.0);
+        let _ = self
+            .num_completed
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |old| {
+                (old < submission.0).then_some(submission.0)
+            });
     }
 
     /// Causes the CPU to wait until all submissions have completed.
@@ -561,50 +604,60 @@ impl Queue {
         // submit work to the queue on our behalf when we call `Present`.
         // Without this, we end up stomping over the currently presenting frame
         // when resizing or destroying the swapchain.
-        self.wait(self.increment());
+        let id = {
+            let (queue, num_submitted) = &mut *self.queue.lock();
+            unsafe { queue.Signal(&self.fence, *num_submitted) }.unwrap();
+            let id = SubmissionId(*num_submitted);
+            *num_submitted += 1;
+            id
+        };
+
+        self.wait(id);
     }
 
     pub fn is_done(&self, submission: SubmissionId) -> bool {
-        if submission.0 > self.num_completed.get() {
+        if submission.0 > self.num_completed.load(Ordering::Acquire) {
             self.poll_fence();
         }
 
-        submission.0 <= self.num_completed.get()
+        submission.0 <= self.num_completed.load(Ordering::Acquire)
     }
 
     pub fn last_completed(&self) -> SubmissionId {
         self.poll_fence();
-        SubmissionId(self.num_completed.get())
+        SubmissionId(self.num_completed.load(Ordering::Acquire))
     }
 
     #[tracing::instrument(skip(self))]
     pub fn submit(&self, commands: &ID3D12CommandList) -> SubmissionId {
-        unsafe { self.queue.ExecuteCommandLists(&[Some(commands.clone())]) };
-        self.increment()
+        let (queue, num_submitted) = &mut *self.queue.lock();
+
+        let id = SubmissionId(*num_submitted);
+        unsafe { queue.ExecuteCommandLists(&[Some(commands.clone())]) };
+        unsafe { queue.Signal(&self.fence, *num_submitted) }.unwrap();
+        *num_submitted += 1;
+
+        id
     }
 
     fn poll_fence(&self) {
-        self.num_completed.set(
-            self.num_completed
-                .get()
-                .max(unsafe { self.fence.GetCompletedValue() }),
-        );
-    }
+        let fence_value = unsafe { self.fence.GetCompletedValue() };
 
-    fn increment(&self) -> SubmissionId {
-        let value = self.num_submitted.get();
-        unsafe { self.queue.Signal(&self.fence, value) }.unwrap();
-        self.num_submitted.set(value + 1);
-        SubmissionId(value)
+        let _ = self
+            .num_completed
+            // Don't know what ordering to use here, so just use SeqCst for both
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |old| {
+                (old < fence_value).then_some(fence_value)
+            });
     }
 }
 
 impl Drop for Queue {
     fn drop(&mut self) {
-        unsafe {
-            self.wait_idle();
-            CloseHandle(self.fence_event);
-        }
+        self.wait_idle();
+
+        let event = self.fence_event.lock();
+        unsafe { CloseHandle(*event) };
     }
 }
 

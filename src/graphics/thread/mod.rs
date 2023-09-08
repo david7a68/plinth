@@ -1,29 +1,40 @@
+mod vsync;
+mod worker;
+
 use std::{
     sync::mpsc::{channel, Receiver, Sender},
     thread::JoinHandle,
 };
 
-use crate::{
-    graphics::{Device, GraphicsConfig, ResizeOp, Swapchain},
-    shell::WindowHandle,
-    vsync::VSyncSource,
-};
+use crate::shell::WindowHandle;
+
+use self::{vsync::VSyncSource, worker::Worker};
+
+use super::{Device, GraphicsConfig, ResizeOp, Swapchain};
 
 #[derive(Clone, Copy)]
 pub struct WindowId(u64);
 
-pub enum Message {
+enum Message {
+    // Window messages
     NewWindow(WindowHandle, Sender<Response>),
     DestroyWindow(WindowId),
     ResizeWindow(WindowId, ResizeOp, Sender<Response>),
     EnableVSync(WindowId),
     DisableVSync(WindowId),
-    ForceDraw(WindowId, Sender<Response>),
+    RepaintNow(WindowId, Sender<Response>),
+
+    // VSync messages
     VSync,
+
+    // Worker thread messages
+    WorkerDone(WindowId),
+
+    // Exit message
     Exit,
 }
 
-pub enum Response {
+enum Response {
     NewWindow(WindowId),
     ResizeWindow,
     Repaint,
@@ -40,14 +51,17 @@ impl Output {
         self.swapchain.resize(op);
     }
 
-    fn draw(&self, device: &mut Device) {
+    #[tracing::instrument(skip_all)]
+    fn repaint(&mut self, device: &mut Device) {
         let (image, _) = self.swapchain.get_back_buffer();
         let canvas = device.create_canvas(image);
-        device.draw_canvas(canvas);
-        self.swapchain.present();
+        let submit_id = device.draw_canvas(canvas);
+        self.swapchain.present(submit_id);
     }
 }
 
+/// Lifetime control object for the render thread. Drop this to stop the
+/// renderer.
 pub struct RenderThread {
     joiner: Option<JoinHandle<()>>,
     sender: Sender<Message>,
@@ -56,18 +70,19 @@ pub struct RenderThread {
 impl RenderThread {
     pub fn spawn(config: GraphicsConfig) -> (Self, RenderThreadProxy) {
         let (sender, receiver) = channel();
-        let vsync_sender = sender.clone();
+        let worker_sender = sender.clone();
 
         let thread = std::thread::spawn(move || {
+            // todo: tracy name thread
+
             let mut thread = Thread {
-                vsync: VSyncSource::new(vsync_sender),
+                vsync: VSyncSource::new(worker_sender.clone()),
+                worker: Worker::new(worker_sender),
                 device: Device::new(&config),
                 windows: Vec::new(),
                 free_windows: Vec::new(),
                 num_vsync: 0,
             };
-
-            thread.vsync.stop();
 
             loop {
                 // Wait for a message.
@@ -87,7 +102,8 @@ impl RenderThread {
                         Message::ResizeWindow(id, op, reply) => thread.resize_window(id, op, reply),
                         Message::EnableVSync(id) => thread.enable_vsync(id),
                         Message::DisableVSync(id) => thread.disable_vsync(id),
-                        Message::ForceDraw(id, reply) => thread.force_draw(id, reply),
+                        Message::RepaintNow(id, reply) => thread.force_draw(id, reply),
+                        Message::WorkerDone(id) => thread.worker_done(id),
                         Message::VSync => {
                             is_vsync = true;
                         }
@@ -100,13 +116,7 @@ impl RenderThread {
                     #[cfg(feature = "profile")]
                     tracing_tracy::client::frame_mark();
 
-                    for output in &thread.windows {
-                        if let Some(output) = output {
-                            if output.is_vsync_enabled {
-                                output.draw(&mut thread.device);
-                            }
-                        }
-                    }
+                    thread.draw_vsync();
                 }
             }
         });
@@ -128,11 +138,27 @@ impl Drop for RenderThread {
     }
 }
 
+enum OutputLocation {
+    /// The output slot is empty.
+    ///
+    /// This may be set even though the output is being destroyed on a worker
+    /// thread.
+    None,
+
+    /// The output is on the render thread.
+    Local(Output),
+
+    /// Thes output is on a worker thread. Wait on the receiver to retrieve the
+    /// output.
+    Worker(Receiver<Output>, Option<(Sender<Response>, Response)>),
+}
+
 struct Thread {
     vsync: VSyncSource,
+    worker: Worker,
     device: Device,
 
-    windows: Vec<Option<Output>>,
+    windows: Vec<OutputLocation>,
     free_windows: Vec<u32>,
 
     num_vsync: usize,
@@ -147,11 +173,11 @@ impl Thread {
         };
 
         let id = if let Some(id) = self.free_windows.pop() {
-            self.windows[id as usize] = Some(output);
+            self.windows[id as usize] = OutputLocation::Local(output);
             WindowId(id as u64)
         } else {
             let id = self.windows.len();
-            self.windows.push(Some(output));
+            self.windows.push(OutputLocation::Local(output));
             WindowId(id as u64)
         };
 
@@ -160,54 +186,118 @@ impl Thread {
 
     #[tracing::instrument(skip_all)]
     fn destroy_window(&mut self, id: WindowId) {
-        if let Some(output) = self.windows[id.0 as usize].take() {
-            if output.is_vsync_enabled {
-                self.num_vsync -= 1;
-            }
-
-            self.free_windows.push(id.0 as u32);
+        let output = self.output_to_worker(id, OutputLocation::None);
+        if output.is_vsync_enabled {
+            self.num_vsync -= 1;
         }
+
+        self.worker.destroy_output(output);
+
+        self.free_windows.push(id.0 as u32);
     }
 
     #[tracing::instrument(skip_all)]
     fn resize_window(&mut self, id: WindowId, op: ResizeOp, reply: Sender<Response>) {
-        self.windows[id.0 as usize].as_mut().unwrap().resize(op);
-        reply.send(Response::ResizeWindow).unwrap();
+        let (sender, receiver) = channel();
+
+        let new_location = OutputLocation::Worker(receiver, Some((reply, Response::ResizeWindow)));
+        let output = self.output_to_worker(id, new_location);
+        self.worker.resize_output(id, output, op, sender);
     }
 
     #[tracing::instrument(skip_all)]
     fn enable_vsync(&mut self, id: WindowId) {
-        self.windows[id.0 as usize]
-            .as_mut()
-            .unwrap()
-            .is_vsync_enabled = true;
+        let output = Self::borrow_output(&mut self.windows, id);
+        output.is_vsync_enabled = true;
 
         self.num_vsync += 1;
-
         if self.num_vsync == 1 {
-            self.vsync.start();
+            self.vsync.next();
         }
     }
 
     #[tracing::instrument(skip_all)]
     fn disable_vsync(&mut self, id: WindowId) {
-        self.windows[id.0 as usize]
-            .as_mut()
-            .unwrap()
-            .is_vsync_enabled = false;
+        let output = Self::borrow_output(&mut self.windows, id);
+        output.is_vsync_enabled = false;
 
         self.num_vsync = self.num_vsync.saturating_sub(1);
+    }
 
-        if self.num_vsync == 0 {
-            self.vsync.stop();
+    #[tracing::instrument(skip_all)]
+    fn draw_vsync(&mut self) {
+        for i in 0..self.windows.len() {
+            if let Some(output) = Self::try_borrow_output(&mut self.windows, WindowId(i as u64)) {
+                if output.is_vsync_enabled {
+                    output.repaint(&mut self.device);
+                }
+            }
+        }
+
+        if self.num_vsync > 0 {
+            self.vsync.next();
         }
     }
 
     #[tracing::instrument(skip_all)]
     fn force_draw(&mut self, id: WindowId, reply: Sender<Response>) {
-        let output = self.windows[id.0 as usize].as_mut().unwrap();
-        output.draw(&mut self.device);
+        let output = Self::borrow_output(&mut self.windows, id);
+        output.repaint(&mut self.device);
         reply.send(Response::Repaint).unwrap();
+    }
+
+    #[tracing::instrument(skip_all)]
+    fn worker_done(&mut self, id: WindowId) {
+        let result = std::mem::replace(&mut self.windows[id.0 as usize], OutputLocation::None);
+
+        match result {
+            OutputLocation::None => panic!("Worker thread finished on destroyed output"),
+            OutputLocation::Local(_) => panic!("Worker thread finished on local output"),
+            OutputLocation::Worker(receiver, response) => {
+                let output = receiver
+                    .try_recv()
+                    .expect("Worker thread sent WorkDone message but no output available");
+
+                debug_assert!(
+                    receiver.try_recv().is_err(),
+                    "Worker thread sent multiple outputs when only one was expected"
+                );
+
+                self.windows[id.0 as usize] = OutputLocation::Local(output);
+
+                if let Some((reply, message)) = response {
+                    reply.send(message).unwrap();
+                }
+            }
+        }
+    }
+
+    fn output_to_worker(&mut self, id: WindowId, value: OutputLocation) -> Output {
+        match std::mem::replace(&mut self.windows[id.0 as usize], value) {
+            OutputLocation::None => panic!("Output has been destroyed"),
+            OutputLocation::Local(output) => output,
+            OutputLocation::Worker(_, _) => panic!("Output is already being used by worker thread"),
+        }
+    }
+
+    fn borrow_output(outputs: &mut [OutputLocation], id: WindowId) -> &mut Output {
+        let slot = &mut outputs[id.0 as usize];
+
+        match slot {
+            OutputLocation::None => panic!("Borrowing destroyed output"),
+            OutputLocation::Local(output) => output,
+            OutputLocation::Worker(_, _) => {
+                panic!("Cannot borrow output that is being used by worker thread")
+            }
+        }
+    }
+
+    fn try_borrow_output(outputs: &mut [OutputLocation], id: WindowId) -> Option<&mut Output> {
+        if let OutputLocation::Local(output) = &mut outputs[id.0 as usize] {
+            Some(output)
+        } else {
+            None
+        }
     }
 }
 
@@ -272,7 +362,7 @@ impl RenderThreadProxy {
     #[tracing::instrument(skip_all)]
     pub fn force_draw(&mut self, id: WindowId) {
         self.message_sender
-            .send(Message::ForceDraw(id, self.response_render.clone()))
+            .send(Message::RepaintNow(id, self.response_render.clone()))
             .unwrap();
 
         match self.response_receiver.recv().unwrap() {

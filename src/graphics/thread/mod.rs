@@ -6,7 +6,7 @@ use std::{
     thread::JoinHandle,
 };
 
-use crate::shell::WindowHandle;
+use crate::window::WindowHandle;
 
 use self::{vsync::VSyncSource, worker::Worker};
 

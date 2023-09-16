@@ -1,5 +1,5 @@
 mod graphics;
-mod shell;
+mod window;
 
 use euclid::Size2D;
 
@@ -7,9 +7,9 @@ use graphics::{
     thread::{RenderThread, RenderThreadProxy, WindowId},
     GraphicsConfig, ResizeOp,
 };
-use shell::{WindowEventHandler, WindowHandle};
 #[cfg(feature = "profile")]
 use tracing_tracy::client::{plot, span_location};
+use window::{WindowEventHandler, WindowHandle};
 
 struct AppWindow {
     state: AppWindowState,
@@ -36,29 +36,29 @@ impl AppWindow {
 
 impl WindowEventHandler for AppWindow {
     #[tracing::instrument(skip(self))]
-    fn on_event(&mut self, event: shell::WindowEvent) {
+    fn on_event(&mut self, event: window::WindowEvent) {
         match event {
-            shell::WindowEvent::Create(handle) => {
+            window::WindowEvent::Create(handle) => {
                 self.state = AppWindowState::Usable {
                     id: self.render_proxy.new_window(handle.clone()),
                     handle,
                 };
             }
-            shell::WindowEvent::CloseRequest => {
+            window::WindowEvent::CloseRequest => {
                 let AppWindowState::Usable { id: _, handle } = &self.state else {
                     panic!("Window close request on non-usable window")
                 };
 
                 handle.destroy().unwrap();
             }
-            shell::WindowEvent::Destroy => {
+            window::WindowEvent::Destroy => {
                 let AppWindowState::Usable { id, handle: _ } = &self.state else {
                     panic!("Window destroy on non-usable window")
                 };
 
                 self.render_proxy.destroy_window(*id);
             }
-            shell::WindowEvent::BeginResize => {
+            window::WindowEvent::BeginResize => {
                 let AppWindowState::Usable { id, handle: _ } = &self.state else {
                     panic!("Window resize on non-usable window")
                 };
@@ -66,7 +66,7 @@ impl WindowEventHandler for AppWindow {
                 self.render_proxy.disable_vsync(*id);
                 self.is_resizing = true;
             }
-            shell::WindowEvent::Resize(size) => {
+            window::WindowEvent::Resize(size) => {
                 let AppWindowState::Usable { id, handle: _ } = &self.state else {
                     panic!("Window resize on non-usable window")
                 };
@@ -78,7 +78,7 @@ impl WindowEventHandler for AppWindow {
 
                 self.render_proxy.resize_window(*id, op);
             }
-            shell::WindowEvent::EndResize => {
+            window::WindowEvent::EndResize => {
                 let AppWindowState::Usable { id, handle: _ } = &self.state else {
                     panic!("Window resize on non-usable window")
                 };
@@ -87,7 +87,7 @@ impl WindowEventHandler for AppWindow {
                 self.render_proxy.enable_vsync(*id);
                 self.is_resizing = false;
             }
-            shell::WindowEvent::Repaint => {
+            window::WindowEvent::Repaint => {
                 let AppWindowState::Usable { id, handle: _ } = &self.state else {
                     panic!("Window repaint on non-usable window")
                 };
@@ -123,27 +123,27 @@ fn main() {
 
     let (_render_thread, render_proxy) = RenderThread::spawn(GraphicsConfig { debug_mode: false });
 
-    let event_loop = shell::EventLoop::new();
+    let event_loop = window::EventLoop::new();
 
-    let _window = shell::WindowBuilder::new()
+    let _window = window::WindowBuilder::new()
         .with_title("Hello, world!")
         .with_content_size(Size2D::new(800, 600))
         .with_event_handler(AppWindow::new(render_proxy.clone()))
         .build();
 
-    let _window = shell::WindowBuilder::new()
+    let _window = window::WindowBuilder::new()
         .with_title("Hello, world!")
         .with_content_size(Size2D::new(800, 600))
         .with_event_handler(AppWindow::new(render_proxy.clone()))
         .build();
 
-    let _window = shell::WindowBuilder::new()
+    let _window = window::WindowBuilder::new()
         .with_title("Hello, world!")
         .with_content_size(Size2D::new(800, 600))
         .with_event_handler(AppWindow::new(render_proxy.clone()))
         .build();
 
-    let _window = shell::WindowBuilder::new()
+    let _window = window::WindowBuilder::new()
         .with_title("Hello, world!")
         .with_content_size(Size2D::new(800, 600))
         .with_event_handler(AppWindow::new(render_proxy))

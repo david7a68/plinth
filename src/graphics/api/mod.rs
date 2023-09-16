@@ -3,7 +3,7 @@ use std::sync::Arc;
 use euclid::Size2D;
 use windows::Win32::Foundation::HWND;
 
-use crate::shell::ScreenSpace;
+use crate::window::ScreenSpace;
 
 use dx12::{Dx12Device, Dx12GraphicsCommandList, Dx12Image, Dx12Swapchain};
 

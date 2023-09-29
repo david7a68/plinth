@@ -3,15 +3,18 @@ use std::time::Instant;
 use clap::{command, Parser, ValueEnum};
 
 use plinth::{
-    new_window, scene::Scene, AnimationFrequency, Application, Canvas, Color, GraphicsConfig,
-    Pixel, PixelsPerSecond, PowerPreference, Rect2D, Size2D, Srgb, Translate2D, Window,
-    WindowEvent, WindowEventHandler, WindowSpec,
+    color::{Color, Srgb},
+    math::{Pixels, PixelsPerSecond, Rect, Size, Vec2},
+    new_window,
+    scene::Scene,
+    AnimationFrequency, Application, Canvas, GraphicsConfig, PowerPreference, Window, WindowEvent,
+    WindowEventHandler, WindowSpec,
 };
 
 struct DemoRect {
-    rect: Rect2D<Pixel>,
+    rect: Rect<Pixels>,
     color: Color<Srgb>,
-    velocity: Translate2D<PixelsPerSecond>,
+    velocity: Vec2<PixelsPerSecond>,
 }
 
 struct DemoWindow {
@@ -28,17 +31,17 @@ impl DemoWindow {
 
         window.set_scene(scene).unwrap();
 
-        let window_center = Rect2D::from(window.size().unwrap().logical).center();
+        let window_center = Rect::from(window.size().unwrap().logical).center();
 
         let mut rects = Vec::new();
         for _ in 0..100 {
-            let angle: f32 = rand::random::<f32>() * std::f32::consts::TAU;
+            let angle: f64 = rand::random::<f64>() * std::f64::consts::TAU;
             let (x, y) = angle.sin_cos();
 
             rects.push(DemoRect {
-                rect: Rect2D::centered_on(window_center.cast::<Pixel>(), Size2D::new(100.0, 100.0)),
+                rect: Rect::from_center(window_center, Size::new(100.0, 100.0)),
                 color: Color::BLACK,
-                velocity: Translate2D::new(x, y) * 2.0,
+                velocity: Vec2::new(x, y) * 2.0,
             });
         }
 
@@ -80,18 +83,18 @@ impl WindowEventHandler for DemoWindow {
                 }
             }
             WindowEvent::Repaint(timings) => {
-                let delta = (timings.next_frame - self.last_present_time).as_secs_f32();
-                let window_rect = Rect2D::from(self.window.size().unwrap().logical);
+                let delta = timings.next_frame - self.last_present_time;
+                let window_rect = Rect::from(self.window.size().unwrap().logical);
 
                 for rect in &mut self.rects {
-                    rect.rect.translate(rect.velocity * delta);
+                    rect.rect += rect.velocity * delta;
 
                     if window_rect.intersection(&rect.rect).is_none() {
                         // reverse rect direction
                         rect.velocity = -rect.velocity;
 
                         // snap it into the self.window
-                        rect.rect.move_into(&window_rect);
+                        // rect.rect.move_into(&window_rect);
                     }
                 }
 

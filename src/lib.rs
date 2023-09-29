@@ -1,20 +1,17 @@
 #![allow(dead_code, unused_variables)]
 
 pub mod color;
+#[macro_use]
 pub mod math;
 pub mod scene;
 
 use std::{path::Path, time::Instant};
 
-pub use color::{Color, ColorSpace, Srgb};
-pub use math::{
-    CoordinateUnit, Pixel, PixelsPerSecond, Point2D, Rect2D, Scale2D, Size2D, Translate2D,
-};
+use color::{Color, Srgb};
+use math::{Pixels, Rect, Scale, Size};
 use scene::{Scene, SceneNode};
 
-pub struct DevicePixel;
-
-impl CoordinateUnit for DevicePixel {}
+pub struct DevicePixels {}
 
 pub enum Axis {
     X,
@@ -24,16 +21,16 @@ pub enum Axis {
 
 #[derive(Clone, Copy)]
 pub struct WindowSize {
-    pub physical: Size2D<DevicePixel>,
-    pub logical: Size2D<Pixel>,
-    pub scale_factor: Scale2D<DevicePixel, Pixel>,
+    pub physical: Size<DevicePixels>,
+    pub logical: Size<Pixels>,
+    pub scale_factor: Scale<DevicePixels, Pixels>,
 }
 
 pub struct WindowSpec {
     pub title: String,
-    pub size: Size2D<Pixel>,
-    pub min_size: Option<Size2D<Pixel>>,
-    pub max_size: Option<Size2D<Pixel>>,
+    pub size: Size<Pixels>,
+    pub min_size: Option<Size<Pixels>>,
+    pub max_size: Option<Size<Pixels>>,
     pub resizable: bool,
     pub visible: bool,
     pub animation_frequency: Option<AnimationFrequency>,
@@ -43,7 +40,7 @@ impl Default for WindowSpec {
     fn default() -> Self {
         Self {
             title: String::new(),
-            size: Size2D::new(800.0, 600.0),
+            size: Size::new(800.0, 600.0),
             min_size: None,
             max_size: None,
             resizable: true,
@@ -116,7 +113,7 @@ pub enum WindowEvent {
     Resize(WindowSize),
     EndResize,
     Repaint(PresentTiming),
-    Scroll(Translate2D<Pixel>),
+    Scroll(Axis, f32),
 }
 
 pub fn new_window<W: WindowEventHandler + 'static, F: FnMut(Window) -> W + 'static>(
@@ -172,7 +169,7 @@ impl Canvas {
         todo!()
     }
 
-    pub fn fill(&mut self, rect: Rect2D<Pixel>, color: Color<Srgb>) {
+    pub fn fill(&mut self, rect: Rect<Pixels>, color: Color<Srgb>) {
         todo!()
     }
 }

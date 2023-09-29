@@ -35,7 +35,7 @@ impl WindowEventHandler for DemoWindow {
             WindowEvent::Repaint(timings) => {
                 // todo
             }
-            WindowEvent::Scroll(amount) => {
+            WindowEvent::Scroll(axis, amount) => {
                 // get cursor position
                 // get image size
 

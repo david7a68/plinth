@@ -1,9 +1,16 @@
-pub trait CoordinateUnit {}
+use std::time::Duration;
 
-pub struct UndefinedUnit {}
+use super::Vec2;
 
-impl CoordinateUnit for UndefinedUnit {}
+pub struct Pixels {}
 
-pub struct Pixel;
+pub struct PixelsPerSecond {}
 
-impl CoordinateUnit for Pixel {}
+impl std::ops::Mul<Duration> for Vec2<PixelsPerSecond> {
+    type Output = Vec2<Pixels>;
+
+    fn mul(self, rhs: Duration) -> Self::Output {
+        let seconds = rhs.as_secs_f64();
+        Vec2::new(self.x * seconds, self.y * seconds)
+    }
+}

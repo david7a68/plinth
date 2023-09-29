@@ -2,13 +2,15 @@
 
 pub mod color;
 pub mod math;
+pub mod scene;
 
-use std::time::Instant;
+use std::{path::Path, time::Instant};
 
 pub use color::{Color, ColorSpace, Srgb};
 pub use math::{
     CoordinateUnit, Pixel, PixelsPerSecond, Point2D, Rect2D, Scale2D, Size2D, Translate2D,
 };
+use scene::{Scene, SceneNode};
 
 pub struct DevicePixel;
 
@@ -114,6 +116,7 @@ pub enum WindowEvent {
     Resize(WindowSize),
     EndResize,
     Repaint(PresentTiming),
+    Scroll(Translate2D<Pixel>),
 }
 
 pub fn new_window<W: WindowEventHandler + 'static, F: FnMut(Window) -> W + 'static>(
@@ -137,92 +140,6 @@ pub struct AnimationFrequency {
     pub optimal_fps: f32,
 }
 
-#[derive(Clone, Copy)]
-pub struct SceneNodeId {
-    index: u32,
-    generation: u32,
-}
-
-pub struct Scene {
-    nodes: Vec<SceneNode>,
-    free_list: Vec<SceneNodeId>,
-}
-
-impl Scene {
-    pub fn new() -> Self {
-        todo!()
-    }
-
-    pub fn set_root(&mut self, id: SceneNodeId) {
-        todo!()
-    }
-
-    pub fn new_root(&mut self, node: impl Into<SceneNode>) -> SceneNodeId {
-        todo!()
-    }
-
-    pub fn root_id(&self) -> Option<SceneNodeId> {
-        todo!()
-    }
-
-    pub fn root(&self) -> Option<&SceneNode> {
-        todo!()
-    }
-
-    pub fn root_mut(&mut self) -> Option<&mut SceneNode> {
-        todo!()
-    }
-
-    pub fn node(&self, id: SceneNodeId) -> Option<&SceneNode> {
-        todo!()
-    }
-
-    pub fn new_node(&mut self, node: impl Into<SceneNode>) -> SceneNodeId {
-        todo!()
-    }
-
-    pub fn destroy_node(&mut self, id: SceneNodeId) {
-        todo!()
-    }
-
-    pub fn add_child(&mut self, parent: SceneNodeId, child: SceneNodeId) {
-        todo!()
-    }
-
-    pub fn new_child(&mut self, parent: SceneNodeId, child: impl Into<SceneNode>) -> SceneNodeId {
-        todo!()
-    }
-
-    pub fn remove_child(&mut self, parent: SceneNodeId, child: SceneNodeId) {
-        todo!()
-    }
-}
-
-pub enum SceneNode {
-    Unused,
-    Background(Color<Srgb>),
-    Canvas(Canvas),
-    Image(()),
-}
-
-pub struct Canvas {
-    dummy: u64,
-}
-
-impl Canvas {
-    pub fn new() -> Self {
-        todo!()
-    }
-
-    pub fn clear(&mut self, color: Color<Srgb>) {
-        todo!()
-    }
-
-    pub fn fill(&mut self, rect: Rect2D<Pixel>, color: Color<Srgb>) {
-        todo!()
-    }
-}
-
 pub enum PowerPreference {
     LowPower,
     HighPerformance,
@@ -242,5 +159,112 @@ impl Application {
     /// Runs the event loop until all open windows are closed.
     pub fn run(&mut self) {
         todo!()
+    }
+}
+pub struct Canvas {}
+
+impl Canvas {
+    pub fn new() -> Self {
+        todo!()
+    }
+
+    pub fn clear(&mut self, color: Color<Srgb>) {
+        todo!()
+    }
+
+    pub fn fill(&mut self, rect: Rect2D<Pixel>, color: Color<Srgb>) {
+        todo!()
+    }
+}
+
+impl From<Canvas> for SceneNode {
+    fn from(canvas: Canvas) -> Self {
+        Self::Canvas(canvas)
+    }
+}
+
+impl TryFrom<SceneNode> for Canvas {
+    type Error = ();
+
+    fn try_from(node: SceneNode) -> Result<Self, Self::Error> {
+        match node {
+            SceneNode::Canvas(canvas) => Ok(canvas),
+            _ => Err(()),
+        }
+    }
+}
+
+pub struct Image {}
+
+impl Image {
+    pub fn from_path(path: impl AsRef<Path>) -> Result<Self, ()> {
+        todo!()
+    }
+}
+
+impl From<Image> for SceneNode {
+    fn from(image: Image) -> Self {
+        Self::Image(image)
+    }
+}
+
+impl TryFrom<SceneNode> for Image {
+    type Error = ();
+
+    fn try_from(node: SceneNode) -> Result<Self, Self::Error> {
+        match node {
+            SceneNode::Image(image) => Ok(image),
+            _ => Err(()),
+        }
+    }
+}
+
+pub struct Text {}
+
+impl Text {
+    pub fn new() -> Self {
+        todo!()
+    }
+}
+
+impl From<Text> for SceneNode {
+    fn from(text: Text) -> Self {
+        Self::Text(text)
+    }
+}
+
+impl TryFrom<SceneNode> for Text {
+    type Error = ();
+
+    fn try_from(node: SceneNode) -> Result<Self, Self::Error> {
+        match node {
+            SceneNode::Text(text) => Ok(text),
+            _ => Err(()),
+        }
+    }
+}
+
+pub struct Panel {}
+
+impl Panel {
+    pub fn new() -> Self {
+        todo!()
+    }
+}
+
+impl From<Panel> for SceneNode {
+    fn from(panel: Panel) -> Self {
+        Self::Panel(panel)
+    }
+}
+
+impl TryFrom<SceneNode> for Panel {
+    type Error = ();
+
+    fn try_from(node: SceneNode) -> Result<Self, Self::Error> {
+        match node {
+            SceneNode::Panel(panel) => Ok(panel),
+            _ => Err(()),
+        }
     }
 }

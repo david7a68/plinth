@@ -3,8 +3,8 @@ use std::time::Instant;
 use clap::{command, Parser, ValueEnum};
 
 use plinth::{
-    new_window, AnimationFrequency, Application, Canvas, Color, GraphicsConfig, Pixel,
-    PixelsPerSecond, PowerPreference, Rect2D, SceneNode, Size2D, Srgb, Translate2D, Window,
+    new_window, scene::Scene, AnimationFrequency, Application, Canvas, Color, GraphicsConfig,
+    Pixel, PixelsPerSecond, PowerPreference, Rect2D, Size2D, Srgb, Translate2D, Window,
     WindowEvent, WindowEventHandler, WindowSpec,
 };
 
@@ -23,7 +23,10 @@ struct DemoWindow {
 
 impl DemoWindow {
     fn new(mut window: Window, throttle_animation: bool) -> Self {
-        window.set_scene(SceneNode::Canvas(Canvas::new())).unwrap();
+        let mut scene = Scene::new();
+        scene.set_root(Canvas::new());
+
+        window.set_scene(scene).unwrap();
 
         let window_center = Rect2D::from(window.size().unwrap().logical).center();
 
@@ -93,9 +96,7 @@ impl WindowEventHandler for DemoWindow {
                 }
 
                 let scene = self.window.scene_mut().unwrap();
-                let SceneNode::Canvas(canvas) = scene else {
-                    panic!()
-                };
+                let canvas = scene.get_mut::<Canvas>(scene.root_id().unwrap()).unwrap();
 
                 // Request a drawing context for the self.window, constrained to the
                 // dirty rectangle provided.

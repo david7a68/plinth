@@ -5,8 +5,8 @@ use clap::{command, Parser, ValueEnum};
 use plinth::{
     color::{Color, Srgb},
     math::{Pixels, PixelsPerSecond, Rect, Size, Vec2},
-    scene::VisualTree,
-    AnimationFrequency, Application, Canvas, GraphicsConfig, PowerPreference, Window, WindowEvent,
+    visuals::{Canvas, VisualTree},
+    AnimationFrequency, Application, GraphicsConfig, PowerPreference, Window, WindowEvent,
     WindowEventHandler, WindowSpec,
 };
 

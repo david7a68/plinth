@@ -1,27 +1,14 @@
 use crate::{
     math::{Pixels, Point, Rect},
-    Canvas, Image, Panel, Text,
+    visuals::{FromVisual, Image, Visual},
 };
+
+use super::{Canvas, Panel, Text};
 
 #[derive(Clone, Copy)]
 pub struct VisualId {
     index: u32,
     generation: u32,
-}
-
-pub enum Visual {
-    Canvas(Canvas),
-    Image(Image),
-    Text(Text),
-    Panel(Panel),
-}
-
-pub trait FromVisual: Sized {
-    fn from_node(node: Visual) -> Option<Self>;
-
-    fn from_ref(node: &Visual) -> Option<&Self>;
-
-    fn from_mut(node: &mut Visual) -> Option<&mut Self>;
 }
 
 pub trait SceneVisitor {

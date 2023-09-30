@@ -1,8 +1,8 @@
 use plinth::{
     math::Rect,
-    scene::{FromVisual, VisualTree},
-    Application, GraphicsConfig, Image, Panel, PowerPreference, Window, WindowEvent,
-    WindowEventHandler, WindowSpec,
+    visuals::{FromVisual, Image, Panel, VisualTree},
+    Application, GraphicsConfig, PowerPreference, Window, WindowEvent, WindowEventHandler,
+    WindowSpec,
 };
 
 const SCROLL_SCALE_FACTOR: f64 = 1.1;

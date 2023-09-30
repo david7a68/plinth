@@ -5,8 +5,7 @@ use clap::{command, Parser, ValueEnum};
 use plinth::{
     color::{Color, Srgb},
     math::{Pixels, PixelsPerSecond, Rect, Size, Vec2},
-    new_window,
-    scene::Scene,
+    scene::VisualTree,
     AnimationFrequency, Application, Canvas, GraphicsConfig, PowerPreference, Window, WindowEvent,
     WindowEventHandler, WindowSpec,
 };
@@ -26,12 +25,12 @@ struct DemoWindow {
 
 impl DemoWindow {
     fn new(mut window: Window, throttle_animation: bool) -> Self {
-        let mut scene = Scene::new();
+        let mut scene = VisualTree::new();
         scene.set_root(Canvas::new());
 
         window.set_scene(scene).unwrap();
 
-        let window_center = Rect::from(window.size().unwrap().logical).center();
+        let window_center = Rect::from(window.size().unwrap()).center();
 
         let mut rects = Vec::new();
         for _ in 0..100 {
@@ -84,17 +83,18 @@ impl WindowEventHandler for DemoWindow {
             }
             WindowEvent::Repaint(timings) => {
                 let delta = timings.next_frame - self.last_present_time;
-                let window_rect = Rect::from(self.window.size().unwrap().logical);
+                let window_rect = Rect::from(self.window.size().unwrap());
 
                 for rect in &mut self.rects {
                     rect.rect += rect.velocity * delta;
 
-                    if window_rect.intersection(&rect.rect).is_none() {
+                    if let Some(intersection) = window_rect.intersection(&rect.rect) {
                         // reverse rect direction
                         rect.velocity = -rect.velocity;
 
                         // snap it into the self.window
-                        // rect.rect.move_into(&window_rect);
+                        rect.rect.x -= intersection.width;
+                        rect.rect.y -= intersection.height;
                     }
                 }
 
@@ -152,13 +152,18 @@ fn make_demo_window(throttle: bool) -> impl Fn(Window) -> DemoWindow {
 }
 
 fn run_one(app: &mut Application, throttle: bool) {
-    let _window = new_window(WindowSpec::default(), make_demo_window(throttle));
+    app.create_window(&WindowSpec::default(), make_demo_window(throttle))
+        .unwrap();
     app.run();
 }
 
 fn run_many(app: &mut Application, throttle: bool) {
-    let _a = new_window(WindowSpec::default(), make_demo_window(throttle));
-    let _b = new_window(WindowSpec::default(), make_demo_window(throttle));
-    let _c = new_window(WindowSpec::default(), make_demo_window(throttle));
+    let spec = WindowSpec::default();
+    app.create_window(&spec, make_demo_window(throttle))
+        .unwrap();
+    app.create_window(&spec, make_demo_window(throttle))
+        .unwrap();
+    app.create_window(&spec, make_demo_window(throttle))
+        .unwrap();
     app.run();
 }

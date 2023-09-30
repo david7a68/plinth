@@ -1,15 +1,14 @@
 #![allow(dead_code, unused_variables)]
 
 pub mod color;
-#[macro_use]
 pub mod math;
 pub mod scene;
 
 use std::{path::Path, time::Instant};
 
 use color::{Color, Srgb};
-use math::{Pixels, Rect, Scale, Size};
-use scene::{Scene, SceneNode};
+use math::{Pixels, Point, Rect, Scale, Size, Vec2};
+use scene::{FromVisual, Visual, VisualTree};
 
 pub struct DevicePixels {}
 
@@ -17,13 +16,6 @@ pub enum Axis {
     X,
     Y,
     XY,
-}
-
-#[derive(Clone, Copy)]
-pub struct WindowSize {
-    pub physical: Size<DevicePixels>,
-    pub logical: Size<Pixels>,
-    pub scale_factor: Scale<DevicePixels, Pixels>,
 }
 
 pub struct WindowSpec {
@@ -62,6 +54,10 @@ pub struct Window {
 }
 
 impl Window {
+    pub fn app(&self) -> &Application {
+        todo!()
+    }
+
     pub fn close(&mut self) -> Result<(), WindowError> {
         todo!()
     }
@@ -78,24 +74,27 @@ impl Window {
         todo!()
     }
 
-    pub fn size(&self) -> Result<WindowSize, WindowError> {
+    pub fn size(&self) -> Result<Size<Pixels>, WindowError> {
         todo!()
     }
 
-    pub fn scene(&self) -> Result<&Scene, WindowError> {
+    pub fn scale(&self) -> Result<Scale<DevicePixels, Pixels>, WindowError> {
         todo!()
     }
 
-    pub fn set_scene(&mut self, scene: Scene) -> Result<(), WindowError> {
+    pub fn pointer_location(&self) -> Result<Point<Pixels>, WindowError> {
         todo!()
     }
 
-    pub fn scene_mut<'a>(&'a mut self) -> Result<&'a mut Scene, WindowError> {
+    pub fn scene(&self) -> Result<&VisualTree, WindowError> {
         todo!()
     }
 
-    /// Synchronizes the scene graph with the window's rendered appearance.
-    pub fn sync_scene(&mut self) -> Result<(), WindowError> {
+    pub fn set_scene(&mut self, scene: VisualTree) -> Result<(), WindowError> {
+        todo!()
+    }
+
+    pub fn scene_mut<'a>(&'a mut self) -> Result<&'a mut VisualTree, WindowError> {
         todo!()
     }
 }
@@ -105,22 +104,15 @@ pub trait WindowEventHandler {
 }
 
 pub enum WindowEvent {
-    Create(Window),
     CloseRequest,
     Destroy,
     Visible(bool),
     BeginResize(Axis),
-    Resize(WindowSize),
+    Resize(Size<Pixels>, Scale<Pixels, DevicePixels>),
     EndResize,
     Repaint(PresentTiming),
+    PointerMove(Point<Pixels>, Vec2<Pixels>),
     Scroll(Axis, f32),
-}
-
-pub fn new_window<W: WindowEventHandler + 'static, F: FnMut(Window) -> W + 'static>(
-    spec: WindowSpec,
-    handler: F,
-) -> Window {
-    todo!()
 }
 
 pub struct PresentTiming {
@@ -153,11 +145,30 @@ impl Application {
         todo!()
     }
 
+    pub fn create_window<W, F>(
+        &mut self,
+        spec: &WindowSpec,
+        constructor: F,
+    ) -> Result<(), WindowError>
+    where
+        W: WindowEventHandler + 'static,
+        F: FnMut(Window) -> W + 'static,
+    {
+        todo!()
+    }
+
     /// Runs the event loop until all open windows are closed.
     pub fn run(&mut self) {
         todo!()
     }
 }
+
+impl Clone for Application {
+    fn clone(&self) -> Self {
+        todo!()
+    }
+}
+
 pub struct Canvas {}
 
 impl Canvas {
@@ -174,20 +185,40 @@ impl Canvas {
     }
 }
 
-impl From<Canvas> for SceneNode {
+impl From<Canvas> for Visual {
     fn from(canvas: Canvas) -> Self {
         Self::Canvas(canvas)
     }
 }
 
-impl TryFrom<SceneNode> for Canvas {
-    type Error = ();
-
-    fn try_from(node: SceneNode) -> Result<Self, Self::Error> {
+impl FromVisual for Canvas {
+    fn from_node(node: Visual) -> Option<Self> {
         match node {
-            SceneNode::Canvas(canvas) => Ok(canvas),
-            _ => Err(()),
+            Visual::Canvas(canvas) => Some(canvas),
+            _ => None,
         }
+    }
+
+    fn from_ref(node: &Visual) -> Option<&Self> {
+        match node {
+            Visual::Canvas(canvas) => Some(canvas),
+            _ => None,
+        }
+    }
+
+    fn from_mut(node: &mut Visual) -> Option<&mut Self> {
+        match node {
+            Visual::Canvas(canvas) => Some(canvas),
+            _ => None,
+        }
+    }
+}
+
+pub struct ImageView {}
+
+impl From<ImageView> for Pixels {
+    fn from(image_view: ImageView) -> Self {
+        Pixels {}
     }
 }
 
@@ -197,21 +228,37 @@ impl Image {
     pub fn from_path(path: impl AsRef<Path>) -> Result<Self, ()> {
         todo!()
     }
+
+    pub fn size(&self) -> Size<Pixels> {
+        todo!()
+    }
 }
 
-impl From<Image> for SceneNode {
+impl From<Image> for Visual {
     fn from(image: Image) -> Self {
         Self::Image(image)
     }
 }
 
-impl TryFrom<SceneNode> for Image {
-    type Error = ();
-
-    fn try_from(node: SceneNode) -> Result<Self, Self::Error> {
+impl FromVisual for Image {
+    fn from_node(node: Visual) -> Option<Self> {
         match node {
-            SceneNode::Image(image) => Ok(image),
-            _ => Err(()),
+            Visual::Image(image) => Some(image),
+            _ => None,
+        }
+    }
+
+    fn from_ref(node: &Visual) -> Option<&Self> {
+        match node {
+            Visual::Image(image) => Some(image),
+            _ => None,
+        }
+    }
+
+    fn from_mut(node: &mut Visual) -> Option<&mut Self> {
+        match node {
+            Visual::Image(image) => Some(image),
+            _ => None,
         }
     }
 }
@@ -224,19 +271,31 @@ impl Text {
     }
 }
 
-impl From<Text> for SceneNode {
+impl From<Text> for Visual {
     fn from(text: Text) -> Self {
         Self::Text(text)
     }
 }
 
-impl TryFrom<SceneNode> for Text {
-    type Error = ();
-
-    fn try_from(node: SceneNode) -> Result<Self, Self::Error> {
+impl FromVisual for Text {
+    fn from_node(node: Visual) -> Option<Self> {
         match node {
-            SceneNode::Text(text) => Ok(text),
-            _ => Err(()),
+            Visual::Text(text) => Some(text),
+            _ => None,
+        }
+    }
+
+    fn from_ref(node: &Visual) -> Option<&Self> {
+        match node {
+            Visual::Text(text) => Some(text),
+            _ => None,
+        }
+    }
+
+    fn from_mut(node: &mut Visual) -> Option<&mut Self> {
+        match node {
+            Visual::Text(text) => Some(text),
+            _ => None,
         }
     }
 }
@@ -249,19 +308,31 @@ impl Panel {
     }
 }
 
-impl From<Panel> for SceneNode {
+impl From<Panel> for Visual {
     fn from(panel: Panel) -> Self {
         Self::Panel(panel)
     }
 }
 
-impl TryFrom<SceneNode> for Panel {
-    type Error = ();
-
-    fn try_from(node: SceneNode) -> Result<Self, Self::Error> {
+impl FromVisual for Panel {
+    fn from_node(node: Visual) -> Option<Self> {
         match node {
-            SceneNode::Panel(panel) => Ok(panel),
-            _ => Err(()),
+            Visual::Panel(panel) => Some(panel),
+            _ => None,
+        }
+    }
+
+    fn from_ref(node: &Visual) -> Option<&Self> {
+        match node {
+            Visual::Panel(panel) => Some(panel),
+            _ => None,
+        }
+    }
+
+    fn from_mut(node: &mut Visual) -> Option<&mut Self> {
+        match node {
+            Visual::Panel(panel) => Some(panel),
+            _ => None,
         }
     }
 }

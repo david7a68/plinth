@@ -1,4 +1,4 @@
-use super::Vec2;
+use super::{Scale, Size, Vec2};
 
 pub struct Translate<Src, Dst> {
     pub x: f64,
@@ -51,6 +51,22 @@ impl<Src, Dst> std::ops::SubAssign for Translate<Src, Dst> {
     fn sub_assign(&mut self, rhs: Self) {
         self.x -= rhs.x;
         self.y -= rhs.y;
+    }
+}
+
+impl<Src, Dst, Dst2> std::ops::Mul<Scale<Dst, Dst2>> for Translate<Src, Dst> {
+    type Output = Translate<Src, Dst2>;
+
+    fn mul(self, rhs: Scale<Dst, Dst2>) -> Self::Output {
+        Translate::new(self.x * rhs.x, self.y * rhs.y)
+    }
+}
+
+impl<Src, Dst> std::ops::Div<Size<Dst>> for Translate<Src, Dst> {
+    type Output = Scale<Src, Dst>;
+
+    fn div(self, rhs: Size<Dst>) -> Self::Output {
+        Scale::new(self.x / rhs.width, self.y / rhs.height)
     }
 }
 

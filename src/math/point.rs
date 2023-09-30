@@ -31,8 +31,8 @@ impl<U> std::ops::AddAssign<Translate<U, U>> for Point<U> {
     }
 }
 
-impl<U, U2> std::ops::Sub<Translate<U, U2>> for Point<U> {
-    type Output = Point<U2>;
+impl<U, U2> std::ops::Sub<Translate<U, U2>> for Point<U2> {
+    type Output = Point<U>;
 
     fn sub(self, rhs: Translate<U, U2>) -> Self::Output {
         Point::new(self.x - rhs.x, self.y - rhs.y)
@@ -46,10 +46,10 @@ impl<U> std::ops::SubAssign<Translate<U, U>> for Point<U> {
     }
 }
 
-impl<U> std::ops::Sub for Point<U> {
-    type Output = Translate<U, U>;
+impl<U, U2> std::ops::Sub<Point<U2>> for Point<U> {
+    type Output = Translate<U, U2>;
 
-    fn sub(self, rhs: Self) -> Self::Output {
+    fn sub(self, rhs: Point<U2>) -> Self::Output {
         Translate::new(self.x - rhs.x, self.y - rhs.y)
     }
 }

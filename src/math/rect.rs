@@ -93,6 +93,10 @@ impl<U> Rect<U> {
     pub fn bottom_right(&self) -> Point<U> {
         Point::new(self.x + self.width, self.y + self.height)
     }
+
+    pub fn size(&self) -> Size<U> {
+        Size::new(self.width, self.height)
+    }
 }
 
 impl<U, U2> std::ops::Add<Translate<U, U2>> for Rect<U> {

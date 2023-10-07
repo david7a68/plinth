@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use super::Vec2;
 
 pub struct Scale<Src, Dst> {
@@ -17,6 +19,36 @@ impl<Src, Dst> Scale<Src, Dst> {
 
     pub fn inverse(self) -> Scale<Dst, Src> {
         Scale::new(1.0 / self.x, 1.0 / self.y)
+    }
+}
+
+impl<Src, Dst> std::ops::Mul<f64> for Scale<Src, Dst> {
+    type Output = Self;
+
+    fn mul(self, rhs: f64) -> Self::Output {
+        Self::new(self.x * rhs, self.y * rhs)
+    }
+}
+
+impl<Src, Dst> std::ops::MulAssign<f64> for Scale<Src, Dst> {
+    fn mul_assign(&mut self, rhs: f64) {
+        self.x *= rhs;
+        self.y *= rhs;
+    }
+}
+
+impl<Src, Dst> std::ops::Div<f64> for Scale<Src, Dst> {
+    type Output = Self;
+
+    fn div(self, rhs: f64) -> Self::Output {
+        Self::new(self.x / rhs, self.y / rhs)
+    }
+}
+
+impl<Src, Dst> std::ops::DivAssign<f64> for Scale<Src, Dst> {
+    fn div_assign(&mut self, rhs: f64) {
+        self.x /= rhs;
+        self.y /= rhs;
     }
 }
 
@@ -47,6 +79,22 @@ impl<U> std::ops::DivAssign<Scale<U, U>> for Scale<U, U> {
     fn div_assign(&mut self, rhs: Scale<U, U>) {
         self.x /= rhs.x;
         self.y /= rhs.y;
+    }
+}
+
+impl<Src, Cst> std::ops::Mul<Duration> for Scale<Src, Cst> {
+    type Output = Scale<Src, Cst>;
+
+    fn mul(self, rhs: Duration) -> Self::Output {
+        Self::new(self.x * rhs.as_secs_f64(), self.y * rhs.as_secs_f64())
+    }
+}
+
+impl<Src, Dst> std::ops::Div<Duration> for Scale<Src, Dst> {
+    type Output = Scale<Src, Dst>;
+
+    fn div(self, rhs: Duration) -> Self::Output {
+        Self::new(self.x / rhs.as_secs_f64(), self.y / rhs.as_secs_f64())
     }
 }
 

@@ -1,9 +1,11 @@
 use std::path::Path;
 
 use crate::{
-    math::{Pixels, Size},
+    math::{Rect, Size},
     visuals::{FromVisual, Visual},
 };
+
+use super::Pixel;
 
 pub struct Image {}
 
@@ -12,7 +14,15 @@ impl Image {
         todo!()
     }
 
-    pub fn size(&self) -> Size<Pixels> {
+    pub fn size(&self) -> Size<Pixel> {
+        todo!()
+    }
+
+    pub fn rect(&self) -> Rect<Pixel> {
+        todo!()
+    }
+
+    pub fn set_rect(&mut self, rect: Rect<Pixel>) {
         todo!()
     }
 }

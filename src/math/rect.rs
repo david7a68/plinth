@@ -45,6 +45,14 @@ impl<U> Rect<U> {
         )
     }
 
+    /// Reinterprets the `Rect` as its own coordinate space.
+    pub fn reinterpret_coordinate_space<U2>(&self) -> (Rect<U2>, Translate<U, U2>) {
+        (
+            Rect::new(0.0, 0.0, self.width, self.height),
+            Translate::new(self.x, self.y),
+        )
+    }
+
     pub fn center(&self) -> Point<U> {
         Point::new(self.x + self.width / 2.0, self.y + self.height / 2.0)
     }

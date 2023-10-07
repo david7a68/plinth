@@ -4,16 +4,16 @@ use clap::{command, Parser, ValueEnum};
 
 use plinth::{
     color::{Color, Srgb},
-    math::{Pixels, PixelsPerSecond, Rect, Size, Vec2},
+    math::{Rect, Size, Translate},
     visuals::{Canvas, VisualTree},
     AnimationFrequency, Application, GraphicsConfig, PowerPreference, Window, WindowEvent,
     WindowEventHandler, WindowSpec,
 };
 
 struct DemoRect {
-    rect: Rect<Pixels>,
+    rect: Rect<Canvas>,
     color: Color<Srgb>,
-    velocity: Vec2<PixelsPerSecond>,
+    velocity: Translate<Canvas, Canvas>,
 }
 
 struct DemoWindow {
@@ -26,11 +26,11 @@ struct DemoWindow {
 impl DemoWindow {
     fn new(mut window: Window, throttle_animation: bool) -> Self {
         let mut scene = VisualTree::new();
-        scene.set_root(Canvas::new());
+        let (canvas_id, _) = scene.set_root(Canvas::new(window.size() * window.scale()));
 
-        window.set_scene(scene).unwrap();
-
-        let window_center = Rect::from(window.size().unwrap()).center();
+        window.set_scene(scene);
+        let canvas = window.scene().get::<Canvas>(canvas_id).unwrap();
+        let center = canvas.drawable_area().center();
 
         let mut rects = Vec::new();
         for _ in 0..100 {
@@ -38,9 +38,9 @@ impl DemoWindow {
             let (x, y) = angle.sin_cos();
 
             rects.push(DemoRect {
-                rect: Rect::from_center(window_center, Size::new(100.0, 100.0)),
+                rect: Rect::from_center(center, Size::new(100.0, 100.0)),
                 color: Color::BLACK,
-                velocity: Vec2::new(x, y) * 2.0,
+                velocity: Translate::new(x, y) * 2.0,
             });
         }
 
@@ -70,25 +70,27 @@ impl WindowEventHandler for DemoWindow {
                         // No throttling, default to display refresh rate. This
                         // is a polite fiction, since the display refresh rate
                         // may change at any time.
-                        Some(self.window.default_animation_frequency().unwrap())
+                        Some(self.window.default_animation_frequency())
 
                         // alternatively
                         // Some(self.window.max_animation_frequency())
                     };
 
-                    self.window.begin_animation(freq).unwrap();
+                    self.window.begin_animation(freq);
                 } else {
-                    self.window.end_animation().unwrap();
+                    self.window.end_animation();
                 }
             }
             WindowEvent::Repaint(timings) => {
                 let delta = timings.next_frame - self.last_present_time;
-                let window_rect = Rect::from(self.window.size().unwrap());
+
+                let canvas = self.window.scene_mut().root_mut::<Canvas>().unwrap();
+                let canvas_rect = canvas.drawable_area();
 
                 for rect in &mut self.rects {
                     rect.rect += rect.velocity * delta;
 
-                    if let Some(intersection) = window_rect.intersection(&rect.rect) {
+                    if let Some(intersection) = canvas_rect.intersection(&rect.rect) {
                         // reverse rect direction
                         rect.velocity = -rect.velocity;
 
@@ -98,15 +100,12 @@ impl WindowEventHandler for DemoWindow {
                     }
                 }
 
-                let scene = self.window.scene_mut().unwrap();
-                let canvas = scene.get_mut::<Canvas>(scene.root_id().unwrap()).unwrap();
-
                 // Request a drawing context for the self.window, constrained to the
                 // dirty rectangle provided.
                 canvas.clear(Color::BLACK);
 
                 for rect in &self.rects {
-                    canvas.fill(rect.rect, rect.color);
+                    canvas.draw_rect(rect.rect, rect.color);
                 }
 
                 // canvas repaint
@@ -152,18 +151,20 @@ fn make_demo_window(throttle: bool) -> impl Fn(Window) -> DemoWindow {
 }
 
 fn run_one(app: &mut Application, throttle: bool) {
-    app.create_window(&WindowSpec::default(), make_demo_window(throttle))
-        .unwrap();
+    app.spawn_window(
+        &WindowSpec {
+            resizable: false,
+            ..Default::default()
+        },
+        make_demo_window(throttle),
+    );
     app.run();
 }
 
 fn run_many(app: &mut Application, throttle: bool) {
     let spec = WindowSpec::default();
-    app.create_window(&spec, make_demo_window(throttle))
-        .unwrap();
-    app.create_window(&spec, make_demo_window(throttle))
-        .unwrap();
-    app.create_window(&spec, make_demo_window(throttle))
-        .unwrap();
+    app.spawn_window(&spec, make_demo_window(throttle));
+    app.spawn_window(&spec, make_demo_window(throttle));
+    app.spawn_window(&spec, make_demo_window(throttle));
     app.run();
 }

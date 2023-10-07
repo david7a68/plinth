@@ -16,6 +16,36 @@ impl<U> Size<U> {
     }
 }
 
+impl<U> std::ops::Mul<f64> for Size<U> {
+    type Output = Self;
+
+    fn mul(self, rhs: f64) -> Self::Output {
+        Self::new(self.width * rhs, self.height * rhs)
+    }
+}
+
+impl<U> std::ops::MulAssign<f64> for Size<U> {
+    fn mul_assign(&mut self, rhs: f64) {
+        self.width *= rhs;
+        self.height *= rhs;
+    }
+}
+
+impl<U> std::ops::Div<f64> for Size<U> {
+    type Output = Self;
+
+    fn div(self, rhs: f64) -> Self::Output {
+        Self::new(self.width / rhs, self.height / rhs)
+    }
+}
+
+impl<U> std::ops::DivAssign<f64> for Size<U> {
+    fn div_assign(&mut self, rhs: f64) {
+        self.width /= rhs;
+        self.height /= rhs;
+    }
+}
+
 impl<U, U2> std::ops::Mul<Scale<U, U2>> for Size<U> {
     type Output = Size<U2>;
 

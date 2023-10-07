@@ -1,20 +1,16 @@
 mod canvas;
 mod image;
-mod panel;
-mod text;
+mod pixel;
 mod tree;
 
 pub use canvas::Canvas;
 pub use image::Image;
-pub use panel::Panel;
-pub use text::Text;
+pub use pixel::Pixel;
 pub use tree::{VisualId, VisualTree};
 
 pub enum Visual {
     Canvas(Canvas),
     Image(Image),
-    Text(Text),
-    Panel(Panel),
 }
 
 pub trait FromVisual: Sized {

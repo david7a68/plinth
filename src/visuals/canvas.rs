@@ -1,22 +1,39 @@
 use crate::{
     color::{Color, Srgb},
-    math::{Pixels, Rect},
+    math::{Rect, Size},
 };
 
-use super::{FromVisual, Visual};
+use super::{FromVisual, Pixel, Visual};
 
+/// A drawable area.
 pub struct Canvas {}
 
 impl Canvas {
-    pub fn new() -> Self {
+    pub fn new(rect: impl Into<Rect<Pixel>>) -> Self {
         todo!()
+    }
+
+    pub fn size(&self) -> Size<Pixel> {
+        todo!()
+    }
+
+    pub fn rect(&self) -> Rect<Pixel> {
+        todo!()
+    }
+
+    pub fn set_rect(&mut self, rect: impl Into<Rect<Pixel>>) {
+        todo!()
+    }
+
+    pub fn drawable_area(&self) -> Rect<Canvas> {
+        self.rect().reinterpret_coordinate_space().0
     }
 
     pub fn clear(&mut self, color: Color<Srgb>) {
         todo!()
     }
 
-    pub fn fill(&mut self, rect: Rect<Pixels>, color: Color<Srgb>) {
+    pub fn draw_rect(&mut self, rect: impl Into<Rect<Canvas>>, color: Color<Srgb>) {
         todo!()
     }
 }

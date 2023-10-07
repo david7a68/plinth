@@ -1,9 +1,9 @@
 use crate::{
-    math::{Pixels, Point, Rect},
+    math::Point,
     visuals::{FromVisual, Image, Visual},
 };
 
-use super::{Canvas, Panel, Text};
+use super::{Canvas, Pixel};
 
 #[derive(Clone, Copy)]
 pub struct VisualId {
@@ -14,17 +14,25 @@ pub struct VisualId {
 pub trait SceneVisitor {
     fn visit_canvas(&mut self, canvas: &Canvas);
     fn visit_image(&mut self, image: &Image);
-    fn visit_text(&mut self, text: &Text);
-    fn visit_panel(&mut self, panel: &Panel);
 }
 
 pub trait SceneVisitorMut {
     fn visit_canvas_mut(&mut self, canvas: &mut Canvas);
     fn visit_image_mut(&mut self, image: &mut Image);
-    fn visit_text_mut(&mut self, text: &mut Text);
-    fn visit_panel_mut(&mut self, panel: &mut Panel);
 }
 
+/// A tree of visual objects.
+///
+/// The visual tree separates a window into several parts which may be updated
+/// at different frequencies in order to improve performance. For example, a
+/// video player may update the playing video more frequently than the UI. This
+/// is especially important for conserving power and bandwidth, such as when
+/// running on underpowered hardware or over a remove desktop session.
+///
+/// The visual tree defines a plane on which all objects are placed. However, it
+/// does not constrain them to the viewable area (i.e. within the window). It is
+/// up to you to make sure to update the sizes and positions of objects as
+/// necessary when the window is resized.
 pub struct VisualTree {}
 
 impl VisualTree {
@@ -32,23 +40,15 @@ impl VisualTree {
         todo!()
     }
 
-    pub fn root(&self) -> Option<&Visual> {
+    pub fn root<T: FromVisual>(&self) -> Option<&T> {
         todo!()
     }
 
-    pub fn root_mut(&mut self) -> Option<&mut Visual> {
+    pub fn root_mut<T: FromVisual>(&mut self) -> Option<&mut T> {
         todo!()
     }
 
     pub fn root_id(&self) -> Option<VisualId> {
-        todo!()
-    }
-
-    pub fn view_rect(&self, node: VisualId) -> Option<Rect<Pixels>> {
-        todo!()
-    }
-
-    pub fn set_view_rect(&mut self, node: VisualId, rect: Rect<Pixels>) {
         todo!()
     }
 
@@ -84,11 +84,11 @@ impl VisualTree {
         todo!()
     }
 
-    pub fn hit_test(&self, point: Point<Pixels>) -> Option<(VisualId, &Visual)> {
+    pub fn hit_test(&self, point: Point<Pixel>) -> Option<(VisualId, &Visual)> {
         todo!()
     }
 
-    pub fn hit_test_mut(&mut self, point: Point<Pixels>) -> Option<(VisualId, &mut Visual)> {
+    pub fn hit_test_mut(&mut self, point: Point<Pixel>) -> Option<(VisualId, &mut Visual)> {
         todo!()
     }
 

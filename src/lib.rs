@@ -1,4 +1,4 @@
-#![allow(dead_code, unused_variables)]
+#![allow(unused_variables)]
 
 pub mod color;
 pub mod math;
@@ -6,10 +6,8 @@ pub mod visuals;
 
 use std::time::Instant;
 
-use math::{Pixels, Point, Scale, Size, Vec2};
-use visuals::VisualTree;
-
-pub struct DevicePixels {}
+use math::{Point, Scale, Size, Vec2};
+use visuals::{Pixel, VisualTree};
 
 pub enum Axis {
     X,
@@ -19,9 +17,9 @@ pub enum Axis {
 
 pub struct WindowSpec {
     pub title: String,
-    pub size: Size<Pixels>,
-    pub min_size: Option<Size<Pixels>>,
-    pub max_size: Option<Size<Pixels>>,
+    pub size: Size<Window>,
+    pub min_size: Option<Size<Window>>,
+    pub max_size: Option<Size<Window>>,
     pub resizable: bool,
     pub visible: bool,
     pub animation_frequency: Option<AnimationFrequency>,
@@ -41,11 +39,6 @@ impl Default for WindowSpec {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum WindowError {
-    AlreadyClosed,
-}
-
 pub struct Window {
     // todo
     #[allow(dead_code)]
@@ -57,43 +50,43 @@ impl Window {
         todo!()
     }
 
-    pub fn close(&mut self) -> Result<(), WindowError> {
+    pub fn close(&mut self) {
         todo!()
     }
 
-    pub fn begin_animation(&mut self, freq: Option<AnimationFrequency>) -> Result<(), WindowError> {
+    pub fn begin_animation(&mut self, freq: Option<AnimationFrequency>) {
         todo!()
     }
 
-    pub fn end_animation(&mut self) -> Result<(), WindowError> {
+    pub fn end_animation(&mut self) {
         todo!()
     }
 
-    pub fn default_animation_frequency(&self) -> Result<AnimationFrequency, WindowError> {
+    pub fn default_animation_frequency(&self) -> AnimationFrequency {
         todo!()
     }
 
-    pub fn size(&self) -> Result<Size<Pixels>, WindowError> {
+    pub fn size(&self) -> Size<Window> {
         todo!()
     }
 
-    pub fn scale(&self) -> Result<Scale<DevicePixels, Pixels>, WindowError> {
+    pub fn scale(&self) -> Scale<Window, Pixel> {
         todo!()
     }
 
-    pub fn pointer_location(&self) -> Result<Point<Pixels>, WindowError> {
+    pub fn pointer_location(&self) -> Point<Window> {
         todo!()
     }
 
-    pub fn scene(&self) -> Result<&VisualTree, WindowError> {
+    pub fn scene(&self) -> &VisualTree {
         todo!()
     }
 
-    pub fn set_scene(&mut self, scene: VisualTree) -> Result<(), WindowError> {
+    pub fn set_scene(&mut self, scene: VisualTree) {
         todo!()
     }
 
-    pub fn scene_mut<'a>(&'a mut self) -> Result<&'a mut VisualTree, WindowError> {
+    pub fn scene_mut<'a>(&'a mut self) -> &'a mut VisualTree {
         todo!()
     }
 }
@@ -107,10 +100,10 @@ pub enum WindowEvent {
     Destroy,
     Visible(bool),
     BeginResize(Axis),
-    Resize(Size<Pixels>, Scale<Pixels, DevicePixels>),
+    Resize(Size<Window>, Scale<Window, Pixel>),
     EndResize,
     Repaint(PresentTiming),
-    PointerMove(Point<Pixels>, Vec2<Pixels>),
+    PointerMove(Point<Window>, Vec2<Window>),
     Scroll(Axis, f32),
 }
 
@@ -144,11 +137,7 @@ impl Application {
         todo!()
     }
 
-    pub fn create_window<W, F>(
-        &mut self,
-        spec: &WindowSpec,
-        constructor: F,
-    ) -> Result<(), WindowError>
+    pub fn spawn_window<W, F>(&mut self, spec: &WindowSpec, constructor: F)
     where
         W: WindowEventHandler + 'static,
         F: FnMut(Window) -> W + 'static,

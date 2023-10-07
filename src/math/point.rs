@@ -69,6 +69,21 @@ impl<U> std::ops::MulAssign<Scale<U, U>> for Point<U> {
     }
 }
 
+impl<U, U2> std::ops::Div<Scale<U, U2>> for Point<U2> {
+    type Output = Point<U>;
+
+    fn div(self, rhs: Scale<U, U2>) -> Self::Output {
+        Point::new(self.x / rhs.x, self.y / rhs.y)
+    }
+}
+
+impl<U> std::ops::DivAssign<Scale<U, U>> for Point<U> {
+    fn div_assign(&mut self, rhs: Scale<U, U>) {
+        self.x /= rhs.x;
+        self.y /= rhs.y;
+    }
+}
+
 impl<U> Clone for Point<U> {
     fn clone(&self) -> Self {
         *self
@@ -105,8 +120,58 @@ impl<U> From<Vec2<U>> for Point<U> {
     }
 }
 
-impl PartialEq for Point<()> {
+impl<U> PartialEq for Point<U> {
     fn eq(&self, rhs: &Self) -> bool {
         self.x == rhs.x && self.y == rhs.y
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new() {
+        let point = Point::<()>::new(1.0, 2.0);
+        assert_eq!(point.x, 1.0);
+        assert_eq!(point.y, 2.0);
+    }
+
+    #[test]
+    fn diff() {
+        let a = Point::<()>::new(1.0, 2.0);
+        let b = Point::<()>::new(3.0, 4.0);
+
+        assert_eq!(b - a, Translate::<(), ()>::new(2.0, 2.0));
+    }
+
+    #[test]
+    fn transforms() {
+        struct A;
+        struct B;
+
+        let point = Point::<A>::new(1.0, 2.0);
+
+        let translate = Translate::<A, B>::new(3.0, 4.0);
+        assert_eq!(point + translate, Point::<B>::new(4.0, 6.0));
+        assert_eq!(point + -translate, Point::<B>::new(-2.0, -2.0));
+        assert_eq!(point + translate - translate, point);
+
+        let scale = Scale::<A, B>::new(5.0, 6.0);
+        assert_eq!(point * scale, Point::<B>::new(5.0, 12.0));
+        assert_eq!(point * scale / scale, point);
+
+        let mut point = point;
+        point += Translate::new(7.0, 8.0);
+        assert_eq!(point, Point::<A>::new(8.0, 10.0));
+
+        point -= Translate::new(7.0, 8.0);
+        assert_eq!(point, Point::<A>::new(1.0, 2.0));
+
+        point *= Scale::new(9.0, 10.0);
+        assert_eq!(point, Point::<A>::new(9.0, 20.0));
+
+        point /= Scale::new(9.0, 10.0);
+        assert_eq!(point, Point::<A>::new(1.0, 2.0));
     }
 }

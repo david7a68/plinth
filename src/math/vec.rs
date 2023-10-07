@@ -84,6 +84,14 @@ impl<U> std::ops::AddAssign<Translate<U, U>> for Vec2<U> {
     }
 }
 
+impl<U, U2> std::ops::Sub<Translate<U, U2>> for Vec2<U2> {
+    type Output = Vec2<U>;
+
+    fn sub(self, rhs: Translate<U, U2>) -> Self::Output {
+        Vec2::new(self.x - rhs.x, self.y - rhs.y)
+    }
+}
+
 impl<U, U2> std::ops::Mul<Scale<U, U2>> for Vec2<U> {
     type Output = Vec2<U2>;
 
@@ -96,6 +104,14 @@ impl<U> std::ops::MulAssign<Scale<U, U>> for Vec2<U> {
     fn mul_assign(&mut self, rhs: Scale<U, U>) {
         self.x *= rhs.x;
         self.y *= rhs.y;
+    }
+}
+
+impl<U, U2> std::ops::Div<Scale<U, U2>> for Vec2<U2> {
+    type Output = Vec2<U>;
+
+    fn div(self, rhs: Scale<U, U2>) -> Self::Output {
+        Vec2::new(self.x / rhs.x, self.y / rhs.y)
     }
 }
 
@@ -168,7 +184,7 @@ impl<U> std::fmt::Display for Vec2<U> {
     }
 }
 
-impl PartialEq for Vec2<()> {
+impl<U> PartialEq for Vec2<U> {
     fn eq(&self, rhs: &Self) -> bool {
         self.x == rhs.x && self.y == rhs.y
     }
@@ -181,5 +197,66 @@ impl<U> From<(f64, f64)> for Vec2<U> {
             y,
             _unit: std::marker::PhantomData,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ops() {
+        let a = Vec2::<()>::new(1.0, 2.0);
+        let b = Vec2::<()>::new(3.0, 4.0);
+
+        assert_eq!(-a, Vec2::new(-1.0, -2.0));
+        assert_eq!(a + b, Vec2::new(4.0, 6.0));
+        assert_eq!(a - b, Vec2::new(-2.0, -2.0));
+        assert_eq!(a % b, Vec2::new(1.0, 2.0));
+
+        let mut c = a;
+
+        c += b;
+        assert_eq!(c, Vec2::new(4.0, 6.0));
+
+        c -= b;
+        assert_eq!(c, Vec2::new(1.0, 2.0));
+
+        c %= b;
+        assert_eq!(c, Vec2::new(1.0, 2.0));
+    }
+
+    #[test]
+    fn float_ops() {
+        let a = Vec2::<()>::new(1.0, 2.0);
+
+        assert_eq!(a * 2.0, Vec2::new(2.0, 4.0));
+        assert_eq!(a / 2.0, Vec2::new(0.5, 1.0));
+        assert_eq!(a % 2.0, Vec2::new(1.0, 0.0));
+
+        let mut b = a;
+
+        b *= 2.0;
+        assert_eq!(b, Vec2::new(2.0, 4.0));
+        b /= 2.0;
+        assert_eq!(b, Vec2::new(1.0, 2.0));
+        b %= 2.0;
+        assert_eq!(b, Vec2::new(1.0, 0.0));
+    }
+
+    #[test]
+    fn transform_ops() {
+        struct A;
+        struct B;
+
+        let a = Vec2::<A>::new(1.0, 2.0);
+
+        let t = Translate::<A, B>::new(1.0, 2.0);
+        assert_eq!(a + t, Vec2::<B>::new(2.0, 4.0));
+        assert_eq!((a + t) - t, Vec2::<A>::new(1.0, 2.0));
+
+        let s = Scale::<A, B>::new(2.0, 3.0);
+        assert_eq!(a * s, Vec2::<B>::new(2.0, 6.0));
+        assert_eq!((a * s) / s, Vec2::<A>::new(1.0, 2.0));
     }
 }

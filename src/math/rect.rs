@@ -46,7 +46,9 @@ impl<U> Rect<U> {
     }
 
     /// Reinterprets the `Rect` as its own coordinate space.
-    pub fn reinterpret_coordinate_space<U2>(&self) -> (Rect<U2>, Translate<U, U2>) {
+    ///
+    /// Also returns the translation back to the original coordinate space.
+    pub fn reinterpret_coordinate_space<U2>(&self) -> (Rect<U2>, Translate<U2, U>) {
         (
             Rect::new(0.0, 0.0, self.width, self.height),
             Translate::new(self.x, self.y),
@@ -123,8 +125,8 @@ impl<U, T: Into<Translate<U, U>>> std::ops::AddAssign<T> for Rect<U> {
     }
 }
 
-impl<U, U2> std::ops::Sub<Translate<U, U2>> for Rect<U> {
-    type Output = Rect<U2>;
+impl<U, U2> std::ops::Sub<Translate<U, U2>> for Rect<U2> {
+    type Output = Rect<U>;
 
     fn sub(self, rhs: Translate<U, U2>) -> Self::Output {
         Rect::new(self.x - rhs.x, self.y - rhs.y, self.width, self.height)
@@ -158,6 +160,28 @@ impl<U> std::ops::MulAssign<Scale<U, U>> for Rect<U> {
         self.y *= rhs.y;
         self.width *= rhs.x;
         self.height *= rhs.y;
+    }
+}
+
+impl<U, U2> std::ops::Div<Scale<U, U2>> for Rect<U2> {
+    type Output = Rect<U>;
+
+    fn div(self, rhs: Scale<U, U2>) -> Self::Output {
+        Rect::new(
+            self.x / rhs.x,
+            self.y / rhs.y,
+            self.width / rhs.x,
+            self.height / rhs.y,
+        )
+    }
+}
+
+impl<U> std::ops::DivAssign<Scale<U, U>> for Rect<U> {
+    fn div_assign(&mut self, rhs: Scale<U, U>) {
+        self.x /= rhs.x;
+        self.y /= rhs.y;
+        self.width /= rhs.x;
+        self.height /= rhs.y;
     }
 }
 
@@ -197,4 +221,100 @@ impl<U> PartialEq for Rect<U> {
     fn eq(&self, rhs: &Self) -> bool {
         self.x == rhs.x && self.y == rhs.y && self.width == rhs.width && self.height == rhs.height
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new() {
+        let rect = Rect::<()>::new(1.0, 2.0, 3.0, 4.0);
+        assert_eq!(rect.x, 1.0);
+        assert_eq!(rect.y, 2.0);
+        assert_eq!(rect.width, 3.0);
+        assert_eq!(rect.height, 4.0);
+
+        assert_eq!(rect.top(), 2.0);
+        assert_eq!(rect.bottom(), 6.0);
+        assert_eq!(rect.left(), 1.0);
+        assert_eq!(rect.right(), 4.0);
+
+        assert_eq!(rect.top_left(), Point::new(1.0, 2.0));
+        assert_eq!(rect.top_right(), Point::new(4.0, 2.0));
+        assert_eq!(rect.bottom_left(), Point::new(1.0, 6.0));
+        assert_eq!(rect.bottom_right(), Point::new(4.0, 6.0));
+
+        assert_eq!(rect.size(), Size::new(3.0, 4.0));
+
+        assert_eq!(
+            rect,
+            Rect::from_points(Point::new(1.0, 2.0), Point::new(4.0, 6.0))
+        );
+
+        assert_eq!(
+            rect,
+            Rect::from_origin(Point::new(1.0, 2.0), Size::new(3.0, 4.0))
+        );
+
+        assert_eq!(
+            rect,
+            Rect::from_center(Point::new(2.5, 4.0), Size::new(3.0, 4.0))
+        );
+    }
+
+    #[test]
+    fn new_zero() {
+        let a = Rect::<()>::from_zero(Size::new(3.0, 4.0));
+        assert_eq!(a, Rect::new(0.0, 0.0, 3.0, 4.0));
+        assert_eq!(a, Rect::from(Size::new(3.0, 4.0)));
+    }
+
+    #[test]
+    fn transforms() {
+        struct A;
+        struct B;
+        struct C;
+
+        let rect = Rect::<A>::new(1.0, 2.0, 3.0, 4.0);
+        let scale = Scale::<A, B>::new(2.0, 3.0);
+        let translate = Translate::<B, C>::new(4.0, 5.0);
+
+        assert_eq!(rect * scale / scale, rect);
+        assert_eq!(rect * scale * scale.inverse(), rect);
+        assert_eq!(rect * scale + translate, Rect::new(6.0, 11.0, 6.0, 12.0));
+        assert_eq!((rect * scale + translate - translate) / scale, rect);
+
+        let mut rect = rect;
+        let scale = Scale::<A, A>::new(2.0, 3.0);
+        let translate = Translate::<A, A>::new(4.0, 5.0);
+
+        rect *= scale;
+        assert_eq!(rect, Rect::new(2.0, 6.0, 6.0, 12.0));
+
+        rect /= scale;
+        assert_eq!(rect, Rect::new(1.0, 2.0, 3.0, 4.0));
+
+        rect += translate;
+        assert_eq!(rect, Rect::new(5.0, 7.0, 3.0, 4.0));
+
+        rect -= translate;
+        assert_eq!(rect, Rect::new(1.0, 2.0, 3.0, 4.0));
+    }
+
+    #[test]
+    fn properties() {
+        struct A;
+        struct B;
+
+        let rect = Rect::<A>::new(1.0, 2.0, 3.0, 4.0);
+        assert_eq!(rect.center(), Point::new(2.5, 4.0));
+
+        let (r, t) = rect.reinterpret_coordinate_space::<B>();
+        assert_eq!(r, Rect::from(Size::new(3.0, 4.0)));
+        assert_eq!(r + t, rect);
+    }
+
+    #[test]
+    fn intersection() {}
 }

@@ -1,9 +1,11 @@
 mod canvas;
+mod color;
 mod image;
 mod pixel;
 mod tree;
 
 pub use canvas::Canvas;
+pub use color::{Color, ColorSpace, Srgb};
 pub use image::Image;
 pub use pixel::Pixel;
 pub use tree::{VisualId, VisualTree};

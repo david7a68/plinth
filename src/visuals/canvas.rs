@@ -1,6 +1,6 @@
 use crate::{
-    color::{Color, Srgb},
     math::{Rect, Size},
+    visuals::{Color, Srgb},
 };
 
 use super::{FromVisual, Pixel, Visual};

@@ -1,13 +1,12 @@
 use std::time::Instant;
 
 use clap::{command, Parser, ValueEnum};
-
 use plinth::{
-    color::{Color, Srgb},
+    animation::AnimationFrequency,
+    application::{Application, GraphicsConfig, PowerPreference},
     math::{Rect, Size, Translate},
-    visuals::{Canvas, VisualTree},
-    AnimationFrequency, Application, GraphicsConfig, PowerPreference, Window, WindowEvent,
-    WindowEventHandler, WindowSpec,
+    visuals::{Canvas, Color, Srgb, VisualTree},
+    window::{Window, WindowEvent, WindowEventHandler, WindowSpec},
 };
 
 struct DemoRect {

@@ -106,6 +106,12 @@ impl<Src, Dst> Clone for Scale<Src, Dst> {
 
 impl<Src, Dst> Copy for Scale<Src, Dst> {}
 
+impl<Src, Dst> Default for Scale<Src, Dst> {
+    fn default() -> Self {
+        Self::new(1.0, 1.0)
+    }
+}
+
 impl<Src, Dst> std::fmt::Debug for Scale<Src, Dst> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Scale")

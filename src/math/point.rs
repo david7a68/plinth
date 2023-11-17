@@ -92,6 +92,12 @@ impl<U> Clone for Point<U> {
 
 impl<U> Copy for Point<U> {}
 
+impl<U> Default for Point<U> {
+    fn default() -> Self {
+        Self::new(0.0, 0.0)
+    }
+}
+
 impl<U> std::fmt::Debug for Point<U> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Point")

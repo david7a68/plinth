@@ -76,7 +76,7 @@ fn main() {
         power_preference: PowerPreference::HighPerformance,
     });
 
-    app.spawn_window(&WindowSpec::default(), DemoWindow::new);
+    app.spawn_window(WindowSpec::default(), DemoWindow::new);
 
     app.run();
 }

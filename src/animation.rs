@@ -5,6 +5,7 @@ pub struct PresentTiming {
     pub last_frame: Instant,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AnimationFrequency {
     /// The minimum rate at which the window would like to receive repaint events.
     pub min_fps: Option<f32>,

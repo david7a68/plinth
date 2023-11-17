@@ -84,6 +84,12 @@ impl<U> Clone for Size<U> {
 
 impl<U> Copy for Size<U> {}
 
+impl<U> Default for Size<U> {
+    fn default() -> Self {
+        Self::new(0.0, 0.0)
+    }
+}
+
 impl<U> std::fmt::Debug for Size<U> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Size")

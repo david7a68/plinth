@@ -151,7 +151,7 @@ fn make_demo_window(throttle: bool) -> impl Fn(Window) -> DemoWindow {
 
 fn run_one(app: &mut Application, throttle: bool) {
     app.spawn_window(
-        &WindowSpec {
+        WindowSpec {
             resizable: false,
             ..Default::default()
         },
@@ -162,8 +162,8 @@ fn run_one(app: &mut Application, throttle: bool) {
 
 fn run_many(app: &mut Application, throttle: bool) {
     let spec = WindowSpec::default();
-    app.spawn_window(&spec, make_demo_window(throttle));
-    app.spawn_window(&spec, make_demo_window(throttle));
-    app.spawn_window(&spec, make_demo_window(throttle));
+    app.spawn_window(spec.clone(), make_demo_window(throttle));
+    app.spawn_window(spec.clone(), make_demo_window(throttle));
+    app.spawn_window(spec, make_demo_window(throttle));
     app.run();
 }

@@ -14,6 +14,10 @@ impl<U> Point<U> {
             _unit: std::marker::PhantomData,
         }
     }
+
+    pub fn retype<U2>(self) -> Point<U2> {
+        Point::new(self.x, self.y)
+    }
 }
 
 impl<U, U2> std::ops::Add<Translate<U, U2>> for Point<U> {

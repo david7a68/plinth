@@ -1,18 +1,10 @@
 use crate::window::{Window, WindowEventHandler, WindowSpec};
 
 #[cfg(target_os = "windows")]
-use crate::backend::system::win32 as system;
+use crate::system;
 
-pub enum PowerPreference {
-    LowPower,
-    HighPerformance,
-}
+pub use crate::graphics::{Config as GraphicsConfig, PowerPreference};
 
-pub struct GraphicsConfig {
-    pub power_preference: PowerPreference,
-}
-
-#[derive(Clone)]
 pub struct Application {
     inner: system::Application,
 }
@@ -41,6 +33,7 @@ impl Application {
 }
 
 #[derive(Clone)]
+#[repr(transparent)]
 pub struct AppContext {
     pub(crate) inner: system::AppContext,
 }
@@ -52,5 +45,11 @@ impl AppContext {
         F: FnMut(Window) -> W + Send + 'static,
     {
         self.inner.spawn_window(spec, constructor);
+    }
+}
+
+impl From<system::AppContext> for AppContext {
+    fn from(inner: system::AppContext) -> Self {
+        Self { inner }
     }
 }

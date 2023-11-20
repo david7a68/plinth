@@ -1,6 +1,9 @@
 use plinth::{
-    application::{Application, GraphicsConfig, PowerPreference},
-    window::{Window, WindowEvent, WindowEventHandler, WindowSpec},
+    animation::PresentTiming,
+    application::{Application, GraphicsConfig},
+    math::{Point, Scale, Size, Vec2},
+    visuals::Pixel,
+    window::{Axis, Window, WindowEventHandler, WindowSpec},
 };
 
 pub struct AppWindow {
@@ -14,39 +17,50 @@ impl AppWindow {
 }
 
 impl WindowEventHandler for AppWindow {
-    fn event(&mut self, event: WindowEvent) {
-        match event {
-            WindowEvent::CloseRequest => self.window.close(),
-            WindowEvent::Destroy => println!("Window destroyed"),
-            WindowEvent::Visible(is_visible) => {
-                if is_visible {
-                    println!("Window is visible");
-                } else {
-                    println!("Window is hidden");
-                }
-            }
-            WindowEvent::BeginResize => {
-                println!("Window resize started on");
-            }
-            WindowEvent::Resize(size, scale) => {
-                println!("Window resized to {} at {:?}", size, scale);
-            }
-            WindowEvent::EndResize => {
-                println!("Window resize ended");
-            }
-            WindowEvent::Repaint(timings) => {
-                println!("Window repaint requested for {:?}", timings.next_frame);
-            }
-            WindowEvent::PointerMove(_, _) => todo!(),
-            WindowEvent::Scroll(_, _) => todo!(),
+    fn on_close_request(&mut self) {
+        println!("Window close requested");
+        self.window.close();
+    }
+
+    fn on_destroy(&mut self) {
+        println!("Window destroyed");
+    }
+
+    fn on_visible(&mut self, is_visible: bool) {
+        if is_visible {
+            println!("Window is visible");
+        } else {
+            println!("Window is hidden");
         }
+    }
+
+    fn on_begin_resize(&mut self) {
+        println!("Window resize started");
+    }
+
+    fn on_resize(&mut self, size: Size<Window>, scale: Scale<Window, Pixel>) {
+        println!("Window resized to {} at {:?}", size, scale);
+    }
+
+    fn on_end_resize(&mut self) {
+        println!("Window resize ended");
+    }
+
+    fn on_repaint(&mut self, timing: PresentTiming) {
+        println!("Window repaint requested for {:?}", timing.next_frame);
+    }
+
+    fn on_pointer_move(&mut self, _location: Point<Window>, _delta: Vec2<Window>) {
+        todo!()
+    }
+
+    fn on_scroll(&mut self, _axis: Axis, _delta: f32) {
+        todo!()
     }
 }
 
 fn main() {
-    let mut app = Application::new(&GraphicsConfig {
-        power_preference: PowerPreference::HighPerformance,
-    });
+    let mut app = Application::new(&GraphicsConfig::default());
 
     app.spawn_window(WindowSpec::default(), AppWindow::new);
     app.spawn_window(WindowSpec::default(), AppWindow::new);

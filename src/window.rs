@@ -6,7 +6,7 @@ use crate::{
 };
 
 #[cfg(target_os = "windows")]
-use crate::backend::system::win32 as system;
+use crate::system;
 
 pub const MAX_TITLE_LENGTH: usize = 255;
 
@@ -43,7 +43,7 @@ impl Default for WindowSpec {
 }
 
 pub struct Window {
-    pub(crate) inner: system::Window,
+    inner: system::Window,
 }
 
 impl Window {
@@ -95,23 +95,31 @@ impl Window {
         todo!()
     }
 
-    pub fn scene_mut<'a>(&'a mut self) -> &'a mut VisualTree {
+    pub fn scene_mut(&mut self) -> &mut VisualTree {
         todo!()
     }
 }
 
 pub trait WindowEventHandler {
-    fn event(&mut self, event: WindowEvent);
-}
+    fn on_close_request(&mut self);
 
-pub enum WindowEvent {
-    CloseRequest,
-    Destroy,
-    Visible(bool),
-    BeginResize,
-    Resize(Size<Window>, Scale<Window, Pixel>),
-    EndResize,
-    Repaint(PresentTiming),
-    PointerMove(Point<Window>, Vec2<Window>),
-    Scroll(Axis, f32),
+    fn on_destroy(&mut self) {}
+
+    #[allow(unused_variables)]
+    fn on_visible(&mut self, is_visible: bool) {}
+
+    fn on_begin_resize(&mut self) {}
+
+    #[allow(unused_variables)]
+    fn on_resize(&mut self, size: Size<Window>, scale: Scale<Window, Pixel>) {}
+
+    fn on_end_resize(&mut self) {}
+
+    fn on_repaint(&mut self, timing: PresentTiming);
+
+    #[allow(unused_variables)]
+    fn on_pointer_move(&mut self, location: Point<Window>, delta: Vec2<Window>) {}
+
+    #[allow(unused_variables)]
+    fn on_scroll(&mut self, axis: Axis, delta: f32) {}
 }

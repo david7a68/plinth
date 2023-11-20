@@ -1,6 +1,5 @@
 use std::{
-    cell::{Cell, RefCell},
-    sync::OnceLock,
+    sync::{mpsc::Sender, OnceLock},
     time::Instant,
 };
 
@@ -13,90 +12,37 @@ use windows::{
         System::LibraryLoader::GetModuleHandleW,
         UI::WindowsAndMessaging::{
             AdjustWindowRect, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-            GetClientRect, GetMessageW, LoadCursorW, PeekMessageW, PostMessageW, PostQuitMessage,
-            RegisterClassExW, ShowWindow, TranslateMessage, CREATESTRUCTW, CS_HREDRAW, CS_VREDRAW,
-            CW_USEDEFAULT, HICON, HMENU, IDC_ARROW, MSG, PM_NOREMOVE, SW_HIDE, SW_SHOW, WM_CLOSE,
-            WM_CREATE, WM_DESTROY, WM_EXITSIZEMOVE, WM_PAINT, WM_SHOWWINDOW, WM_SIZING, WM_TIMER,
-            WM_USER, WM_WINDOWPOSCHANGED, WNDCLASSEXW, WS_EX_NOREDIRECTIONBITMAP,
-            WS_OVERLAPPEDWINDOW,
+            GetClientRect, GetMessageW, GetWindowLongPtrW, LoadCursorW, PeekMessageW,
+            PostQuitMessage, RegisterClassExW, SetWindowLongPtrW, ShowWindow, TranslateMessage,
+            CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HICON, HMENU, IDC_ARROW, MSG,
+            PM_NOREMOVE, SW_SHOW, WM_CLOSE, WM_DESTROY, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE,
+            WM_PAINT, WM_SHOWWINDOW, WM_TIMER, WM_WINDOWPOSCHANGED, WNDCLASSEXW,
+            WS_EX_NOREDIRECTIONBITMAP, WS_OVERLAPPEDWINDOW,
         },
     },
 };
 
 use crate::{
-    animation::{AnimationFrequency, PresentTiming},
-    application::AppContext,
-    math::{Point, Scale, Size},
-    visuals::Pixel,
-    window::{WindowEvent, WindowEventHandler, WindowSpec, MAX_TITLE_LENGTH},
+    animation::PresentTiming,
+    window::{WindowSpec, MAX_TITLE_LENGTH},
 };
 
-use super::AppMessage;
+use super::{Event, UM_DESTROY_WINDOW};
 
 const CLASS_NAME: PCWSTR = w!("plinth_window_class");
-const UM_DESTROY_WINDOW: u32 = WM_USER;
 
-thread_local! {
-    static STATE: State = State::default();
-    static EVENT_HANDLER: RefCell<Option<Box<dyn WindowEventHandler>>> = RefCell::new(None);
+struct State {
+    sender: Sender<Event>,
+    width: u32,
+    height: u32,
+    is_size_move: bool,
+    is_resizing: bool,
 }
 
-#[derive(Debug, Default)]
-pub struct State {
-    initialized: Cell<bool>,
-    is_resizing: Cell<bool>,
-    size: Cell<Size<crate::window::Window>>,
-}
-
-pub struct Window {
-    hwnd: HWND,
-    context: AppContext,
-}
-
-impl Window {
-    pub fn app(&self) -> &AppContext {
-        &self.context
-    }
-
-    pub fn close(&mut self) {
-        unsafe { PostMessageW(self.hwnd, UM_DESTROY_WINDOW, None, None) }.unwrap();
-    }
-
-    pub fn begin_animation(&mut self, _freq: Option<AnimationFrequency>) {
-        todo!()
-    }
-
-    pub fn end_animation(&mut self) {
-        todo!()
-    }
-
-    pub fn default_animation_frequency(&self) -> AnimationFrequency {
-        todo!()
-    }
-
-    pub fn size(&self) -> Size<crate::window::Window> {
-        todo!()
-    }
-
-    pub fn scale(&self) -> Scale<crate::window::Window, Pixel> {
-        todo!()
-    }
-
-    pub fn set_visible(&mut self, visible: bool) {
-        let flag = if visible { SW_SHOW } else { SW_HIDE };
-        unsafe { ShowWindow(self.hwnd, flag) };
-    }
-
-    pub fn pointer_location(&self) -> Point<crate::window::Window> {
-        todo!()
-    }
-}
-
-pub fn spawn_window_thread<W, F>(context: AppContext, spec: WindowSpec, mut constructor: F)
-where
-    W: WindowEventHandler + 'static,
-    F: FnMut(crate::window::Window) -> W + Send + 'static,
-{
+/// Spawns a new thread and creates a window and its event loop on it.
+///
+/// The window gets sent to the event handler thread via a channel.
+pub fn spawn(spec: WindowSpec, sender: Sender<Event>) {
     std::thread::spawn(move || {
         let wndclass = ensure_wndclass_registered();
 
@@ -123,13 +69,6 @@ where
         // SAFETY: This gets passed into CreateWindowExW, which must not
         // persist the pointer beyond WM_CREATE, or it will produce a
         // dangling pointer.
-
-        let mut constructor = |window| Box::new(constructor(window)) as Box<dyn WindowEventHandler>;
-        let create_info = RefCell::new(CreateInfo {
-            context: Some(context.clone()),
-            constructor: &mut constructor,
-        });
-
         let hwnd = unsafe {
             CreateWindowExW(
                 WS_EX_NOREDIRECTIONBITMAP,
@@ -145,19 +84,25 @@ where
                 HWND::default(),
                 HMENU::default(),
                 HMODULE::default(),
-                Some(&create_info as *const RefCell<_> as _),
+                None,
             )
         };
+
+        sender.send(Event::Create(hwnd)).unwrap();
+
+        let mut state = State {
+            sender,
+            width: 0,
+            height: 0,
+            is_size_move: false,
+            is_resizing: false,
+        };
+
+        unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, &mut state as *mut _ as _) };
 
         if spec.visible {
             unsafe { ShowWindow(hwnd, SW_SHOW) };
         }
-
-        context
-            .inner
-            .sender
-            .send(AppMessage::WindowCreated)
-            .unwrap();
 
         let mut msg = MSG::default();
         loop {
@@ -166,7 +111,6 @@ where
             // than it can process them.
             unsafe { PeekMessageW(&mut msg, None, WM_TIMER, WM_TIMER, PM_NOREMOVE) };
 
-            // TODO: Make this more sophisticated.
             let result = unsafe { GetMessageW(&mut msg, None, 0, 0) };
 
             match result.0 {
@@ -185,21 +129,10 @@ where
                     DispatchMessageW(&msg);
                 },
             }
-
-            // if redraw requested
-            //     redraw
-
-            // if animating
-            //    wait for next vsync
         }
 
-        context.inner.sender.send(AppMessage::WindowClosed).unwrap();
+        unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0) };
     });
-}
-
-struct CreateInfo<'a> {
-    context: Option<AppContext>,
-    constructor: &'a mut dyn FnMut(crate::window::Window) -> Box<dyn WindowEventHandler>,
 }
 
 fn ensure_wndclass_registered() -> PCWSTR {
@@ -231,7 +164,7 @@ fn ensure_wndclass_registered() -> PCWSTR {
 
         atom
     });
-    PCWSTR(WND_CLASS_ATOM.get().unwrap().clone() as usize as *const _)
+    PCWSTR(*WND_CLASS_ATOM.get().unwrap() as usize as *const _)
 }
 
 unsafe extern "system" fn wndproc_trampoline(
@@ -240,34 +173,20 @@ unsafe extern "system" fn wndproc_trampoline(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    if msg == WM_CREATE {
-        let create_struct = lparam.0 as *const CREATESTRUCTW;
-        let create_info = &*((*create_struct).lpCreateParams as *const RefCell<CreateInfo>);
-        let mut ci = create_info.borrow_mut();
+    let state = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
 
-        let window = crate::window::Window::new(Window {
-            hwnd,
-            context: ci.context.take().unwrap(),
-        });
-
-        let handler = (ci.constructor)(window);
-        EVENT_HANDLER.set(Some(handler));
-        STATE.with(|s| s.initialized.set(true));
+    if state != 0 {
+        let state = state as *mut State;
+        wndproc(&mut *state, hwnd, msg, wparam, lparam)
+    } else {
+        unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
     }
-
-    STATE.with(|state| {
-        if state.initialized.get() {
-            wndproc(state, hwnd, msg, wparam, lparam)
-        } else {
-            DefWindowProcW(hwnd, msg, wparam, lparam)
-        }
-    })
 }
 
-fn wndproc(state: &State, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+fn wndproc(state: &mut State, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_CLOSE => {
-            dispatch_event(WindowEvent::CloseRequest);
+            state.sender.send(Event::CloseRequest).unwrap();
             LRESULT(0)
         }
         UM_DESTROY_WINDOW => {
@@ -275,39 +194,55 @@ fn wndproc(state: &State, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) 
             LRESULT(0)
         }
         WM_DESTROY => {
-            dispatch_event(WindowEvent::Destroy);
+            state.sender.send(Event::Destroy).unwrap();
             unsafe { PostQuitMessage(0) };
             LRESULT(0)
         }
         WM_SHOWWINDOW => {
-            dispatch_event(WindowEvent::Visible(wparam.0 != 0));
+            state.sender.send(Event::Visible(wparam.0 != 0)).unwrap();
             LRESULT(0)
         }
-        WM_SIZING => {
-            state.is_resizing.set(true);
-            dispatch_event(WindowEvent::BeginResize);
+        WM_ENTERSIZEMOVE => {
+            state.is_size_move = true;
             LRESULT(1)
         }
         WM_EXITSIZEMOVE => {
-            if state.is_resizing.get() {
-                state.is_resizing.set(false);
-                dispatch_event(WindowEvent::EndResize);
+            state.is_size_move = false;
+
+            if state.is_resizing {
+                state.is_resizing = false;
+                state.sender.send(Event::EndResize).unwrap();
             }
+
             LRESULT(0)
         }
         WM_WINDOWPOSCHANGED => {
-            let size = unsafe {
+            let (width, height) = unsafe {
                 let mut rect = RECT::default();
                 GetClientRect(hwnd, &mut rect).unwrap();
 
-                Size::new(rect.right as f64, rect.bottom as f64)
+                ((rect.right - rect.left) as _, (rect.bottom - rect.top) as _)
             };
 
             // we don't care about window position, so ignore it
 
-            if size != state.size.get() {
-                state.size.set(size);
-                dispatch_event(WindowEvent::Resize(size, Scale::default()));
+            if width != state.width || height != state.height {
+                if state.is_size_move && !state.is_resizing {
+                    state.is_resizing = true;
+                    state.sender.send(Event::BeginResize).unwrap();
+                }
+
+                state.width = width;
+                state.height = height;
+
+                state
+                    .sender
+                    .send(Event::Resize {
+                        width,
+                        height,
+                        scale: 1.0,
+                    })
+                    .unwrap();
             }
 
             LRESULT(0)
@@ -317,18 +252,16 @@ fn wndproc(state: &State, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) 
             let _hdc = unsafe { BeginPaint(hwnd, &mut ps) };
             unsafe { EndPaint(hwnd, &ps) };
 
-            // TODO: This should be somewhere else, unless during resize
-            dispatch_event(WindowEvent::Repaint(PresentTiming {
-                next_frame: Instant::now(),
-                last_frame: Instant::now(),
-            }));
+            state
+                .sender
+                .send(Event::Repaint(PresentTiming {
+                    next_frame: Instant::now(),
+                    last_frame: Instant::now(),
+                }))
+                .unwrap();
 
             LRESULT(0)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
     }
-}
-
-fn dispatch_event(event: WindowEvent) {
-    EVENT_HANDLER.with_borrow_mut(|handler| handler.as_mut().unwrap().event(event));
 }

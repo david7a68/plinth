@@ -14,6 +14,10 @@ impl<U> Vec2<U> {
             _unit: std::marker::PhantomData,
         }
     }
+
+    pub fn retype<U2>(self) -> Vec2<U2> {
+        Vec2::new(self.x, self.y)
+    }
 }
 
 impl<U> std::ops::Neg for Vec2<U> {

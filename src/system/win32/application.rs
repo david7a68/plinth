@@ -1,24 +1,24 @@
-mod window;
-pub use window::Window;
+use std::sync::Arc;
 
 use crossbeam::channel::{Receiver, Sender};
 
 use crate::{
     application::GraphicsConfig,
+    graphics::{self},
     window::{WindowEventHandler, WindowSpec},
 };
 
-use self::window::spawn_window_thread;
+use super::window::spawn_window;
 
 #[derive(Debug)]
-pub(self) enum AppMessage {
+pub(super) enum AppMessage {
     WindowCreated,
     WindowClosed,
 }
 
-#[derive(Clone)]
 pub struct Application {
-    context: AppContext,
+    device: Arc<graphics::Device>,
+    sender: Sender<AppMessage>,
     receiver: Receiver<AppMessage>,
 }
 
@@ -27,10 +27,17 @@ impl Application {
         // TODO: this bound is nonsense. actually figure out what it should be.
         let (sender, receiver) = crossbeam::channel::bounded(1);
 
+        let device = Arc::new(graphics::Device::new(graphics));
+
         Self {
-            context: AppContext::new(graphics, sender),
+            device,
+            sender,
             receiver,
         }
+    }
+
+    pub fn context(&self) -> AppContext {
+        AppContext::new(self.device.clone(), self.sender.clone())
     }
 
     pub fn spawn_window<W, F>(&mut self, spec: WindowSpec, constructor: F)
@@ -38,7 +45,7 @@ impl Application {
         W: WindowEventHandler + 'static,
         F: FnMut(crate::window::Window) -> W + Send + 'static,
     {
-        self.context.spawn_window(spec, constructor);
+        spawn_window(self.context(), spec, constructor);
     }
 
     pub fn run(&mut self) {
@@ -59,16 +66,21 @@ impl Application {
     }
 }
 
+impl Drop for Application {
+    fn drop(&mut self) {
+        // wait for graphics thread to exit
+    }
+}
+
 #[derive(Clone)]
 pub struct AppContext {
-    sender: Sender<AppMessage>,
+    pub(crate) device: Arc<graphics::Device>,
+    pub(super) sender: Sender<AppMessage>,
 }
 
 impl AppContext {
-    fn new(_graphics: &GraphicsConfig, sender: Sender<AppMessage>) -> Self {
-        // initialize renderer
-
-        Self { sender }
+    fn new(device: Arc<graphics::Device>, sender: Sender<AppMessage>) -> Self {
+        Self { sender, device }
     }
 
     pub fn spawn_window<W, F>(&mut self, spec: WindowSpec, constructor: F)
@@ -76,12 +88,6 @@ impl AppContext {
         W: WindowEventHandler + 'static,
         F: FnMut(crate::window::Window) -> W + Send + 'static,
     {
-        spawn_window_thread(
-            crate::application::AppContext {
-                inner: self.clone(),
-            },
-            spec,
-            constructor,
-        );
+        spawn_window(self.clone(), spec, constructor);
     }
 }

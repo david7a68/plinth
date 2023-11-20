@@ -3,10 +3,10 @@ use std::time::Instant;
 use clap::{command, Parser, ValueEnum};
 use plinth::{
     animation::AnimationFrequency,
-    application::{Application, GraphicsConfig, PowerPreference},
+    application::{Application, GraphicsConfig},
     math::{Rect, Size, Translate},
     visuals::{Canvas, Color, Srgb, VisualTree},
-    window::{Window, WindowEvent, WindowEventHandler, WindowSpec},
+    window::{Window, WindowEventHandler, WindowSpec},
 };
 
 struct DemoRect {
@@ -53,65 +53,65 @@ impl DemoWindow {
 }
 
 impl WindowEventHandler for DemoWindow {
-    fn event(&mut self, event: WindowEvent) {
-        match event {
-            WindowEvent::Visible(is_visible) => {
-                if is_visible {
-                    let freq = if self.throttle_animation {
-                        // throttle to <= 30fps (might be e.g. 28.8 fps on a 144
-                        // hz display at 1/5 refresh rate)
-                        Some(AnimationFrequency {
-                            min_fps: None,
-                            max_fps: Some(30.0),
-                            optimal_fps: 30.0,
-                        })
-                    } else {
-                        // No throttling, default to display refresh rate. This
-                        // is a polite fiction, since the display refresh rate
-                        // may change at any time.
-                        Some(self.window.default_animation_frequency())
+    fn on_close_request(&mut self) {
+        self.window.close();
+    }
 
-                        // alternatively
-                        // Some(self.window.max_animation_frequency())
-                    };
+    fn on_visible(&mut self, is_visible: bool) {
+        if is_visible {
+            let freq = if self.throttle_animation {
+                // throttle to <= 30fps (might be e.g. 28.8 fps on a 144
+                // hz display at 1/5 refresh rate)
+                Some(AnimationFrequency {
+                    min_fps: None,
+                    max_fps: Some(30.0),
+                    optimal_fps: 30.0,
+                })
+            } else {
+                // No throttling, default to display refresh rate. This
+                // is a polite fiction, since the display refresh rate
+                // may change at any time.
+                Some(self.window.default_animation_frequency())
 
-                    self.window.begin_animation(freq);
-                } else {
-                    self.window.end_animation();
-                }
-            }
-            WindowEvent::Repaint(timings) => {
-                let delta = timings.next_frame - self.last_present_time;
+                // alternatively
+                // Some(self.window.max_animation_frequency())
+            };
 
-                let canvas = self.window.scene_mut().root_mut::<Canvas>().unwrap();
-                let canvas_rect = canvas.drawable_area();
-
-                for rect in &mut self.rects {
-                    rect.rect += rect.velocity * delta;
-
-                    if let Some(intersection) = canvas_rect.intersection(&rect.rect) {
-                        // reverse rect direction
-                        rect.velocity = -rect.velocity;
-
-                        // snap it into the self.window
-                        rect.rect.x -= intersection.width;
-                        rect.rect.y -= intersection.height;
-                    }
-                }
-
-                // Request a drawing context for the self.window, constrained to the
-                // dirty rectangle provided.
-                canvas.clear(Color::BLACK);
-
-                for rect in &self.rects {
-                    canvas.draw_rect(rect.rect, rect.color);
-                }
-
-                // canvas repaint
-                self.last_present_time = timings.next_frame;
-            }
-            _ => {}
+            self.window.begin_animation(freq);
+        } else {
+            self.window.end_animation();
         }
+    }
+
+    fn on_repaint(&mut self, timings: plinth::animation::PresentTiming) {
+        let delta = timings.next_frame - self.last_present_time;
+
+        let canvas = self.window.scene_mut().root_mut::<Canvas>().unwrap();
+        let canvas_rect = canvas.drawable_area();
+
+        for rect in &mut self.rects {
+            rect.rect += rect.velocity * delta;
+
+            if let Some(intersection) = canvas_rect.intersection(&rect.rect) {
+                // reverse rect direction
+                rect.velocity = -rect.velocity;
+
+                // snap it into the self.window
+                rect.rect.x -= intersection.width;
+                rect.rect.y -= intersection.height;
+            }
+        }
+
+        // Request a drawing context for the self.window, constrained to the
+        // dirty rectangle provided.
+        canvas.clear(Color::BLACK);
+
+        for rect in &self.rects {
+            canvas.draw_rect(rect.rect, rect.color);
+        }
+
+        // canvas repaint
+        self.last_present_time = timings.next_frame;
     }
 }
 
@@ -135,9 +135,7 @@ fn main() {
     let args = Cli::parse();
     let throttle = args.throttle_animation;
 
-    let mut app = Application::new(&GraphicsConfig {
-        power_preference: PowerPreference::HighPerformance,
-    });
+    let mut app = Application::new(&GraphicsConfig::default());
 
     match args.count {
         Count::One => run_one(&mut app, throttle),

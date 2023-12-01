@@ -9,7 +9,6 @@ use windows::Win32::{
 use crate::{
     animation::{AnimationFrequency, PresentTiming},
     math::{Point, Scale, Size, Vec2},
-    visuals::Pixel,
     window::{Axis, WindowEventHandler, WindowSpec},
 };
 
@@ -17,6 +16,7 @@ use super::AppContext;
 
 const UM_DESTROY_WINDOW: u32 = WM_USER;
 
+#[derive(Debug)]
 pub enum Event {
     Create(HWND),
     CloseRequest,
@@ -60,7 +60,7 @@ impl Window {
         todo!()
     }
 
-    pub fn scale(&self) -> Scale<crate::window::Window, Pixel> {
+    pub fn scale(&self) -> Scale<crate::window::Window, crate::window::Window> {
         todo!()
     }
 

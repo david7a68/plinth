@@ -2,7 +2,6 @@ use plinth::{
     animation::PresentTiming,
     application::{Application, GraphicsConfig},
     math::{Point, Scale, Size, Vec2},
-    visuals::Pixel,
     window::{Axis, Window, WindowEventHandler, WindowSpec},
 };
 
@@ -38,7 +37,7 @@ impl WindowEventHandler for AppWindow {
         println!("Window resize started");
     }
 
-    fn on_resize(&mut self, size: Size<Window>, scale: Scale<Window, Pixel>) {
+    fn on_resize(&mut self, size: Size<Window>, scale: Scale<Window, Window>) {
         println!("Window resized to {} at {:?}", size, scale);
     }
 

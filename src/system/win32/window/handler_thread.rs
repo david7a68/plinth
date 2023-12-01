@@ -1,3 +1,7 @@
+//! Window thread.
+//!
+//! Each window runs on its own thread, receiving events from a channel.
+
 use std::sync::{mpsc::Receiver, Arc};
 
 use crate::{
@@ -9,8 +13,12 @@ use crate::{
 
 use super::{Event, Window};
 
-/// Spawns a new thread to handle processing of window events. One handler
-/// thread is created for each window.
+/// Spawns a new thread to handle processing of window events.
+///
+/// Each handler thread can only handle one window and will panic if it receives
+/// more than one `Event::Create` message. The lifetime of the spawned thread is
+/// tied to the lifetime of the channel receiver and will automatically exit
+/// when the channel is closed.
 pub fn spawn<W, F>(context: AppContext, mut constructor: F, event_receiver: Receiver<Event>)
 where
     W: WindowEventHandler + 'static,
@@ -20,9 +28,14 @@ where
         let AppContext { device, sender } = context.clone();
 
         let (hwnd, handler) = {
-            let Event::Create(hwnd) = event_receiver.recv().unwrap() else {
-                panic!("First message must be Event::Create(hwnd)");
+            let hwnd = match event_receiver.recv().unwrap() {
+                Event::Create(hwnd) => hwnd,
+                msg => panic!(
+                    "First message must be Event::Create(hwnd). Got {:?} instead.",
+                    msg
+                ),
             };
+
             sender.send(AppMessage::WindowCreated).unwrap();
             (
                 hwnd,
@@ -68,6 +81,9 @@ where
     device: Arc<Device>,
     handler: W,
     swapchain: Swapchain,
+    /// The command list used for drawing operations. Owning it exclusively for
+    /// this window might be more memory intensive than a shared command list,
+    /// but it's much simpler.
     command_list: GraphicsCommandList,
     submission_id: Option<SubmissionId>,
     is_resizing: bool,
@@ -106,7 +122,7 @@ where
                         ResizeOp::Flex {
                             width,
                             height,
-                            flex: 1.5,
+                            flex: 2.0,
                         },
                     );
                 } else {

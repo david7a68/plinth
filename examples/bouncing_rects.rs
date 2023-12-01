@@ -4,8 +4,8 @@ use clap::{command, Parser, ValueEnum};
 use plinth::{
     animation::AnimationFrequency,
     application::{Application, GraphicsConfig},
+    graphics::{Canvas, Color, Srgb},
     math::{Rect, Size, Translate},
-    visuals::{Canvas, Color, Srgb, VisualTree},
     window::{Window, WindowEventHandler, WindowSpec},
 };
 
@@ -24,12 +24,7 @@ struct DemoWindow {
 
 impl DemoWindow {
     fn new(mut window: Window, throttle_animation: bool) -> Self {
-        let mut scene = VisualTree::new();
-        let (canvas_id, _) = scene.set_root(Canvas::new(window.size() * window.scale()));
-
-        window.set_scene(scene);
-        let canvas = window.scene().get::<Canvas>(canvas_id).unwrap();
-        let center = canvas.drawable_area().center();
+        let center = window.canvas().rect().center();
 
         let mut rects = Vec::new();
         for _ in 0..100 {
@@ -86,8 +81,8 @@ impl WindowEventHandler for DemoWindow {
     fn on_repaint(&mut self, timings: plinth::animation::PresentTiming) {
         let delta = timings.next_frame - self.last_present_time;
 
-        let canvas = self.window.scene_mut().root_mut::<Canvas>().unwrap();
-        let canvas_rect = canvas.drawable_area();
+        let canvas = self.window.canvas_mut();
+        let canvas_rect = canvas.rect();
 
         for rect in &mut self.rects {
             rect.rect += rect.velocity * delta;
@@ -107,7 +102,7 @@ impl WindowEventHandler for DemoWindow {
         canvas.clear(Color::BLACK);
 
         for rect in &self.rects {
-            canvas.draw_rect(rect.rect, rect.color);
+            canvas.draw_rect(rect.rect, rect.color.into());
         }
 
         // canvas repaint

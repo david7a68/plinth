@@ -1,3 +1,8 @@
+//! The Windows message pump.
+//!
+//! The message pump is located on its own thread and events are sent to an
+//! event handler via a channel.
+
 use std::{
     sync::{mpsc::Sender, OnceLock},
     time::Instant,

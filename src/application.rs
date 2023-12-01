@@ -32,6 +32,7 @@ impl Application {
     }
 }
 
+/// A reference-counted handle to application-wide state.
 #[derive(Clone)]
 #[repr(transparent)]
 pub struct AppContext {
@@ -39,6 +40,10 @@ pub struct AppContext {
 }
 
 impl AppContext {
+    /// Spawns a new window on its own thread.
+    ///
+    /// The constructor is called on the new thread to initialize any per-window
+    /// state once the window has been created, but before it is visible.
     pub fn spawn_window<W, F>(&mut self, spec: WindowSpec, constructor: F)
     where
         W: WindowEventHandler + 'static,

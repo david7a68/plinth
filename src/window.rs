@@ -1,8 +1,8 @@
 use crate::{
     animation::{AnimationFrequency, PresentTiming},
     application::AppContext,
+    graphics::Canvas,
     math::{Point, Scale, Size, Vec2},
-    visuals::{Pixel, VisualTree},
 };
 
 #[cfg(target_os = "windows")]
@@ -75,7 +75,8 @@ impl Window {
         self.inner.size()
     }
 
-    pub fn scale(&self) -> Scale<Window, Pixel> {
+    /// The HiDPI scale factor.
+    pub fn scale(&self) -> Scale<Window, Window> {
         self.inner.scale()
     }
 
@@ -87,15 +88,11 @@ impl Window {
         self.inner.set_visible(visible);
     }
 
-    pub fn scene(&self) -> &VisualTree {
+    pub fn canvas(&self) -> &Canvas {
         todo!()
     }
 
-    pub fn set_scene(&mut self, _scene: VisualTree) {
-        todo!()
-    }
-
-    pub fn scene_mut(&mut self) -> &mut VisualTree {
+    pub fn canvas_mut(&mut self) -> &mut Canvas {
         todo!()
     }
 }
@@ -111,7 +108,7 @@ pub trait WindowEventHandler {
     fn on_begin_resize(&mut self) {}
 
     #[allow(unused_variables)]
-    fn on_resize(&mut self, size: Size<Window>, scale: Scale<Window, Pixel>) {}
+    fn on_resize(&mut self, size: Size<Window>, scale: Scale<Window, Window>) {}
 
     fn on_end_resize(&mut self) {}
 

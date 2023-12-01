@@ -1,6 +1,12 @@
 mod backend;
+mod canvas;
+mod color;
+mod image;
 
 pub use self::backend::*;
+pub use self::canvas::*;
+pub use self::color::*;
+pub use self::image::*;
 
 pub enum PowerPreference {
     LowPower,

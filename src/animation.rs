@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PresentTiming {
     pub next_frame: Instant,
     pub last_frame: Instant,

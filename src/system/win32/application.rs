@@ -18,7 +18,7 @@ pub(super) enum AppMessage {
 }
 
 pub struct ApplicationImpl {
-    device: Arc<graphics::Device>,
+    graphics: Arc<graphics::Graphics>,
     sender: Sender<AppMessage>,
     receiver: Receiver<AppMessage>,
 }
@@ -28,17 +28,17 @@ impl ApplicationImpl {
         // TODO: this bound is nonsense. actually figure out what it should be.
         let (sender, receiver) = std::sync::mpsc::channel();
 
-        let device = Arc::new(graphics::Device::new(graphics));
+        let graphics = Arc::new(graphics::Graphics::new(graphics));
 
         Self {
-            device,
+            graphics,
             sender,
             receiver,
         }
     }
 
     pub fn context(&self) -> AppContextImpl {
-        AppContextImpl::new(self.device.clone(), self.sender.clone())
+        AppContextImpl::new(self.graphics.clone(), self.sender.clone())
     }
 
     pub fn spawn_window<W, F>(&mut self, spec: WindowSpec, constructor: F)
@@ -53,7 +53,6 @@ impl ApplicationImpl {
         let mut num_windows = 0;
 
         while let Ok(msg) = self.receiver.recv() {
-            println!("Received message: {:?}", msg);
             match msg {
                 AppMessage::WindowCreated => num_windows += 1,
                 AppMessage::WindowClosed => num_windows -= 1,
@@ -75,13 +74,16 @@ impl Drop for ApplicationImpl {
 
 #[derive(Clone)]
 pub struct AppContextImpl {
-    pub(crate) device: Arc<graphics::Device>,
+    pub(crate) graphics: Arc<graphics::Graphics>,
+    // pub(crate) rect_pipeline: Arc<graphics::Pipeline>,
+    // pub(crate) image_pipeline: Arc<graphics::Pipeline>,
+    // pub(crate) temp_allocator: Arc<graphics::SegmentedRingAllocator>,
     pub(super) sender: Sender<AppMessage>,
 }
 
 impl AppContextImpl {
-    fn new(device: Arc<graphics::Device>, sender: Sender<AppMessage>) -> Self {
-        Self { sender, device }
+    fn new(graphics: Arc<graphics::Graphics>, sender: Sender<AppMessage>) -> Self {
+        Self { sender, graphics }
     }
 
     pub fn spawn_window<W, F>(&mut self, spec: WindowSpec, constructor: F)

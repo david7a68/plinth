@@ -1,51 +1,57 @@
 use crate::math::Rect;
 
-use super::{Color, DefaultColorSpace, GraphicsCommandList};
+use super::{backend::GraphicsCommandList, Color, DefaultColorSpace, Image};
 
-pub struct Canvas<'a, U> {
-    rect: Rect<U>,
-    geometry: &'a mut GeometryBuffer,
-    command_list: &'a mut GraphicsCommandList,
+pub(crate) struct DrawData {
+    // todo: this will be something else soon
+    pub vertices: Vec<f32>,
+    pub indices: Vec<u32>,
+    pub command_list: GraphicsCommandList,
 }
 
-impl<'a, U> Canvas<'a, U> {
-    pub fn new(
-        rect: Rect<U>,
-        geometry: &'a mut GeometryBuffer,
-        command_list: &'a mut GraphicsCommandList,
-    ) -> Self {
+impl DrawData {
+    pub fn new(command_list: GraphicsCommandList) -> Self {
         Self {
-            rect,
-            geometry,
+            vertices: Vec::new(),
+            indices: Vec::new(),
             command_list,
         }
     }
 
+    pub fn reset(&mut self) {
+        self.command_list.reset();
+        self.vertices.clear();
+        self.indices.clear();
+    }
+
+    /// Closese the command list and copies the data to the GPU for rendering.
+    pub fn finish(&mut self) {
+        self.command_list.finish();
+    }
+}
+
+pub struct Canvas<'a, U> {
+    bounds: Rect<U>,
+    data: &'a mut DrawData,
+}
+
+impl<'a, U> Canvas<'a, U> {
+    pub(crate) fn new(data: &'a mut DrawData, bounds: Rect<U>, target: &Image) -> Self {
+        data.command_list.set_render_target(target);
+        Self { bounds, data }
+    }
+
     pub fn rect(&self) -> &Rect<U> {
-        &self.rect
+        &self.bounds
     }
 
     pub fn clear(&mut self, color: Color<DefaultColorSpace>) {
-        self.command_list
+        self.data
+            .command_list
             .clear([color.r, color.g, color.b, color.a]);
     }
 
     pub fn draw_rect(&mut self, rect: impl Into<Rect<U>>, color: Color<DefaultColorSpace>) {
-        todo!()
-    }
-}
-
-pub struct GeometryBuffer {
-    // todo: this will be something else soon
-    vertices: Vec<f32>,
-    indices: Vec<u32>,
-}
-
-impl GeometryBuffer {
-    pub fn new() -> Self {
-        Self {
-            vertices: Vec::new(),
-            indices: Vec::new(),
-        }
+        // todo, no-op
     }
 }

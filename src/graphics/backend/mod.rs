@@ -56,7 +56,7 @@ pub struct Swapchain {
 }
 
 impl Swapchain {
-    pub fn resize(&mut self, device: &Device, op: ResizeOp) {
+    fn resize(&mut self, device: &Device, op: ResizeOp) {
         match &mut self.swapchain {
             SwapchainImpl::Dx12(swapchain) => {
                 let DeviceImpl::Dx12(device) = &device.device else {
@@ -167,6 +167,10 @@ impl Device {
                 swapchain: SwapchainImpl::Dx12(device.create_swapchain(window)),
             },
         }
+    }
+
+    pub fn resize_swapchain(&self, swapchain: &mut Swapchain, op: ResizeOp) {
+        swapchain.resize(self, op);
     }
 
     pub fn create_graphics_command_list(&self) -> GraphicsCommandList {

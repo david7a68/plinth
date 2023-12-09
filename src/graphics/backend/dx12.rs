@@ -397,7 +397,11 @@ impl Dx12GraphicsCommandList {
         }
         .unwrap();
 
-        unsafe { command_list.SetName(w!("Graphics Command List")) }.unwrap();
+        unsafe {
+            command_list.Close().unwrap();
+            command_list.SetName(w!("Graphics Command List")).unwrap();
+        }
+
         Self {
             command_list,
             command_allocator,

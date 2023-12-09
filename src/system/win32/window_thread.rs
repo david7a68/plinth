@@ -7,9 +7,7 @@ use std::sync::{mpsc::Receiver, Arc};
 use parking_lot::RwLock;
 
 use crate::{
-    graphics::{
-        Canvas, Device, GeometryBuffer, GraphicsCommandList, ResizeOp, SubmissionId, Swapchain,
-    },
+    graphics::{Canvas, DrawData, Graphics, ResizeOp, SubmissionId, Swapchain},
     math::{Scale, Size},
     window::{Window, WindowEventHandler},
 };
@@ -34,7 +32,7 @@ pub(super) fn spawn<W, F>(
     F: FnMut(Window) -> W + Send + 'static,
 {
     std::thread::spawn(move || {
-        let AppContextImpl { device, sender } = context.clone();
+        let AppContextImpl { graphics, sender } = context.clone();
 
         let shared_state = Arc::new(RwLock::new(SharedState::default()));
 
@@ -58,23 +56,18 @@ pub(super) fn spawn<W, F>(
             )
         };
 
-        let swapchain = device.create_swapchain(hwnd);
-        let command_list = device.create_graphics_command_list();
+        let swapchain = graphics.create_swapchain(hwnd);
+        let draw_data = graphics.create_draw_buffer();
 
         let mut state = State {
-            device,
             handler,
             shared_state,
+            graphics,
             swapchain,
-            command_list,
-            geometry_buffer: GeometryBuffer::new(),
+            draw_data,
             submission_id: None,
             is_resizing: false,
         };
-
-        // start the command list closed so we don't have to branch on the first
-        // iteration of the loop
-        state.command_list.finish();
 
         for event in event_receiver {
             state.on_event(event);
@@ -84,7 +77,7 @@ pub(super) fn spawn<W, F>(
 
         // Make sure that the graphics thread has finished with the swapchain
         // before destroying it.
-        state.device.wait_for_idle();
+        state.graphics.wait_for_idle();
     });
 }
 
@@ -92,16 +85,13 @@ struct State<W>
 where
     W: WindowEventHandler + 'static,
 {
-    device: Arc<Device>,
     handler: W,
     shared_state: Arc<RwLock<SharedState>>,
 
+    graphics: Arc<Graphics>,
     swapchain: Swapchain,
-    /// The command list used for drawing operations. Owning it exclusively for
-    /// this window might be more memory intensive than a shared command list,
-    /// but it's much simpler.
-    command_list: GraphicsCommandList,
-    geometry_buffer: GeometryBuffer,
+    draw_data: DrawData,
+
     submission_id: Option<SubmissionId>,
     is_resizing: bool,
 }
@@ -133,18 +123,17 @@ where
                 height,
                 scale,
             } => {
-                if self.is_resizing {
-                    self.swapchain.resize(
-                        &self.device,
-                        ResizeOp::Flex {
-                            width,
-                            height,
-                            flex: 2.0,
-                        },
-                    );
+                let op = if self.is_resizing {
+                    ResizeOp::Flex {
+                        width,
+                        height,
+                        flex: 2.0,
+                    }
                 } else {
-                    self.swapchain.resize(&self.device, ResizeOp::Auto);
-                }
+                    ResizeOp::Auto
+                };
+
+                self.graphics.resize_swapchain(&mut self.swapchain, op);
 
                 let size = Size::new(width as _, height as _);
 
@@ -153,7 +142,8 @@ where
             }
             Event::EndResize => {
                 self.is_resizing = false;
-                self.swapchain.resize(&self.device, ResizeOp::Auto);
+                self.graphics
+                    .resize_swapchain(&mut self.swapchain, ResizeOp::Auto);
 
                 self.handler.on_end_resize();
             }
@@ -161,25 +151,22 @@ where
                 let (image, _) = self.swapchain.get_back_buffer();
 
                 if let Some(submission_id) = self.submission_id {
-                    self.device.wait_for_submission(submission_id);
+                    self.graphics.wait_for_submission(submission_id);
                 }
 
-                self.command_list.reset();
-                self.command_list.set_render_target(image);
-
+                self.draw_data.reset();
                 let rect = self.shared_state.read().size.into();
-                let mut canvas =
-                    Canvas::new(rect, &mut self.geometry_buffer, &mut self.command_list);
+                let mut canvas = Canvas::new(&mut self.draw_data, rect, image);
 
                 self.handler.on_repaint(&mut canvas, timings);
 
-                self.command_list.finish();
+                // copy geometry from the geometry buffer to a temp buffer and
+                // close the command list
+                self.draw_data.finish();
 
-                // copy geometry from the geometry buffer to a temp buffer
+                let submit_id = self.graphics.draw(&self.draw_data);
 
-                let submit_id = self.device.submit_graphics_command_list(&self.command_list);
                 self.submission_id = Some(submit_id);
-
                 self.swapchain.present(submit_id);
             }
             Event::PointerMove(location) => {

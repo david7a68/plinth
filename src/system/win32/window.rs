@@ -1,6 +1,3 @@
-mod event_thread;
-mod handler_thread;
-
 use std::sync::Arc;
 
 use parking_lot::RwLock;
@@ -11,17 +8,18 @@ use windows::Win32::{
 
 use crate::{
     animation::{AnimationFrequency, PresentTiming},
+    application::AppContext,
     input::{Axis, ButtonState, MouseButton},
     math::{Point, Scale, Size},
-    window::{WindowEventHandler, WindowSpec},
+    window::{Window, WindowEventHandler, WindowSpec},
 };
 
-use super::AppContext;
+use super::application::AppContextImpl;
 
-const UM_DESTROY_WINDOW: u32 = WM_USER;
+pub(super) const UM_DESTROY_WINDOW: u32 = WM_USER;
 
 #[derive(Debug)]
-pub enum Event {
+pub(super) enum Event {
     Create(HWND),
     CloseRequest,
     Destroy,
@@ -37,22 +35,22 @@ pub enum Event {
 }
 
 #[derive(Default)]
-struct SharedState {
-    size: Size<crate::window::Window>,
+pub(super) struct SharedState {
+    pub(super) size: Size<Window>,
 
     /// The most recent position of the cursor, or `None` if the cursor is not
     /// in the window's client area.
-    pointer_location: Option<Point<crate::window::Window>>,
+    pub(super) pointer_location: Option<Point<Window>>,
 }
 
-pub struct Window {
-    hwnd: HWND,
-    context: crate::application::AppContext,
-    shared_state: Arc<RwLock<SharedState>>,
+pub struct WindowImpl {
+    pub(super) hwnd: HWND,
+    pub(super) context: AppContext,
+    pub(super) shared_state: Arc<RwLock<SharedState>>,
 }
 
-impl Window {
-    pub fn app(&self) -> &crate::application::AppContext {
+impl WindowImpl {
+    pub fn app(&self) -> &AppContext {
         &self.context
     }
 
@@ -72,11 +70,11 @@ impl Window {
         todo!()
     }
 
-    pub fn size(&self) -> Size<crate::window::Window> {
+    pub fn size(&self) -> Size<Window> {
         self.shared_state.read().size
     }
 
-    pub fn scale(&self) -> Scale<crate::window::Window, crate::window::Window> {
+    pub fn scale(&self) -> Scale<Window, Window> {
         todo!()
     }
 
@@ -85,7 +83,7 @@ impl Window {
         unsafe { ShowWindow(self.hwnd, flag) };
     }
 
-    pub fn pointer_location(&self) -> Option<Point<crate::window::Window>> {
+    pub fn pointer_location(&self) -> Option<Point<Window>> {
         self.shared_state.read().pointer_location
     }
 }
@@ -102,13 +100,13 @@ impl Window {
 /// 2. Using a second thread per window gives us more control over redraw events
 ///    while in the modal event loop. This means that animations don't freeze up
 ///    or stutter while the user is resizing.
-pub fn spawn_window<W, F>(context: AppContext, spec: WindowSpec, constructor: F)
+pub(super) fn spawn_window<W, F>(context: AppContextImpl, spec: WindowSpec, constructor: F)
 where
     W: WindowEventHandler + 'static,
-    F: FnMut(crate::window::Window) -> W + Send + 'static,
+    F: FnMut(Window) -> W + Send + 'static,
 {
     let (evt_send, evt_recv) = std::sync::mpsc::channel();
 
-    event_thread::spawn(spec, evt_send);
-    handler_thread::spawn(context, constructor, evt_recv);
+    super::event_thread::spawn(spec, evt_send);
+    super::handler_thread::spawn(context, constructor, evt_recv);
 }

@@ -8,12 +8,14 @@ use parking_lot::RwLock;
 
 use crate::{
     graphics::{Device, GraphicsCommandList, ResizeOp, SubmissionId, Swapchain},
-    math::{Point, Scale, Size},
-    system::{win32::application::AppMessage, AppContext},
-    window::WindowEventHandler,
+    math::{Scale, Size},
+    window::{Window, WindowEventHandler},
 };
 
-use super::{Event, SharedState, Window};
+use super::{
+    application::{AppContextImpl, AppMessage},
+    window::{Event, SharedState, WindowImpl},
+};
 
 /// Spawns a new thread to handle processing of window events.
 ///
@@ -21,13 +23,16 @@ use super::{Event, SharedState, Window};
 /// more than one `Event::Create` message. The lifetime of the spawned thread is
 /// tied to the lifetime of the channel receiver and will automatically exit
 /// when the channel is closed.
-pub fn spawn<W, F>(context: AppContext, mut constructor: F, event_receiver: Receiver<Event>)
-where
+pub(super) fn spawn<W, F>(
+    context: AppContextImpl,
+    mut constructor: F,
+    event_receiver: Receiver<Event>,
+) where
     W: WindowEventHandler + 'static,
-    F: FnMut(crate::window::Window) -> W + Send + 'static,
+    F: FnMut(Window) -> W + Send + 'static,
 {
     std::thread::spawn(move || {
-        let AppContext { device, sender } = context.clone();
+        let AppContextImpl { device, sender } = context.clone();
 
         let shared_state = Arc::new(RwLock::new(SharedState::default()));
 
@@ -43,7 +48,7 @@ where
             sender.send(AppMessage::WindowCreated).unwrap();
             (
                 hwnd,
-                constructor(crate::window::Window::new(Window {
+                constructor(Window::new(WindowImpl {
                     hwnd,
                     context: context.into(),
                     shared_state: shared_state.clone(),

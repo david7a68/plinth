@@ -17,13 +17,13 @@ pub(super) enum AppMessage {
     WindowClosed,
 }
 
-pub struct Application {
+pub struct ApplicationImpl {
     device: Arc<graphics::Device>,
     sender: Sender<AppMessage>,
     receiver: Receiver<AppMessage>,
 }
 
-impl Application {
+impl ApplicationImpl {
     pub fn new(graphics: &GraphicsConfig) -> Self {
         // TODO: this bound is nonsense. actually figure out what it should be.
         let (sender, receiver) = std::sync::mpsc::channel();
@@ -37,8 +37,8 @@ impl Application {
         }
     }
 
-    pub fn context(&self) -> AppContext {
-        AppContext::new(self.device.clone(), self.sender.clone())
+    pub fn context(&self) -> AppContextImpl {
+        AppContextImpl::new(self.device.clone(), self.sender.clone())
     }
 
     pub fn spawn_window<W, F>(&mut self, spec: WindowSpec, constructor: F)
@@ -67,19 +67,19 @@ impl Application {
     }
 }
 
-impl Drop for Application {
+impl Drop for ApplicationImpl {
     fn drop(&mut self) {
         // wait for graphics thread to exit
     }
 }
 
 #[derive(Clone)]
-pub struct AppContext {
+pub struct AppContextImpl {
     pub(crate) device: Arc<graphics::Device>,
     pub(super) sender: Sender<AppMessage>,
 }
 
-impl AppContext {
+impl AppContextImpl {
     fn new(device: Arc<graphics::Device>, sender: Sender<AppMessage>) -> Self {
         Self { sender, device }
     }

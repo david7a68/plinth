@@ -39,7 +39,7 @@ use crate::{
     window::{WindowSpec, MAX_TITLE_LENGTH},
 };
 
-use super::{Event, UM_DESTROY_WINDOW};
+use super::window::{Event, UM_DESTROY_WINDOW};
 
 const CLASS_NAME: PCWSTR = w!("plinth_window_class");
 
@@ -55,7 +55,7 @@ struct State {
 /// Spawns a new thread and creates a window and its event loop on it.
 ///
 /// The window gets sent to the event handler thread via a channel.
-pub fn spawn(spec: WindowSpec, sender: Sender<Event>) {
+pub(super) fn spawn(spec: WindowSpec, sender: Sender<Event>) {
     std::thread::spawn(move || {
         let wndclass = ensure_wndclass_registered();
 

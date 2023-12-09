@@ -6,13 +6,13 @@ use crate::system;
 pub use crate::graphics::{Config as GraphicsConfig, PowerPreference};
 
 pub struct Application {
-    inner: system::Application,
+    inner: system::ApplicationImpl,
 }
 
 impl Application {
     pub fn new(graphics: &GraphicsConfig) -> Self {
         Self {
-            inner: system::Application::new(graphics),
+            inner: system::ApplicationImpl::new(graphics),
         }
     }
 
@@ -36,7 +36,7 @@ impl Application {
 #[derive(Clone)]
 #[repr(transparent)]
 pub struct AppContext {
-    pub(crate) inner: system::AppContext,
+    pub(crate) inner: system::AppContextImpl,
 }
 
 impl AppContext {
@@ -53,8 +53,8 @@ impl AppContext {
     }
 }
 
-impl From<system::AppContext> for AppContext {
-    fn from(inner: system::AppContext) -> Self {
+impl From<system::AppContextImpl> for AppContext {
+    fn from(inner: system::AppContextImpl) -> Self {
         Self { inner }
     }
 }

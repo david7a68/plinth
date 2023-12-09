@@ -37,11 +37,11 @@ impl Default for WindowSpec {
 }
 
 pub struct Window {
-    inner: system::Window,
+    inner: system::WindowImpl,
 }
 
 impl Window {
-    pub(crate) fn new(inner: system::Window) -> Self {
+    pub(crate) fn new(inner: system::WindowImpl) -> Self {
         Self { inner }
     }
 

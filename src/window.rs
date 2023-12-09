@@ -81,14 +81,6 @@ impl Window {
     pub fn set_visible(&mut self, visible: bool) {
         self.inner.set_visible(visible);
     }
-
-    pub fn canvas(&self) -> &Canvas {
-        todo!()
-    }
-
-    pub fn canvas_mut(&mut self) -> &mut Canvas {
-        todo!()
-    }
 }
 
 pub trait WindowEventHandler {
@@ -106,7 +98,7 @@ pub trait WindowEventHandler {
 
     fn on_end_resize(&mut self) {}
 
-    fn on_repaint(&mut self, timing: PresentTiming);
+    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: PresentTiming);
 
     #[allow(unused_variables)]
     fn on_mouse_button(

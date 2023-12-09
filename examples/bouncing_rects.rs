@@ -2,7 +2,7 @@ use std::time::Instant;
 
 use clap::{command, Parser, ValueEnum};
 use plinth::{
-    animation::AnimationFrequency,
+    animation::{AnimationFrequency, PresentTiming},
     application::{Application, GraphicsConfig},
     graphics::{Canvas, Color, Srgb},
     math::{Rect, Size, Translate},
@@ -10,9 +10,9 @@ use plinth::{
 };
 
 struct DemoRect {
-    rect: Rect<Canvas>,
+    rect: Rect<Window>,
     color: Color<Srgb>,
-    velocity: Translate<Canvas, Canvas>,
+    velocity: Translate<Window, Window>,
 }
 
 struct DemoWindow {
@@ -24,7 +24,7 @@ struct DemoWindow {
 
 impl DemoWindow {
     fn new(mut window: Window, throttle_animation: bool) -> Self {
-        let center = window.canvas().rect().center();
+        let center = Rect::from(window.size()).center();
 
         let mut rects = Vec::new();
         for _ in 0..100 {
@@ -78,10 +78,9 @@ impl WindowEventHandler for DemoWindow {
         }
     }
 
-    fn on_repaint(&mut self, timings: plinth::animation::PresentTiming) {
+    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timings: PresentTiming) {
         let delta = timings.next_frame - self.last_present_time;
 
-        let canvas = self.window.canvas_mut();
         let canvas_rect = canvas.rect();
 
         for rect in &mut self.rects {

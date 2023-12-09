@@ -7,7 +7,9 @@ use std::sync::{mpsc::Receiver, Arc};
 use parking_lot::RwLock;
 
 use crate::{
-    graphics::{Device, GraphicsCommandList, ResizeOp, SubmissionId, Swapchain},
+    graphics::{
+        Canvas, Device, GeometryBuffer, GraphicsCommandList, ResizeOp, SubmissionId, Swapchain,
+    },
     math::{Scale, Size},
     window::{Window, WindowEventHandler},
 };
@@ -65,6 +67,7 @@ pub(super) fn spawn<W, F>(
             shared_state,
             swapchain,
             command_list,
+            geometry_buffer: GeometryBuffer::new(),
             submission_id: None,
             is_resizing: false,
         };
@@ -98,6 +101,7 @@ where
     /// this window might be more memory intensive than a shared command list,
     /// but it's much simpler.
     command_list: GraphicsCommandList,
+    geometry_buffer: GeometryBuffer,
     submission_id: Option<SubmissionId>,
     is_resizing: bool,
 }
@@ -162,16 +166,21 @@ where
 
                 self.command_list.reset();
                 self.command_list.set_render_target(image);
-                self.command_list.clear([0.0, 0.0, 0.0, 1.0]);
+
+                let rect = self.shared_state.read().size.into();
+                let mut canvas =
+                    Canvas::new(rect, &mut self.geometry_buffer, &mut self.command_list);
+
+                self.handler.on_repaint(&mut canvas, timings);
+
                 self.command_list.finish();
+
+                // copy geometry from the geometry buffer to a temp buffer
 
                 let submit_id = self.device.submit_graphics_command_list(&self.command_list);
                 self.submission_id = Some(submit_id);
 
                 self.swapchain.present(submit_id);
-
-                // TODO: figure out how drawing actually works
-                self.handler.on_repaint(timings);
             }
             Event::PointerMove(location) => {
                 let location = location.into();

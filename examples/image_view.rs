@@ -1,5 +1,7 @@
 use plinth::{
+    animation::PresentTiming,
     application::{Application, GraphicsConfig},
+    graphics::Canvas,
     input::Axis,
     window::{Window, WindowEventHandler, WindowSpec},
 };
@@ -36,7 +38,7 @@ impl WindowEventHandler for DemoWindow {
     ) {
     }
 
-    fn on_repaint(&mut self, _timing: plinth::animation::PresentTiming) {
+    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, _timing: PresentTiming) {
         // todo
     }
 

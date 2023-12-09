@@ -108,5 +108,5 @@ where
     let (evt_send, evt_recv) = std::sync::mpsc::channel();
 
     super::event_thread::spawn(spec, evt_send);
-    super::handler_thread::spawn(context, constructor, evt_recv);
+    super::window_thread::spawn(context, constructor, evt_recv);
 }

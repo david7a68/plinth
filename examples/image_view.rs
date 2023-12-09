@@ -1,6 +1,6 @@
 use plinth::{
     application::{Application, GraphicsConfig},
-    math::Rect,
+    input::Axis,
     window::{Window, WindowEventHandler, WindowSpec},
 };
 
@@ -40,7 +40,7 @@ impl WindowEventHandler for DemoWindow {
         // todo
     }
 
-    fn on_scroll(&mut self, _axis: plinth::window::Axis, delta: f32) {
+    fn on_scroll(&mut self, _axis: Axis, delta: f32) {
         // todo: commented out because scenes have been removed
 
         // let pointer = self.window.pointer_location() * self.window.scale();

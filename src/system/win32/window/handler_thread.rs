@@ -4,14 +4,16 @@
 
 use std::sync::{mpsc::Receiver, Arc};
 
+use parking_lot::RwLock;
+
 use crate::{
     graphics::{Device, GraphicsCommandList, ResizeOp, SubmissionId, Swapchain},
-    math::{Scale, Size},
+    math::{Point, Scale, Size},
     system::{win32::application::AppMessage, AppContext},
     window::WindowEventHandler,
 };
 
-use super::{Event, Window};
+use super::{Event, SharedState, Window};
 
 /// Spawns a new thread to handle processing of window events.
 ///
@@ -26,6 +28,8 @@ where
 {
     std::thread::spawn(move || {
         let AppContext { device, sender } = context.clone();
+
+        let shared_state = Arc::new(RwLock::new(SharedState::default()));
 
         let (hwnd, handler) = {
             let hwnd = match event_receiver.recv().unwrap() {
@@ -42,6 +46,7 @@ where
                 constructor(crate::window::Window::new(Window {
                     hwnd,
                     context: context.into(),
+                    shared_state: shared_state.clone(),
                 })),
             )
         };
@@ -52,6 +57,7 @@ where
         let mut state = State {
             device,
             handler,
+            shared_state,
             swapchain,
             command_list,
             submission_id: None,
@@ -80,6 +86,8 @@ where
 {
     device: Arc<Device>,
     handler: W,
+    shared_state: Arc<RwLock<SharedState>>,
+
     swapchain: Swapchain,
     /// The command list used for drawing operations. Owning it exclusively for
     /// this window might be more memory intensive than a shared command list,
@@ -129,8 +137,10 @@ where
                     self.swapchain.resize(&self.device, ResizeOp::Auto);
                 }
 
-                self.handler
-                    .on_resize(Size::new(width as _, height as _), Scale::new(scale, scale));
+                let size = Size::new(width as _, height as _);
+
+                self.shared_state.write().size = size;
+                self.handler.on_resize(size, Scale::new(scale, scale));
             }
             Event::EndResize => {
                 self.is_resizing = false;
@@ -158,13 +168,28 @@ where
                 // TODO: figure out how drawing actually works
                 self.handler.on_repaint(timings);
             }
-            Event::PointerMove(location, delta) => {
-                self.handler
-                    .on_pointer_move(location.retype(), delta.retype());
+            Event::PointerMove(location) => {
+                let location = location.into();
+                let delta = {
+                    let mut shared_state = self.shared_state.write();
+                    shared_state.pointer_location = Some(location);
+
+                    if let Some(last_cursor_pos) = shared_state.pointer_location {
+                        location - last_cursor_pos
+                    } else {
+                        (0.0, 0.0).into()
+                    }
+                };
+
+                self.handler.on_pointer_move(location, delta.into());
             }
-            Event::Scroll(_, _) => {
-                self.handler.on_close_request();
+            Event::PointerLeave => {
+                self.handler.on_pointer_leave();
             }
+            Event::MouseButton(button, state, location) => {
+                self.handler.on_mouse_button(button, state, location.into());
+            }
+            Event::Scroll(axis, delta) => self.handler.on_scroll(axis, delta),
         }
     }
 }

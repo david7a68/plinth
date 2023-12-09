@@ -1,6 +1,9 @@
 mod event_thread;
 mod handler_thread;
 
+use std::sync::Arc;
+
+use parking_lot::RwLock;
 use windows::Win32::{
     Foundation::HWND,
     UI::WindowsAndMessaging::{PostMessageW, ShowWindow, SW_HIDE, SW_SHOW, WM_USER},
@@ -8,8 +11,9 @@ use windows::Win32::{
 
 use crate::{
     animation::{AnimationFrequency, PresentTiming},
-    math::{Point, Scale, Size, Vec2},
-    window::{Axis, WindowEventHandler, WindowSpec},
+    input::{Axis, ButtonState, MouseButton},
+    math::{Point, Scale, Size},
+    window::{WindowEventHandler, WindowSpec},
 };
 
 use super::AppContext;
@@ -26,13 +30,25 @@ pub enum Event {
     Resize { width: u32, height: u32, scale: f64 },
     EndResize,
     Repaint(PresentTiming),
-    PointerMove(Point<()>, Vec2<()>),
+    MouseButton(MouseButton, ButtonState, (i16, i16)),
+    PointerMove((i16, i16)),
+    PointerLeave,
     Scroll(Axis, f32),
+}
+
+#[derive(Default)]
+struct SharedState {
+    size: Size<crate::window::Window>,
+
+    /// The most recent position of the cursor, or `None` if the cursor is not
+    /// in the window's client area.
+    pointer_location: Option<Point<crate::window::Window>>,
 }
 
 pub struct Window {
     hwnd: HWND,
     context: crate::application::AppContext,
+    shared_state: Arc<RwLock<SharedState>>,
 }
 
 impl Window {
@@ -57,7 +73,7 @@ impl Window {
     }
 
     pub fn size(&self) -> Size<crate::window::Window> {
-        todo!()
+        self.shared_state.read().size
     }
 
     pub fn scale(&self) -> Scale<crate::window::Window, crate::window::Window> {
@@ -69,8 +85,8 @@ impl Window {
         unsafe { ShowWindow(self.hwnd, flag) };
     }
 
-    pub fn pointer_location(&self) -> Point<crate::window::Window> {
-        todo!()
+    pub fn pointer_location(&self) -> Option<Point<crate::window::Window>> {
+        self.shared_state.read().pointer_location
     }
 }
 

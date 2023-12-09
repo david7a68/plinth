@@ -204,6 +204,12 @@ impl<U> From<(f64, f64)> for Vec2<U> {
     }
 }
 
+impl<U1, U2, U3> From<Translate<U1, U2>> for Vec2<U3> {
+    fn from(t: Translate<U1, U2>) -> Self {
+        Self::new(t.x, t.y)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

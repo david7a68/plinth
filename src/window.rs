@@ -2,6 +2,7 @@ use crate::{
     animation::{AnimationFrequency, PresentTiming},
     application::AppContext,
     graphics::Canvas,
+    input::{Axis, ButtonState, MouseButton},
     math::{Point, Scale, Size, Vec2},
 };
 
@@ -9,13 +10,6 @@ use crate::{
 use crate::system;
 
 pub const MAX_TITLE_LENGTH: usize = 255;
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Axis {
-    X,
-    Y,
-    XY,
-}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct WindowSpec {
@@ -80,7 +74,7 @@ impl Window {
         self.inner.scale()
     }
 
-    pub fn pointer_location(&self) -> Point<Window> {
+    pub fn pointer_location(&self) -> Option<Point<Window>> {
         self.inner.pointer_location()
     }
 
@@ -115,7 +109,19 @@ pub trait WindowEventHandler {
     fn on_repaint(&mut self, timing: PresentTiming);
 
     #[allow(unused_variables)]
+    fn on_mouse_button(
+        &mut self,
+        button: MouseButton,
+        state: ButtonState,
+        location: Point<Window>,
+    ) {
+    }
+
+    #[allow(unused_variables)]
     fn on_pointer_move(&mut self, location: Point<Window>, delta: Vec2<Window>) {}
+
+    #[allow(unused_variables)]
+    fn on_pointer_leave(&mut self) {}
 
     #[allow(unused_variables)]
     fn on_scroll(&mut self, axis: Axis, delta: f32) {}

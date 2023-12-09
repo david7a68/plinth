@@ -15,20 +15,27 @@ use windows::{
         Foundation::{GetLastError, HMODULE, HWND, LPARAM, LRESULT, RECT, WPARAM},
         Graphics::Gdi::{BeginPaint, EndPaint, HBRUSH, PAINTSTRUCT},
         System::LibraryLoader::GetModuleHandleW,
-        UI::WindowsAndMessaging::{
-            AdjustWindowRect, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-            GetClientRect, GetMessageW, GetWindowLongPtrW, LoadCursorW, PeekMessageW,
-            PostQuitMessage, RegisterClassExW, SetWindowLongPtrW, ShowWindow, TranslateMessage,
-            CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HICON, HMENU, IDC_ARROW, MSG,
-            PM_NOREMOVE, SW_SHOW, WM_CLOSE, WM_DESTROY, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE,
-            WM_PAINT, WM_SHOWWINDOW, WM_TIMER, WM_WINDOWPOSCHANGED, WNDCLASSEXW,
-            WS_EX_NOREDIRECTIONBITMAP, WS_OVERLAPPEDWINDOW,
+        UI::{
+            Controls::WM_MOUSELEAVE,
+            Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT},
+            WindowsAndMessaging::{
+                AdjustWindowRect, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
+                GetClientRect, GetMessageW, GetWindowLongPtrW, LoadCursorW, PeekMessageW,
+                PostQuitMessage, RegisterClassExW, SetWindowLongPtrW, ShowWindow, TranslateMessage,
+                CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HICON, HMENU, IDC_ARROW, MSG,
+                PM_NOREMOVE, SW_SHOW, WM_CLOSE, WM_DESTROY, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE,
+                WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL,
+                WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_PAINT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SHOWWINDOW,
+                WM_TIMER, WM_WINDOWPOSCHANGED, WNDCLASSEXW, WS_EX_NOREDIRECTIONBITMAP,
+                WS_OVERLAPPEDWINDOW,
+            },
         },
     },
 };
 
 use crate::{
     animation::PresentTiming,
+    input::{Axis, ButtonState, MouseButton},
     window::{WindowSpec, MAX_TITLE_LENGTH},
 };
 
@@ -42,6 +49,7 @@ struct State {
     height: u32,
     is_size_move: bool,
     is_resizing: bool,
+    pointer_in_client_area: bool,
 }
 
 /// Spawns a new thread and creates a window and its event loop on it.
@@ -101,6 +109,7 @@ pub fn spawn(spec: WindowSpec, sender: Sender<Event>) {
             height: 0,
             is_size_move: false,
             is_resizing: false,
+            pointer_in_client_area: false,
         };
 
         unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, &mut state as *mut _ as _) };
@@ -188,6 +197,12 @@ unsafe extern "system" fn wndproc_trampoline(
     }
 }
 
+fn mouse_coords(lparam: LPARAM) -> (i16, i16) {
+    let x = (lparam.0 & 0xffff) as i16;
+    let y = ((lparam.0 >> 16) & 0xffff) as i16;
+    (x, y)
+}
+
 fn wndproc(state: &mut State, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_CLOSE => {
@@ -265,6 +280,109 @@ fn wndproc(state: &mut State, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
                 }))
                 .unwrap();
 
+            LRESULT(0)
+        }
+        WM_MOUSEMOVE => {
+            if !state.pointer_in_client_area {
+                state.pointer_in_client_area = true;
+
+                unsafe {
+                    TrackMouseEvent(&mut TRACKMOUSEEVENT {
+                        cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                        dwFlags: TME_LEAVE,
+                        hwndTrack: hwnd,
+                        dwHoverTime: 0,
+                    })
+                }
+                .unwrap();
+            }
+
+            state
+                .sender
+                .send(Event::PointerMove(mouse_coords(lparam)))
+                .unwrap();
+
+            LRESULT(0)
+        }
+        WM_MOUSELEAVE => {
+            state.pointer_in_client_area = false;
+            state.sender.send(Event::PointerLeave).unwrap();
+            LRESULT(0)
+        }
+        WM_MOUSEWHEEL => {
+            let delta = ((wparam.0 >> 16) as i16) as f32 / 120.0;
+            state.sender.send(Event::Scroll(Axis::X, delta)).unwrap();
+            LRESULT(0)
+        }
+        WM_MOUSEHWHEEL => {
+            let delta = ((wparam.0 >> 16) as i16) as f32 / 120.0;
+            state.sender.send(Event::Scroll(Axis::Y, delta)).unwrap();
+            LRESULT(0)
+        }
+        WM_LBUTTONDOWN => {
+            state
+                .sender
+                .send(Event::MouseButton(
+                    MouseButton::Left,
+                    ButtonState::Pressed,
+                    mouse_coords(lparam),
+                ))
+                .unwrap();
+            LRESULT(0)
+        }
+        WM_LBUTTONUP => {
+            state
+                .sender
+                .send(Event::MouseButton(
+                    MouseButton::Left,
+                    ButtonState::Released,
+                    mouse_coords(lparam),
+                ))
+                .unwrap();
+            LRESULT(0)
+        }
+        WM_RBUTTONDOWN => {
+            state
+                .sender
+                .send(Event::MouseButton(
+                    MouseButton::Right,
+                    ButtonState::Pressed,
+                    mouse_coords(lparam),
+                ))
+                .unwrap();
+            LRESULT(0)
+        }
+        WM_RBUTTONUP => {
+            state
+                .sender
+                .send(Event::MouseButton(
+                    MouseButton::Right,
+                    ButtonState::Released,
+                    mouse_coords(lparam),
+                ))
+                .unwrap();
+            LRESULT(0)
+        }
+        WM_MBUTTONDOWN => {
+            state
+                .sender
+                .send(Event::MouseButton(
+                    MouseButton::Middle,
+                    ButtonState::Pressed,
+                    mouse_coords(lparam),
+                ))
+                .unwrap();
+            LRESULT(0)
+        }
+        WM_MBUTTONUP => {
+            state
+                .sender
+                .send(Event::MouseButton(
+                    MouseButton::Middle,
+                    ButtonState::Released,
+                    mouse_coords(lparam),
+                ))
+                .unwrap();
             LRESULT(0)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },

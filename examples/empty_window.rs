@@ -1,8 +1,9 @@
 use plinth::{
     animation::PresentTiming,
     application::{Application, GraphicsConfig},
+    input::{Axis, ButtonState, MouseButton},
     math::{Point, Scale, Size, Vec2},
-    window::{Axis, Window, WindowEventHandler, WindowSpec},
+    window::{Window, WindowEventHandler, WindowSpec},
 };
 
 pub struct AppWindow {
@@ -49,12 +50,25 @@ impl WindowEventHandler for AppWindow {
         println!("Window repaint requested for {:?}", timing.next_frame);
     }
 
-    fn on_pointer_move(&mut self, _location: Point<Window>, _delta: Vec2<Window>) {
-        todo!()
+    fn on_mouse_button(
+        &mut self,
+        button: MouseButton,
+        state: ButtonState,
+        _location: Point<Window>,
+    ) {
+        println!("{:?} mouse button {:?}", button, state);
     }
 
-    fn on_scroll(&mut self, _axis: Axis, _delta: f32) {
-        todo!()
+    fn on_pointer_move(&mut self, location: Point<Window>, delta: Vec2<Window>) {
+        println!("pointer at {:?} with delta {:?}", location, delta);
+    }
+
+    fn on_pointer_leave(&mut self) {
+        println!("pointer left window",);
+    }
+
+    fn on_scroll(&mut self, axis: Axis, delta: f32) {
+        println!("scroll {:?} by {}", axis, delta);
     }
 }
 

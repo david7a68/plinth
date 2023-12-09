@@ -1,6 +1,7 @@
-use std::sync::Arc;
-
-use crossbeam::channel::{Receiver, Sender};
+use std::sync::{
+    mpsc::{Receiver, Sender},
+    Arc,
+};
 
 use crate::{
     application::GraphicsConfig,
@@ -25,7 +26,7 @@ pub struct Application {
 impl Application {
     pub fn new(graphics: &GraphicsConfig) -> Self {
         // TODO: this bound is nonsense. actually figure out what it should be.
-        let (sender, receiver) = crossbeam::channel::bounded(1);
+        let (sender, receiver) = std::sync::mpsc::channel();
 
         let device = Arc::new(graphics::Device::new(graphics));
 

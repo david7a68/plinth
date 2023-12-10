@@ -1,6 +1,7 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use arrayvec::ArrayVec;
+use graphics::GraphicsConfig;
 use parking_lot::Mutex;
 use windows::{
     core::{w, ComInterface, PCSTR},
@@ -203,6 +204,10 @@ impl Dx12Swapchain {
         self.last_present = Some(submission_id);
     }
 
+    pub fn wait_for_vsync(&self) {
+        unsafe { self.handle.GetContainingOutput().unwrap().WaitForVBlank() }.unwrap();
+    }
+
     #[tracing::instrument(skip(swapchain, device))]
     fn get_images(swapchain: &IDXGISwapChain3, device: &Dx12Device) -> [Image; 2] {
         let image0: ID3D12Resource = unsafe { swapchain.GetBuffer(0) }.unwrap();
@@ -262,7 +267,7 @@ pub struct Dx12Device {
 }
 
 impl Dx12Device {
-    pub fn new(config: &graphics::Config) -> Self {
+    pub fn new(config: &GraphicsConfig) -> Self {
         let mut dxgi_flags = 0;
 
         if config.debug_mode {

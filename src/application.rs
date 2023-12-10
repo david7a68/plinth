@@ -3,7 +3,7 @@ use crate::window::{Window, WindowEventHandler, WindowSpec};
 #[cfg(target_os = "windows")]
 use crate::system;
 
-pub use crate::graphics::{Config as GraphicsConfig, PowerPreference};
+pub use crate::graphics::{GraphicsConfig, PowerPreference};
 
 pub struct Application {
     inner: system::ApplicationImpl,
@@ -16,7 +16,7 @@ impl Application {
         }
     }
 
-    pub fn spawn_window<W, F>(&mut self, spec: WindowSpec, constructor: F)
+    pub fn spawn_window<W, F>(&self, spec: WindowSpec, constructor: F)
     where
         W: WindowEventHandler + 'static,
         F: FnMut(Window) -> W + Send + 'static,

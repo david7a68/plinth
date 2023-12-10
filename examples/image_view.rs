@@ -1,7 +1,6 @@
 use plinth::{
-    animation::PresentTiming,
     application::{Application, GraphicsConfig},
-    graphics::Canvas,
+    graphics::{Canvas, FrameStatistics},
     input::Axis,
     window::{Window, WindowEventHandler, WindowSpec},
 };
@@ -25,9 +24,10 @@ impl WindowEventHandler for DemoWindow {
 
     fn on_visible(&mut self, visible: bool) {
         if visible {
-            self.window.begin_animation(None);
+            self.window
+                .set_animation_frequency(self.window.refresh_rate().optimal_fps);
         } else {
-            self.window.end_animation();
+            self.window.set_animation_frequency(0.0);
         }
     }
 
@@ -38,7 +38,7 @@ impl WindowEventHandler for DemoWindow {
     ) {
     }
 
-    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, _timing: PresentTiming) {
+    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, _timing: &FrameStatistics) {
         // todo
     }
 

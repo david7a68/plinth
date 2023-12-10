@@ -2,9 +2,8 @@ use std::time::Instant;
 
 use clap::{command, Parser, ValueEnum};
 use plinth::{
-    animation::{AnimationFrequency, PresentTiming},
     application::{Application, GraphicsConfig},
-    graphics::{Canvas, Color, Srgb},
+    graphics::{Canvas, Color, FrameStatistics, Srgb},
     math::{Rect, Size, Translate},
     window::{Window, WindowEventHandler, WindowSpec},
 };
@@ -57,29 +56,25 @@ impl WindowEventHandler for DemoWindow {
             let freq = if self.throttle_animation {
                 // throttle to <= 30fps (might be e.g. 28.8 fps on a 144
                 // hz display at 1/5 refresh rate)
-                Some(AnimationFrequency {
-                    min_fps: None,
-                    max_fps: Some(30.0),
-                    optimal_fps: 30.0,
-                })
+                30.0
             } else {
                 // No throttling, default to display refresh rate. This
                 // is a polite fiction, since the display refresh rate
                 // may change at any time.
-                Some(self.window.default_animation_frequency())
+                self.window.refresh_rate().optimal_fps
 
                 // alternatively
                 // Some(self.window.max_animation_frequency())
             };
 
-            self.window.begin_animation(freq);
+            self.window.set_animation_frequency(freq);
         } else {
-            self.window.end_animation();
+            self.window.set_animation_frequency(0.0);
         }
     }
 
-    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timings: PresentTiming) {
-        let delta = timings.next_frame - self.last_present_time;
+    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timings: &FrameStatistics) {
+        let delta = timings.next_estimated_present - self.last_present_time;
 
         let canvas_rect = canvas.rect();
 
@@ -105,7 +100,7 @@ impl WindowEventHandler for DemoWindow {
         }
 
         // canvas repaint
-        self.last_present_time = timings.next_frame;
+        self.last_present_time = timings.next_estimated_present;
     }
 }
 

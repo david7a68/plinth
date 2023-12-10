@@ -3,10 +3,7 @@
 //! The message pump is located on its own thread and events are sent to an
 //! event handler via a channel.
 
-use std::{
-    sync::{mpsc::Sender, OnceLock},
-    time::Instant,
-};
+use std::sync::{mpsc::Sender, OnceLock};
 
 use arrayvec::ArrayVec;
 use windows::{
@@ -34,12 +31,11 @@ use windows::{
 };
 
 use crate::{
-    animation::PresentTiming,
     input::{Axis, ButtonState, MouseButton},
     window::{WindowSpec, MAX_TITLE_LENGTH},
 };
 
-use super::window::{Event, UM_DESTROY_WINDOW};
+use super::window::{Event, UM_ANIM_REQUEST, UM_DESTROY_WINDOW};
 
 const CLASS_NAME: PCWSTR = w!("plinth_window_class");
 
@@ -102,6 +98,11 @@ pub(super) fn spawn(spec: WindowSpec, sender: Sender<Event>) {
         };
 
         sender.send(Event::Create(hwnd)).unwrap();
+        sender
+            .send(Event::SetAnimationFrequency(
+                spec.refresh_rate.unwrap_or_default(),
+            ))
+            .unwrap();
 
         let mut state = State {
             sender,
@@ -267,18 +268,20 @@ fn wndproc(state: &mut State, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
 
             LRESULT(0)
         }
+        UM_ANIM_REQUEST => {
+            let freq = f32::from_bits(wparam.0 as u32);
+            state
+                .sender
+                .send(Event::SetAnimationFrequency(freq))
+                .unwrap();
+            LRESULT(0)
+        }
         WM_PAINT => {
             let mut ps = PAINTSTRUCT::default();
             let _hdc = unsafe { BeginPaint(hwnd, &mut ps) };
             unsafe { EndPaint(hwnd, &ps) };
 
-            state
-                .sender
-                .send(Event::Repaint(PresentTiming {
-                    next_frame: Instant::now(),
-                    last_frame: Instant::now(),
-                }))
-                .unwrap();
+            state.sender.send(Event::Repaint).unwrap();
 
             LRESULT(0)
         }
@@ -311,12 +314,12 @@ fn wndproc(state: &mut State, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
         }
         WM_MOUSEWHEEL => {
             let delta = ((wparam.0 >> 16) as i16) as f32 / 120.0;
-            state.sender.send(Event::Scroll(Axis::X, delta)).unwrap();
+            state.sender.send(Event::Scroll(Axis::Y, delta)).unwrap();
             LRESULT(0)
         }
         WM_MOUSEHWHEEL => {
             let delta = ((wparam.0 >> 16) as i16) as f32 / 120.0;
-            state.sender.send(Event::Scroll(Axis::Y, delta)).unwrap();
+            state.sender.send(Event::Scroll(Axis::X, delta)).unwrap();
             LRESULT(0)
         }
         WM_LBUTTONDOWN => {

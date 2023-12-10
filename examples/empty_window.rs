@@ -1,7 +1,6 @@
 use plinth::{
-    animation::PresentTiming,
     application::{Application, GraphicsConfig},
-    graphics::Canvas,
+    graphics::{Canvas, FrameStatistics},
     input::{Axis, ButtonState, MouseButton},
     math::{Point, Scale, Size, Vec2},
     window::{Window, WindowEventHandler, WindowSpec},
@@ -47,8 +46,11 @@ impl WindowEventHandler for AppWindow {
         println!("Window resize ended");
     }
 
-    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: PresentTiming) {
-        println!("Window repaint requested for {:?}", timing.next_frame);
+    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameStatistics) {
+        println!(
+            "Window repaint requested for {:?}",
+            timing.next_estimated_present
+        );
     }
 
     fn on_mouse_button(

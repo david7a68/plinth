@@ -41,7 +41,7 @@ impl ApplicationImpl {
         AppContextImpl::new(self.graphics.clone(), self.sender.clone())
     }
 
-    pub fn spawn_window<W, F>(&mut self, spec: WindowSpec, constructor: F)
+    pub fn spawn_window<W, F>(&self, spec: WindowSpec, constructor: F)
     where
         W: WindowEventHandler + 'static,
         F: FnMut(crate::window::Window) -> W + Send + 'static,

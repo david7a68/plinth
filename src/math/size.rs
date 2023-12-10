@@ -106,11 +106,19 @@ impl<U> std::fmt::Display for Size<U> {
     }
 }
 
-impl<U> From<(f64, f64)> for Size<U> {
-    fn from((width, height): (f64, f64)) -> Self {
-        Self::new(width, height)
-    }
+macro_rules! from_tuple {
+    ($($kind:ty),+) => {
+        $(
+            impl<U> From<($kind, $kind)> for Size<U> {
+                fn from((x, y): ($kind, $kind)) -> Self {
+                    Self::new(x as f64, y as f64)
+                }
+            }
+        )+
+    };
 }
+
+from_tuple!(u8, u16, u32, i8, i16, i32, f32, f64);
 
 impl<U> From<Vec2<U>> for Size<U> {
     fn from(vec: Vec2<U>) -> Self {

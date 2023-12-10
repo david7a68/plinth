@@ -1,6 +1,7 @@
 mod backend;
 mod canvas;
 mod color;
+mod frame_statistics;
 
 use windows::Win32::Foundation::HWND;
 
@@ -8,18 +9,19 @@ use self::backend::Device;
 pub use self::backend::{Image, ResizeOp, SubmissionId, Swapchain};
 pub use self::canvas::*;
 pub use self::color::*;
+pub use self::frame_statistics::*;
 
 pub enum PowerPreference {
     LowPower,
     HighPerformance,
 }
 
-pub struct Config {
+pub struct GraphicsConfig {
     pub power_preference: PowerPreference,
     pub debug_mode: bool,
 }
 
-impl Default for Config {
+impl Default for GraphicsConfig {
     fn default() -> Self {
         Self {
             power_preference: PowerPreference::HighPerformance,
@@ -33,7 +35,7 @@ pub(crate) struct Graphics {
 }
 
 impl Graphics {
-    pub fn new(config: &Config) -> Self {
+    pub fn new(config: &GraphicsConfig) -> Self {
         Self {
             device: Device::new(config),
         }

@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use windows::Win32::{
-    Foundation::HWND,
-    UI::WindowsAndMessaging::{PostMessageW, ShowWindow, SW_HIDE, SW_SHOW, WM_USER},
+    Foundation::{HWND, WPARAM},
+    UI::WindowsAndMessaging::{PostMessageW, ShowWindow, SW_HIDE, SW_SHOW, WM_APP},
 };
 
 use crate::{
-    animation::{AnimationFrequency, PresentTiming},
     application::AppContext,
+    graphics::RefreshRate,
     input::{Axis, ButtonState, MouseButton},
     math::{Point, Scale, Size},
     window::{Window, WindowEventHandler, WindowSpec},
@@ -16,9 +16,10 @@ use crate::{
 
 use super::application::AppContextImpl;
 
-pub(super) const UM_DESTROY_WINDOW: u32 = WM_USER;
+pub(super) const UM_DESTROY_WINDOW: u32 = WM_APP;
+pub(super) const UM_ANIM_REQUEST: u32 = WM_APP + 1;
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) enum Event {
     Create(HWND),
     CloseRequest,
@@ -27,16 +28,19 @@ pub(super) enum Event {
     BeginResize,
     Resize { width: u32, height: u32, scale: f64 },
     EndResize,
-    Repaint(PresentTiming),
+    Repaint,
     MouseButton(MouseButton, ButtonState, (i16, i16)),
     PointerMove((i16, i16)),
     PointerLeave,
     Scroll(Axis, f32),
+    SetAnimationFrequency(f32),
 }
 
 #[derive(Default)]
 pub(super) struct SharedState {
     pub(super) size: Size<Window>,
+
+    pub(super) is_visible: bool,
 
     /// The most recent position of the cursor, or `None` if the cursor is not
     /// in the window's client area.
@@ -58,15 +62,19 @@ impl WindowImpl {
         unsafe { PostMessageW(self.hwnd, UM_DESTROY_WINDOW, None, None) }.unwrap();
     }
 
-    pub fn begin_animation(&mut self, _freq: Option<AnimationFrequency>) {
-        todo!()
+    pub fn set_animation_frequency(&mut self, freq: f32) {
+        unsafe {
+            PostMessageW(
+                self.hwnd,
+                UM_ANIM_REQUEST,
+                WPARAM(freq.to_bits() as usize),
+                None,
+            )
+        }
+        .unwrap();
     }
 
-    pub fn end_animation(&mut self) {
-        todo!()
-    }
-
-    pub fn default_animation_frequency(&self) -> AnimationFrequency {
+    pub fn refresh_rate(&self) -> RefreshRate {
         todo!()
     }
 

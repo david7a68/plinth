@@ -1,7 +1,7 @@
 use dx12::{Dx12Device, Dx12GraphicsCommandList, Dx12Image, Dx12Swapchain};
 use windows::Win32::Foundation::HWND;
 
-use super::Config;
+use super::GraphicsConfig;
 
 mod dx12;
 
@@ -15,6 +15,11 @@ mod dx12;
 // - Unfortunately, this approach still has a per-call cost. However, the hope
 //   (and indeed this is an unsubstantiated hope) is that the CPU branch
 //   predictor can eliminate the cost in most cases.
+
+#[derive(Clone, Copy, Debug)]
+enum Error {
+    ObjectDestroyed,
+}
 
 pub struct Image {
     image: ImageImpl,
@@ -77,6 +82,12 @@ impl Swapchain {
     pub fn present(&mut self, submission_id: SubmissionId) {
         match &mut self.swapchain {
             SwapchainImpl::Dx12(swapchain) => swapchain.present(submission_id),
+        }
+    }
+
+    pub fn wait_for_vsync(&self) {
+        match &self.swapchain {
+            SwapchainImpl::Dx12(swapchain) => swapchain.wait_for_vsync(),
         }
     }
 }
@@ -155,7 +166,7 @@ pub struct Device {
 }
 
 impl Device {
-    pub fn new(config: &Config) -> Self {
+    pub fn new(config: &GraphicsConfig) -> Self {
         let device = DeviceImpl::Dx12(Dx12Device::new(config));
 
         Self { device }

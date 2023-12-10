@@ -2,12 +2,18 @@
 //!
 //! Each window runs on its own thread, receiving events from a channel.
 
-use std::sync::{mpsc::Receiver, Arc};
+use std::{
+    sync::{
+        mpsc::{Receiver, SyncSender, TryRecvError},
+        Arc,
+    },
+    time::Instant,
+};
 
 use parking_lot::RwLock;
 
 use crate::{
-    graphics::{Canvas, DrawData, Graphics, ResizeOp, SubmissionId, Swapchain},
+    graphics::{Canvas, DrawData, FrameStatistics, Graphics, ResizeOp, SubmissionId, Swapchain},
     math::{Scale, Size},
     window::{Window, WindowEventHandler},
 };
@@ -56,50 +62,96 @@ pub(super) fn spawn<W, F>(
             )
         };
 
-        let swapchain = graphics.create_swapchain(hwnd);
-        let draw_data = graphics.create_draw_buffer();
-
-        let mut state = State {
-            handler,
-            shared_state,
-            graphics,
-            swapchain,
-            draw_data,
-            submission_id: None,
-            is_resizing: false,
-        };
-
-        for event in event_receiver {
-            state.on_event(event);
-        }
-
+        State::new(hwnd, handler, shared_state, &graphics).run(&event_receiver);
         sender.send(AppMessage::WindowClosed).unwrap();
-
-        // Make sure that the graphics thread has finished with the swapchain
-        // before destroying it.
-        state.graphics.wait_for_idle();
     });
 }
 
-struct State<W>
+struct State<'a, W>
 where
     W: WindowEventHandler + 'static,
 {
     handler: W,
     shared_state: Arc<RwLock<SharedState>>,
 
-    graphics: Arc<Graphics>,
+    graphics: &'a Arc<Graphics>,
     swapchain: Swapchain,
     draw_data: DrawData,
+
+    target_refresh_rate: f32,
 
     submission_id: Option<SubmissionId>,
     is_resizing: bool,
 }
 
-impl<W> State<W>
+impl<'a, W> State<'a, W>
 where
     W: WindowEventHandler + 'static,
 {
+    fn new(
+        hwnd: windows::Win32::Foundation::HWND,
+        handler: W,
+        shared_state: Arc<RwLock<SharedState>>,
+        graphics: &'a Arc<Graphics>,
+    ) -> Self {
+        let swapchain = graphics.create_swapchain(hwnd);
+        let draw_data = graphics.create_draw_buffer();
+
+        Self {
+            handler,
+            shared_state,
+            graphics,
+            swapchain,
+            draw_data,
+            target_refresh_rate: 0.0,
+            submission_id: None,
+            is_resizing: false,
+        }
+    }
+
+    fn run(&mut self, event_receiver: &Receiver<Event>) {
+        while self.process_pending::<false>(event_receiver) {
+            // 0 means wait for redraw requests
+            if self.target_refresh_rate > 0.0 && self.shared_state.read().is_visible {
+                self.repaint(); // placeholder, renders every frame
+                self.swapchain.wait_for_vsync();
+            } else {
+                self.process_pending::<true>(event_receiver);
+            }
+        }
+    }
+
+    /// Returns `true` if the window is still open, `false` if it has been
+    /// destroyed.
+    fn process_pending<const BLOCK: bool>(&mut self, event_receiver: &Receiver<Event>) -> bool {
+        if BLOCK {
+            // only fails if the channel is closed
+            let Ok(event) = event_receiver.recv() else {
+                return false;
+            };
+            self.on_event(event);
+
+            if event == Event::Destroy {
+                return false;
+            }
+        }
+
+        loop {
+            match event_receiver.try_recv() {
+                Ok(event) => {
+                    self.on_event(event);
+                    if event == Event::Destroy {
+                        break false;
+                    }
+                }
+                Err(e) => match e {
+                    TryRecvError::Empty => break true,
+                    TryRecvError::Disconnected => break false,
+                },
+            }
+        }
+    }
+
     fn on_event(&mut self, event: Event) {
         match event {
             Event::Create(_) => {
@@ -137,7 +189,12 @@ where
 
                 let size = Size::new(width as _, height as _);
 
-                self.shared_state.write().size = size;
+                {
+                    let mut state = self.shared_state.write();
+                    state.size = size;
+                    state.is_visible = width > 0 && height > 0;
+                }
+
                 self.handler.on_resize(size, Scale::new(scale, scale));
             }
             Event::EndResize => {
@@ -147,27 +204,15 @@ where
 
                 self.handler.on_end_resize();
             }
-            Event::Repaint(timings) => {
-                let (image, _) = self.swapchain.get_back_buffer();
-
-                if let Some(submission_id) = self.submission_id {
-                    self.graphics.wait_for_submission(submission_id);
+            Event::SetAnimationFrequency(freq) => {
+                self.target_refresh_rate = freq;
+            }
+            Event::Repaint => {
+                // if we're already animating, don't repaint now because we'll
+                // be doing it once event processing is complete.
+                if self.target_refresh_rate == 0.0 {
+                    self.repaint();
                 }
-
-                self.draw_data.reset();
-                let rect = self.shared_state.read().size.into();
-                let mut canvas = Canvas::new(&mut self.draw_data, rect, image);
-
-                self.handler.on_repaint(&mut canvas, timings);
-
-                // copy geometry from the geometry buffer to a temp buffer and
-                // close the command list
-                self.draw_data.finish();
-
-                let submit_id = self.graphics.draw(&self.draw_data);
-
-                self.submission_id = Some(submit_id);
-                self.swapchain.present(submit_id);
             }
             Event::PointerMove(location) => {
                 let location = location.into();
@@ -192,5 +237,47 @@ where
             }
             Event::Scroll(axis, delta) => self.handler.on_scroll(axis, delta),
         }
+    }
+
+    fn repaint(&mut self) {
+        let (image, _) = self.swapchain.get_back_buffer();
+
+        if let Some(submission_id) = self.submission_id {
+            self.graphics.wait_for_submission(submission_id);
+        }
+
+        self.draw_data.reset();
+        let rect = self.shared_state.read().size.into();
+        let mut canvas = Canvas::new(&mut self.draw_data, rect, image);
+
+        let dummy_stats = FrameStatistics {
+            prev_max_frame_budget: Default::default(),
+            prev_adj_frame_budget: Default::default(),
+            prev_cpu_render_time: Default::default(),
+            prev_gpu_render_time: Default::default(),
+            prev_all_render_time: Default::default(),
+            prev_present_time: Instant::now(),
+            next_estimated_present: Instant::now(),
+        };
+
+        self.handler.on_repaint(&mut canvas, &dummy_stats);
+
+        // copy geometry from the geometry buffer to a temp buffer and
+        // close the command list
+        self.draw_data.finish();
+
+        let submit_id = self.graphics.draw(&self.draw_data);
+
+        self.submission_id = Some(submit_id);
+        self.swapchain.present(submit_id);
+    }
+}
+
+impl<W> Drop for State<'_, W>
+where
+    W: WindowEventHandler + 'static,
+{
+    fn drop(&mut self) {
+        self.graphics.wait_for_idle();
     }
 }

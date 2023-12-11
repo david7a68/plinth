@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::sync::Arc;
 
 use plinth::{
     application::Application,
@@ -9,7 +9,6 @@ use plinth::{
 
 pub struct AppWindow {
     window: Window,
-    prev_paint: Instant,
     refresh_rate: f32,
 }
 
@@ -17,7 +16,6 @@ impl AppWindow {
     fn new(window: Window) -> Self {
         Self {
             window,
-            prev_paint: Instant::now(),
             refresh_rate: 60.0,
         }
     }
@@ -29,19 +27,19 @@ impl WindowEventHandler for AppWindow {
     }
 
     fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameStatistics) {
+        // print frame stats: last frame's present time, frame budget, and current refresh rate
         println!(
-            "delta: {:?}",
-            timing.next_estimated_present - self.prev_paint
+            "repaint:\n    prev present time: {:?}\n    present time: {:?}\n    frame budget: {:?}\n    target refresh rate: {}",
+            timing.prev_present_time,
+            timing.next_present_time,
+            timing.next_present_time - timing.prev_present_time,
+            self.refresh_rate,
         );
         canvas.clear(Color::RED);
-
-        self.prev_paint = timing.next_estimated_present;
     }
 
     fn on_scroll(&mut self, axis: Axis, delta: f32) {
         if axis == Axis::Y {
-            println!("refresh rate: {}", self.refresh_rate);
-
             self.refresh_rate = 0.0_f32.max(self.refresh_rate + delta);
             self.window.set_animation_frequency(self.refresh_rate);
         }
@@ -49,7 +47,12 @@ impl WindowEventHandler for AppWindow {
 }
 
 pub fn main() {
-    let mut app = Application::new(&GraphicsConfig::default());
+    tracing_subscriber::fmt().pretty().init();
+
+    let mut app = Application::new(&GraphicsConfig {
+        debug_mode: false,
+        ..Default::default()
+    });
 
     app.spawn_window(
         WindowSpec {

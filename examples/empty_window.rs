@@ -1,6 +1,6 @@
 use plinth::{
     application::{Application, GraphicsConfig},
-    graphics::{Canvas, FrameStatistics},
+    graphics::{Canvas, Color, FrameStatistics},
     input::{Axis, ButtonState, MouseButton},
     math::{Point, Scale, Size, Vec2},
     window::{Window, WindowEventHandler, WindowSpec},
@@ -47,9 +47,10 @@ impl WindowEventHandler for AppWindow {
     }
 
     fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameStatistics) {
+        canvas.clear(Color::GREEN);
         println!(
             "Window repaint requested for {:?}",
-            timing.next_estimated_present
+            timing.next_present_time
         );
     }
 

@@ -1,28 +1,48 @@
+use std::{sync::OnceLock, thread::current};
+
 use windows::{
     core::{w, ComInterface},
     Win32::{
         Foundation::HWND,
         Graphics::{
             Direct3D12::ID3D12Resource,
+            DirectComposition::{
+                DCompositionWaitForCompositorClock, IDCompositionDevice, IDCompositionTarget,
+                IDCompositionVisual, DCOMPOSITION_FRAME_STATISTICS,
+            },
             Dxgi::{
                 Common::{
                     DXGI_ALPHA_MODE_IGNORE, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_UNKNOWN,
                     DXGI_SAMPLE_DESC,
                 },
-                IDXGISwapChain3, DXGI_PRESENT_RESTART, DXGI_RGBA, DXGI_SCALING_NONE,
+                IDXGISwapChain3, DXGI_PRESENT_RESTART, DXGI_RGBA, DXGI_SCALING_STRETCH,
                 DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
                 DXGI_USAGE_RENDER_TARGET_OUTPUT,
             },
         },
+        UI::WindowsAndMessaging::GetClientRect,
     },
 };
 
-use crate::graphics::{backend::dx12::Dx12Image, Image, ResizeOp, SubmissionId};
+use crate::graphics::{
+    backend::dx12::Dx12Image, Image, PresentStatistics, PresentTime, ResizeOp, SubmissionId,
+};
 
 use super::Dx12Device;
 
+static CAN_WAIT_FOR_COMPOSITOR_CLOCK: OnceLock<bool> = OnceLock::new();
+
 pub struct Dx12Swapchain {
     handle: IDXGISwapChain3,
+
+    #[allow(dead_code)]
+    target: IDCompositionTarget,
+
+    #[allow(dead_code)]
+    visual: IDCompositionVisual,
+
+    compositor: IDCompositionDevice,
+
     images: Option<[Image; 2]>,
     was_resized: bool,
     last_present: Option<SubmissionId>,
@@ -30,9 +50,24 @@ pub struct Dx12Swapchain {
 
 impl Dx12Swapchain {
     pub fn new(device: &Dx12Device, window: HWND) -> Self {
+        CAN_WAIT_FOR_COMPOSITOR_CLOCK.get_or_init(|| {
+            let version = windows_version::OsVersion::current();
+            version.major >= 10 && version.build >= 22000
+        });
+
+        let target = unsafe { device.compositor.CreateTargetForHwnd(window, true) }.unwrap();
+        let visual = unsafe { device.compositor.CreateVisual() }.unwrap();
+        unsafe { target.SetRoot(&visual) }.unwrap();
+
+        let (width, height) = {
+            let mut rect = Default::default();
+            unsafe { GetClientRect(window, &mut rect) }.unwrap();
+            (rect.right - rect.left, rect.bottom - rect.top)
+        };
+
         let swapchain_desc = DXGI_SWAP_CHAIN_DESC1 {
-            Width: 0,  // extract from hwnd
-            Height: 0, // extract from hwnd
+            Width: width as u32,   // extract from hwnd
+            Height: height as u32, // extract from hwnd
             Format: DXGI_FORMAT_R16G16B16A16_FLOAT,
             Stereo: false.into(),
             SampleDesc: DXGI_SAMPLE_DESC {
@@ -41,24 +76,22 @@ impl Dx12Swapchain {
             },
             BufferUsage: DXGI_USAGE_RENDER_TARGET_OUTPUT,
             BufferCount: 2,
-            Scaling: DXGI_SCALING_NONE,
+            Scaling: DXGI_SCALING_STRETCH,
             SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
             AlphaMode: DXGI_ALPHA_MODE_IGNORE, // backbuffer tranparency is ignored
             Flags: 0,
         };
 
-        let swapchain = unsafe {
-            device.dxgi_factory.CreateSwapChainForHwnd(
+        let handle = unsafe {
+            device.dxgi_factory.CreateSwapChainForComposition(
                 &device.graphics_queue.queue,
-                window,
                 &swapchain_desc,
-                None,
                 None,
             )
         }
         .unwrap_or_else(|e| {
             tracing::error!("Failed to create swapchain: {:?}", e);
-            panic!()
+            panic!();
         })
         .cast::<IDXGISwapChain3>()
         .unwrap_or_else(|e| {
@@ -70,7 +103,7 @@ impl Dx12Swapchain {
         });
 
         unsafe {
-            swapchain
+            handle
                 .SetBackgroundColor(&DXGI_RGBA {
                     r: 0.0,
                     g: 0.2,
@@ -80,12 +113,38 @@ impl Dx12Swapchain {
                 .unwrap();
         }
 
-        let images = Self::get_images(&swapchain, device);
+        unsafe { visual.SetContent(&handle) }.unwrap();
+        unsafe { device.compositor.Commit() }.unwrap();
+
+        let images = Self::get_images(&handle, device);
+
         Self {
-            handle: swapchain,
+            target,
+            visual,
+            handle,
+            compositor: device.compositor.clone(),
             images: Some(images),
             was_resized: false,
             last_present: None,
+        }
+    }
+
+    pub fn present_statistics(&self) -> PresentStatistics {
+        let mut statistics = DCOMPOSITION_FRAME_STATISTICS::default();
+        unsafe { self.compositor.GetFrameStatistics(&mut statistics) }.unwrap();
+
+        let num = statistics.currentCompositionRate.Numerator as f64;
+        let den = statistics.currentCompositionRate.Denominator as f64;
+        let current_rate = num / den;
+
+        let prev_present_time = PresentTime::from_ticks(statistics.lastFrameTime as u64);
+        let next_estimated_present_time =
+            PresentTime::from_ticks(statistics.nextEstimatedFrameTime as u64);
+
+        PresentStatistics {
+            current_rate: current_rate as f32,
+            prev_present_time,
+            next_estimated_present_time,
         }
     }
 
@@ -133,7 +192,6 @@ impl Dx12Swapchain {
         }
 
         match op {
-            ResizeOp::Auto => resize_swapchain(device, self, 0, 0),
             ResizeOp::Fixed { width, height } => resize_swapchain(device, self, width, height),
             ResizeOp::Flex {
                 width,
@@ -176,7 +234,11 @@ impl Dx12Swapchain {
     }
 
     pub fn wait_for_vsync(&self) {
-        unsafe { self.handle.GetContainingOutput().unwrap().WaitForVBlank() }.unwrap();
+        if *CAN_WAIT_FOR_COMPOSITOR_CLOCK.get().unwrap() {
+            unsafe { DCompositionWaitForCompositorClock(None, u32::MAX) };
+        } else {
+            todo!("wait for vsync without DCompositionWaitForCompositorClock")
+        }
     }
 
     #[tracing::instrument(skip(swapchain, device))]

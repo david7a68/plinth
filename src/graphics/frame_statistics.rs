@@ -1,4 +1,6 @@
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use crate::system;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FrameStatistics {
@@ -31,13 +33,100 @@ pub struct FrameStatistics {
     pub prev_all_render_time: Duration,
 
     /// The time that the last present occurred.
-    pub prev_present_time: Instant,
+    pub prev_present_time: PresentTime,
 
     /// The estimated time that the next present will occur.
-    pub next_estimated_present: Instant,
+    pub next_present_time: PresentTime,
 }
 
-impl FrameStatistics {}
+/// The time that a present has or will occur.
+///
+/// This is used because there is not always a way to construct `Instant`s from
+/// compositor timestamps.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PresentTime(Duration);
+
+impl PresentTime {
+    pub fn now() -> Self {
+        Self(system::present_time_now())
+    }
+
+    pub fn from_ticks(ticks: u64) -> Self {
+        Self(system::present_time_from_ticks(ticks))
+    }
+}
+
+impl std::ops::Add<Duration> for PresentTime {
+    type Output = Self;
+
+    fn add(self, rhs: Duration) -> Self::Output {
+        Self(self.0 + rhs)
+    }
+}
+
+impl std::ops::Sub for PresentTime {
+    type Output = PresentDuration;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        PresentDuration(self.0 - rhs.0)
+    }
+}
+
+impl PartialOrd for PresentTime {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.0.partial_cmp(&other.0)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PresentDuration(Duration);
+
+impl PresentDuration {
+    pub fn round_to_multiple_of(&self, other: Self) -> Self {
+        Self(Duration::from_secs_f64(
+            (self.0.as_secs_f64() / other.0.as_secs_f64()).round() * other.0.as_secs_f64(),
+        ))
+    }
+}
+
+impl std::ops::Div<PresentDuration> for PresentDuration {
+    type Output = f64;
+
+    fn div(self, rhs: PresentDuration) -> Self::Output {
+        self.0.as_secs_f64() / rhs.0.as_secs_f64()
+    }
+}
+
+impl std::ops::Add<PresentDuration> for PresentTime {
+    type Output = Self;
+
+    fn add(self, rhs: PresentDuration) -> Self::Output {
+        Self(self.0 + rhs.0)
+    }
+}
+
+impl std::ops::Add<PresentTime> for PresentDuration {
+    type Output = PresentTime;
+
+    fn add(self, rhs: PresentTime) -> Self::Output {
+        PresentTime(self.0 + rhs.0)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PresentStatistics {
+    pub current_rate: f32,
+
+    pub prev_present_time: PresentTime,
+
+    pub next_estimated_present_time: PresentTime,
+}
+
+impl PresentStatistics {
+    pub fn frame_budget(&self) -> PresentDuration {
+        self.next_estimated_present_time - self.prev_present_time
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RefreshRate {

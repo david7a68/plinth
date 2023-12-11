@@ -14,6 +14,7 @@ use windows::{
                 D3D12_MESSAGE_SEVERITY_INFO, D3D12_MESSAGE_SEVERITY_MESSAGE,
                 D3D12_MESSAGE_SEVERITY_WARNING,
             },
+            DirectComposition::{DCompositionCreateDevice2, IDCompositionDevice},
             Dxgi::{
                 CreateDXGIFactory2, DXGIGetDebugInterface1, IDXGIDebug, IDXGIFactory2,
                 DXGI_CREATE_FACTORY_DEBUG, DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_ALL,
@@ -31,6 +32,7 @@ pub const MAX_RENDER_TARGETS: usize = 32;
 
 pub struct Dx12Device {
     pub dxgi_factory: IDXGIFactory2,
+    pub compositor: IDCompositionDevice,
     pub device: ID3D12Device,
 
     pub graphics_queue: Queue,
@@ -48,7 +50,6 @@ impl Dx12Device {
             if let Some(controller) = controller {
                 tracing::info!("Enabling D3D12 debug layer");
                 unsafe { controller.EnableDebugLayer() };
-
                 unsafe { controller.SetEnableGPUBasedValidation(true) };
 
                 if let Ok(controller) = controller.cast::<ID3D12Debug5>() {
@@ -57,8 +58,6 @@ impl Dx12Device {
             } else {
                 tracing::warn!("Failed to enable D3D12 debug layer");
             }
-
-            dxgi_flags |= DXGI_CREATE_FACTORY_DEBUG;
 
             if let Ok(dxgi_debug) = unsafe { DXGIGetDebugInterface1::<IDXGIDebug>(0) } {
                 tracing::info!("Enabling DXGI debug layer");
@@ -71,6 +70,8 @@ impl Dx12Device {
                 }
                 .unwrap();
             }
+
+            dxgi_flags |= DXGI_CREATE_FACTORY_DEBUG;
         }
 
         let dxgi_factory: IDXGIFactory2 = unsafe { CreateDXGIFactory2(dxgi_flags) }.unwrap();
@@ -83,6 +84,8 @@ impl Dx12Device {
 
             device.unwrap()
         };
+
+        let compositor = unsafe { DCompositionCreateDevice2(None) }.unwrap();
 
         if config.debug_mode {
             if let Ok(info_queue) = device.cast::<ID3D12InfoQueue1>() {
@@ -109,6 +112,7 @@ impl Dx12Device {
 
         Self {
             dxgi_factory,
+            compositor,
             device,
             graphics_queue,
             render_target_descriptor_heap,
@@ -132,10 +136,6 @@ impl Dx12Device {
     #[tracing::instrument(skip(self))]
     pub fn wait_until(&self, submission: SubmissionId) {
         self.graphics_queue.wait(submission);
-    }
-
-    pub fn most_recently_completed_submission(&self) -> SubmissionId {
-        self.graphics_queue.last_completed()
     }
 
     pub fn submit_graphics_command_list(&self, cmd_list: &Dx12GraphicsCommandList) -> SubmissionId {

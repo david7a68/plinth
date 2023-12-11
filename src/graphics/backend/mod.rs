@@ -1,10 +1,11 @@
+use std::time::Instant;
+
 use dx12::{Dx12Device, Dx12GraphicsCommandList, Dx12Image, Dx12Swapchain};
 use windows::Win32::Foundation::HWND;
 
-use super::GraphicsConfig;
+use super::{GraphicsConfig, PresentStatistics};
 
 mod dx12;
-mod dxgi;
 
 // Implementation notes:
 //
@@ -16,11 +17,6 @@ mod dxgi;
 // - Unfortunately, this approach still has a per-call cost. However, the hope
 //   (and indeed this is an unsubstantiated hope) is that the CPU branch
 //   predictor can eliminate the cost in most cases.
-
-#[derive(Clone, Copy, Debug)]
-enum Error {
-    ObjectDestroyed,
-}
 
 pub struct Image {
     image: ImageImpl,
@@ -52,7 +48,6 @@ pub(super) enum ImageImpl {
 
 #[derive(Debug)]
 pub enum ResizeOp {
-    Auto,
     Fixed { width: u32, height: u32 },
     Flex { width: u32, height: u32, flex: f32 },
 }
@@ -62,6 +57,12 @@ pub struct Swapchain {
 }
 
 impl Swapchain {
+    pub fn present_statistics(&self) -> PresentStatistics {
+        match &self.swapchain {
+            SwapchainImpl::Dx12(swapchain) => swapchain.present_statistics(),
+        }
+    }
+
     fn resize(&mut self, device: &Device, op: ResizeOp) {
         match &mut self.swapchain {
             SwapchainImpl::Dx12(swapchain) => {
@@ -157,11 +158,6 @@ enum GraphicsCommandListImpl {
     Dx12(Dx12GraphicsCommandList),
 }
 
-struct Submit {
-    id: SubmissionId,
-    command_list: GraphicsCommandList,
-}
-
 pub struct Device {
     device: DeviceImpl,
 }
@@ -198,12 +194,6 @@ impl Device {
     pub fn wait_for_submission(&self, submission_id: SubmissionId) {
         match &self.device {
             DeviceImpl::Dx12(device) => device.wait_for_submission(submission_id),
-        }
-    }
-
-    pub fn most_recently_completed_submission(&self) -> SubmissionId {
-        match &self.device {
-            DeviceImpl::Dx12(device) => device.most_recently_completed_submission(),
         }
     }
 

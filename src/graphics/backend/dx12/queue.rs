@@ -112,11 +112,6 @@ impl Queue {
         submission.0 <= self.num_completed.load(Ordering::Acquire)
     }
 
-    pub fn last_completed(&self) -> SubmissionId {
-        self.poll_fence();
-        SubmissionId(self.num_completed.load(Ordering::Acquire))
-    }
-
     #[tracing::instrument(skip(self))]
     pub fn submit(&self, commands: &ID3D12CommandList) -> SubmissionId {
         // todo: relax ordering if possible

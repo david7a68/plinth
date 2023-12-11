@@ -1,6 +1,9 @@
 use crate::math::Rect;
 
-use super::{backend::GraphicsCommandList, Color, DefaultColorSpace, Image};
+use super::{
+    backend::{GraphicsCommandList, ResourceState},
+    Color, DefaultColorSpace, Image,
+};
 
 pub(crate) struct DrawData {
     // todo: this will be something else soon
@@ -32,13 +35,34 @@ impl DrawData {
 
 pub struct Canvas<'a, U> {
     bounds: Rect<U>,
+    target: &'a Image,
     data: &'a mut DrawData,
 }
 
 impl<'a, U> Canvas<'a, U> {
-    pub(crate) fn new(data: &'a mut DrawData, bounds: Rect<U>, target: &Image) -> Self {
+    pub(crate) fn new(data: &'a mut DrawData, bounds: Rect<U>, target: &'a Image) -> Self {
+        data.command_list.image_barrier(
+            target,
+            ResourceState::Present,
+            ResourceState::RenderTarget,
+        );
         data.command_list.set_render_target(target);
-        Self { bounds, data }
+
+        Self {
+            bounds,
+            target,
+            data,
+        }
+    }
+
+    pub(crate) fn finish(self) -> &'a mut DrawData {
+        self.data.command_list.image_barrier(
+            self.target,
+            ResourceState::RenderTarget,
+            ResourceState::Present,
+        );
+
+        self.data
     }
 
     pub fn rect(&self) -> &Rect<U> {

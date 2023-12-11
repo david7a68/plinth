@@ -22,7 +22,7 @@ struct DemoWindow {
 }
 
 impl DemoWindow {
-    fn new(mut window: Window, throttle_animation: bool) -> Self {
+    fn new(window: Window, throttle_animation: bool) -> Self {
         let center = Rect::from(window.size()).center();
 
         let mut rects = Vec::new();
@@ -74,7 +74,7 @@ impl WindowEventHandler for DemoWindow {
     }
 
     fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timings: &FrameStatistics) {
-        let delta = timings.next_estimated_present - self.last_present_time;
+        let delta = timings.next_present_time - self.last_present_time;
 
         let canvas_rect = canvas.rect();
 
@@ -100,7 +100,7 @@ impl WindowEventHandler for DemoWindow {
         }
 
         // canvas repaint
-        self.last_present_time = timings.next_estimated_present;
+        self.last_present_time = timings.next_present_time;
     }
 }
 

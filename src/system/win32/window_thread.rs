@@ -7,13 +7,16 @@ use std::{
         mpsc::{Receiver, TryRecvError},
         Arc,
     },
-    time::Instant,
+    time::Duration,
 };
 
 use parking_lot::RwLock;
 
 use crate::{
-    graphics::{Canvas, DrawData, FrameStatistics, Graphics, ResizeOp, SubmissionId, Swapchain},
+    graphics::{
+        Canvas, DrawData, FrameStatistics, Graphics, PresentStatistics, PresentTime, ResizeOp,
+        SubmissionId, Swapchain,
+    },
     math::Scale,
     window::{Window, WindowEventHandler},
 };
@@ -79,9 +82,14 @@ where
     draw_data: DrawData,
 
     target_refresh_rate: f32,
+    target_refresh_interval: Duration,
+
+    total_repaint_time: Duration,
+    present_statistics: PresentStatistics,
 
     submission_id: Option<SubmissionId>,
     is_drag_resizing: bool,
+    need_repaint: bool,
 }
 
 impl<'a, W> State<'a, W>
@@ -97,6 +105,8 @@ where
         let swapchain = graphics.create_swapchain(hwnd);
         let draw_data = graphics.create_draw_buffer();
 
+        let present_statistics = swapchain.present_statistics();
+
         Self {
             handler,
             shared_state,
@@ -104,8 +114,12 @@ where
             swapchain,
             draw_data,
             target_refresh_rate: 0.0,
+            target_refresh_interval: Duration::default(),
+            total_repaint_time: Duration::default(),
+            present_statistics,
             submission_id: None,
             is_drag_resizing: false,
+            need_repaint: false,
         }
     }
 
@@ -113,12 +127,29 @@ where
         while self.process_pending::<false>(event_receiver) {
             // 0 means wait for redraw requests
             if self.target_refresh_rate > 0.0 && self.shared_state.read().is_visible {
-                self.repaint(); // placeholder, renders every frame
-                self.swapchain.wait_for_vsync();
+                let estimated_render_complete_time = PresentTime::now() + self.total_repaint_time;
+
+                self.need_repaint = estimated_render_complete_time
+                    + self.present_statistics.frame_budget()
+                    >= self.target_present_time();
             } else {
                 self.process_pending::<true>(event_receiver);
             }
+
+            // repaint after processing inputs
+            if self.need_repaint {
+                let start = std::time::Instant::now();
+
+                self.repaint();
+                self.total_repaint_time = start.elapsed(); // todo: include gpu time
+                self.swapchain.wait_for_vsync();
+                self.present_statistics = self.swapchain.present_statistics();
+            }
         }
+    }
+
+    fn target_present_time(&self) -> PresentTime {
+        self.present_statistics.prev_present_time + self.target_refresh_interval
     }
 
     /// Returns `true` if the window is still open, `false` if it has been
@@ -184,7 +215,7 @@ where
                         flex: 2.0,
                     }
                 } else {
-                    ResizeOp::Auto
+                    ResizeOp::Fixed { width, height }
                 };
 
                 self.graphics.resize_swapchain(&mut self.swapchain, op);
@@ -201,20 +232,29 @@ where
             }
             Event::EndResize => {
                 self.is_drag_resizing = false;
-                self.graphics
-                    .resize_swapchain(&mut self.swapchain, ResizeOp::Auto);
+
+                let size = self.shared_state.read().size;
+                self.graphics.resize_swapchain(
+                    &mut self.swapchain,
+                    ResizeOp::Fixed {
+                        width: size.width as u32,
+                        height: size.height as u32,
+                    },
+                );
 
                 self.handler.on_end_resize();
             }
             Event::SetAnimationFrequency(freq) => {
                 self.target_refresh_rate = freq;
+
+                if freq == 0.0 {
+                    self.target_refresh_interval = Duration::default();
+                } else {
+                    self.target_refresh_interval = Duration::from_secs_f32(1.0 / freq);
+                }
             }
             Event::Repaint => {
-                // if we're already animating, don't repaint now because we'll
-                // be doing it once event processing is complete.
-                if self.target_refresh_rate == 0.0 {
-                    self.repaint();
-                }
+                self.need_repaint = true;
             }
             Event::PointerMove(location) => {
                 let location = location.into();
@@ -252,30 +292,38 @@ where
             self.graphics.wait_for_submission(submission_id);
         }
 
-        self.draw_data.reset();
-        let rect = self.shared_state.read().size.into();
-        let mut canvas = Canvas::new(&mut self.draw_data, rect, image);
+        let target_budget = self.target_present_time() - self.present_statistics.prev_present_time;
+        let actual_budget =
+            target_budget.round_to_multiple_of(self.present_statistics.frame_budget());
 
         let dummy_stats = FrameStatistics {
             prev_max_frame_budget: Default::default(),
             prev_adj_frame_budget: Default::default(),
-            prev_cpu_render_time: Default::default(),
+            prev_cpu_render_time: self.total_repaint_time,
             prev_gpu_render_time: Default::default(),
             prev_all_render_time: Default::default(),
-            prev_present_time: Instant::now(),
-            next_estimated_present: Instant::now(),
+            prev_present_time: self.present_statistics.prev_present_time,
+            next_present_time: actual_budget + self.present_statistics.prev_present_time,
         };
 
-        self.handler.on_repaint(&mut canvas, &dummy_stats);
+        let draw_data = {
+            self.draw_data.reset();
+            let rect = self.shared_state.read().size.into();
+
+            let mut canvas = Canvas::new(&mut self.draw_data, rect, image);
+            self.handler.on_repaint(&mut canvas, &dummy_stats);
+            canvas.finish()
+        };
 
         // copy geometry from the geometry buffer to a temp buffer and
-        // close the command list
-        self.draw_data.finish();
 
-        let submit_id = self.graphics.draw(&self.draw_data);
+        draw_data.finish();
+        let submit_id = self.graphics.draw(draw_data);
 
         self.submission_id = Some(submit_id);
         self.swapchain.present(submit_id);
+
+        self.need_repaint = false;
     }
 }
 

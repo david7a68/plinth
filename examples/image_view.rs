@@ -12,7 +12,7 @@ pub struct DemoWindow {
 }
 
 impl DemoWindow {
-    fn new(mut window: Window) -> Self {
+    fn new(window: Window) -> Self {
         Self { window }
     }
 }

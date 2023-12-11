@@ -4,6 +4,7 @@ use windows::Win32::Foundation::HWND;
 use super::GraphicsConfig;
 
 mod dx12;
+mod dxgi;
 
 // Implementation notes:
 //

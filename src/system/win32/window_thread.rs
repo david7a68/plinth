@@ -4,7 +4,7 @@
 
 use std::{
     sync::{
-        mpsc::{Receiver, SyncSender, TryRecvError},
+        mpsc::{Receiver, TryRecvError},
         Arc,
     },
     time::Instant,
@@ -14,7 +14,7 @@ use parking_lot::RwLock;
 
 use crate::{
     graphics::{Canvas, DrawData, FrameStatistics, Graphics, ResizeOp, SubmissionId, Swapchain},
-    math::{Scale, Size},
+    math::Scale,
     window::{Window, WindowEventHandler},
 };
 
@@ -81,7 +81,7 @@ where
     target_refresh_rate: f32,
 
     submission_id: Option<SubmissionId>,
-    is_resizing: bool,
+    is_drag_resizing: bool,
 }
 
 impl<'a, W> State<'a, W>
@@ -105,7 +105,7 @@ where
             draw_data,
             target_refresh_rate: 0.0,
             submission_id: None,
-            is_resizing: false,
+            is_drag_resizing: false,
         }
     }
 
@@ -129,9 +129,10 @@ where
             let Ok(event) = event_receiver.recv() else {
                 return false;
             };
-            self.on_event(event);
 
-            if event == Event::Destroy {
+            // This is so that we don't try to render after returning, even
+            // though the channel is still open.
+            if !self.on_event(event) {
                 return false;
             }
         }
@@ -139,8 +140,7 @@ where
         loop {
             match event_receiver.try_recv() {
                 Ok(event) => {
-                    self.on_event(event);
-                    if event == Event::Destroy {
+                    if !self.on_event(event) {
                         break false;
                     }
                 }
@@ -152,7 +152,8 @@ where
         }
     }
 
-    fn on_event(&mut self, event: Event) {
+    fn on_event(&mut self, event: Event) -> bool {
+        // default return true, explicitly return false if we want to exit
         match event {
             Event::Create(_) => {
                 panic!("Window already created");
@@ -162,12 +163,13 @@ where
             }
             Event::Destroy => {
                 self.handler.on_destroy();
+                return false;
             }
             Event::Visible(is_visible) => {
                 self.handler.on_visible(is_visible);
             }
             Event::BeginResize => {
-                self.is_resizing = true;
+                self.is_drag_resizing = true;
                 self.handler.on_begin_resize();
             }
             Event::Resize {
@@ -175,7 +177,7 @@ where
                 height,
                 scale,
             } => {
-                let op = if self.is_resizing {
+                let op = if self.is_drag_resizing {
                     ResizeOp::Flex {
                         width,
                         height,
@@ -187,7 +189,7 @@ where
 
                 self.graphics.resize_swapchain(&mut self.swapchain, op);
 
-                let size = Size::new(width as _, height as _);
+                let size = (width, height).into();
 
                 {
                     let mut state = self.shared_state.write();
@@ -198,7 +200,7 @@ where
                 self.handler.on_resize(size, Scale::new(scale, scale));
             }
             Event::EndResize => {
-                self.is_resizing = false;
+                self.is_drag_resizing = false;
                 self.graphics
                     .resize_swapchain(&mut self.swapchain, ResizeOp::Auto);
 
@@ -235,8 +237,12 @@ where
             Event::MouseButton(button, state, location) => {
                 self.handler.on_mouse_button(button, state, location.into());
             }
-            Event::Scroll(axis, delta) => self.handler.on_scroll(axis, delta),
+            Event::Scroll(axis, delta) => {
+                self.handler.on_scroll(axis, delta);
+            }
         }
+
+        true
     }
 
     fn repaint(&mut self) {

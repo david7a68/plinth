@@ -75,9 +75,6 @@ impl Drop for ApplicationImpl {
 #[derive(Clone)]
 pub struct AppContextImpl {
     pub(crate) graphics: Arc<graphics::Graphics>,
-    // pub(crate) rect_pipeline: Arc<graphics::Pipeline>,
-    // pub(crate) image_pipeline: Arc<graphics::Pipeline>,
-    // pub(crate) temp_allocator: Arc<graphics::SegmentedRingAllocator>,
     pub(super) sender: Sender<AppMessage>,
 }
 

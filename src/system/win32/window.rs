@@ -2,13 +2,13 @@ use std::sync::Arc;
 
 use parking_lot::RwLock;
 use windows::Win32::{
-    Foundation::{HWND, WPARAM},
+    Foundation::{HWND, LPARAM, WPARAM},
     UI::WindowsAndMessaging::{PostMessageW, ShowWindow, SW_HIDE, SW_SHOW, WM_APP},
 };
 
 use crate::{
     application::AppContext,
-    graphics::RefreshRate,
+    graphics::{FramesPerSecond, RefreshRate},
     input::{Axis, ButtonState, MouseButton},
     math::{Point, Scale, Size},
     window::{Window, WindowEventHandler, WindowSpec},
@@ -33,7 +33,7 @@ pub(super) enum Event {
     PointerMove((i16, i16)),
     PointerLeave,
     Scroll(Axis, f32),
-    SetAnimationFrequency(f32),
+    SetAnimationFrequency(FramesPerSecond),
 }
 
 #[derive(Default)]
@@ -62,12 +62,12 @@ impl WindowImpl {
         unsafe { PostMessageW(self.hwnd, UM_DESTROY_WINDOW, None, None) }.unwrap();
     }
 
-    pub fn set_animation_frequency(&mut self, freq: f32) {
+    pub fn set_animation_frequency(&mut self, freq: FramesPerSecond) {
         unsafe {
             PostMessageW(
                 self.hwnd,
                 UM_ANIM_REQUEST,
-                WPARAM(freq.to_bits() as usize),
+                WPARAM(freq.0.to_bits() as usize),
                 None,
             )
         }

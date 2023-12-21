@@ -2,19 +2,19 @@ use std::time::Duration;
 
 use plinth::{
     application::Application,
-    graphics::{Canvas, Color, FrameStatistics, GraphicsConfig, PresentDuration},
+    graphics::{Canvas, Color, FrameInfo, FramesPerSecond, GraphicsConfig},
     input::Axis,
     window::{Window, WindowEventHandler, WindowSpec},
 };
 
-const STARTING_REFRESH_RATE: f32 = 60.0;
+const STARTING_REFRESH_RATE: FramesPerSecond = FramesPerSecond(60.0);
 
 // consume 100ms per frame (10fps), the clock should correct accordingly
 const SLEEP_PER_FRAME: Duration = Duration::from_millis(100);
 
 pub struct AppWindow {
     window: Window,
-    refresh_rate: f32,
+    refresh_rate: FramesPerSecond,
 }
 
 impl AppWindow {
@@ -31,15 +31,15 @@ impl WindowEventHandler for AppWindow {
         self.window.close();
     }
 
-    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameStatistics) {
+    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameInfo) {
         // print frame stats: last frame's present time, frame budget, and current refresh rate
         println!(
-            "repaint:\n    prev present time: {:?}\n    present time: {:?}\n    frame budget: {:?}\n    target refresh rate: {}\n    estimated refresh rate: {}",
-            timing.prev_present_time,
-            timing.next_present_time,
-            timing.next_present_time - timing.prev_present_time,
+            "repaint:\n    prev present time: {:?}\n    present time: {:?}\n    frame budget: {:?}\n    target refresh rate: {:?}\n    estimated refresh rate: {:?}",
+            timing.prev_present,
+            timing.next_present,
+            timing.next_present - timing.prev_present,
             self.refresh_rate,
-            PresentDuration::from_secs_f32(1.0) / (timing.next_present_time - timing.prev_present_time)
+            (timing.next_present - timing.prev_present).as_frames_per_second()
         );
         canvas.clear(Color::RED);
 
@@ -48,7 +48,9 @@ impl WindowEventHandler for AppWindow {
 
     fn on_scroll(&mut self, axis: Axis, delta: f32) {
         if axis == Axis::Y {
-            self.refresh_rate = 0.0_f32.max(self.refresh_rate + delta);
+            self.refresh_rate =
+                (self.refresh_rate + FramesPerSecond(delta as _)).max(FramesPerSecond::ZERO);
+
             self.window.set_animation_frequency(self.refresh_rate);
         }
     }

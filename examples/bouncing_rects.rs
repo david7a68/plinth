@@ -1,9 +1,7 @@
-use std::time::Instant;
-
 use clap::{command, Parser, ValueEnum};
 use plinth::{
     application::{Application, GraphicsConfig},
-    graphics::{Canvas, Color, FrameStatistics, Srgb},
+    graphics::{Canvas, Color, FrameInfo, FramesPerSecond, PresentInstant, Srgb},
     math::{Rect, Size, Translate},
     window::{Window, WindowEventHandler, WindowSpec},
 };
@@ -18,7 +16,7 @@ struct DemoWindow {
     window: Window,
     rects: Vec<DemoRect>,
     throttle_animation: bool,
-    last_present_time: Instant,
+    last_present_time: PresentInstant,
 }
 
 impl DemoWindow {
@@ -41,7 +39,7 @@ impl DemoWindow {
             window,
             rects,
             throttle_animation,
-            last_present_time: Instant::now(),
+            last_present_time: PresentInstant::now(),
         }
     }
 }
@@ -56,7 +54,7 @@ impl WindowEventHandler for DemoWindow {
             let freq = if self.throttle_animation {
                 // throttle to <= 30fps (might be e.g. 28.8 fps on a 144
                 // hz display at 1/5 refresh rate)
-                30.0
+                FramesPerSecond(30.0)
             } else {
                 // No throttling, default to display refresh rate. This
                 // is a polite fiction, since the display refresh rate
@@ -69,12 +67,12 @@ impl WindowEventHandler for DemoWindow {
 
             self.window.set_animation_frequency(freq);
         } else {
-            self.window.set_animation_frequency(0.0);
+            self.window.set_animation_frequency(FramesPerSecond::ZERO);
         }
     }
 
-    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timings: &FrameStatistics) {
-        let delta = timings.next_present_time - self.last_present_time;
+    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timings: &FrameInfo) {
+        let delta = timings.next_present.time - self.last_present_time;
 
         let canvas_rect = canvas.rect();
 
@@ -100,7 +98,7 @@ impl WindowEventHandler for DemoWindow {
         }
 
         // canvas repaint
-        self.last_present_time = timings.next_present_time;
+        self.last_present_time = timings.next_present.time;
     }
 }
 

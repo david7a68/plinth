@@ -1,6 +1,6 @@
 use plinth::{
     application::{Application, GraphicsConfig},
-    graphics::{Canvas, FrameStatistics},
+    graphics::{Canvas, FrameInfo, FramesPerSecond},
     input::Axis,
     window::{Window, WindowEventHandler, WindowSpec},
 };
@@ -27,7 +27,7 @@ impl WindowEventHandler for DemoWindow {
             self.window
                 .set_animation_frequency(self.window.refresh_rate().optimal_fps);
         } else {
-            self.window.set_animation_frequency(0.0);
+            self.window.set_animation_frequency(FramesPerSecond::ZERO);
         }
     }
 
@@ -38,7 +38,7 @@ impl WindowEventHandler for DemoWindow {
     ) {
     }
 
-    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, _timing: &FrameStatistics) {
+    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, _timing: &FrameInfo) {
         // todo
     }
 

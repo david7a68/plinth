@@ -31,6 +31,7 @@ use windows::{
 };
 
 use crate::{
+    graphics::FramesPerSecond,
     input::{Axis, ButtonState, MouseButton},
     window::{WindowSpec, MAX_TITLE_LENGTH},
 };
@@ -269,10 +270,10 @@ fn wndproc(state: &mut State, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
             LRESULT(0)
         }
         UM_ANIM_REQUEST => {
-            let freq = f32::from_bits(wparam.0 as u32);
+            let freq = f64::from_bits(wparam.0 as u64);
             state
                 .sender
-                .send(Event::SetAnimationFrequency(freq))
+                .send(Event::SetAnimationFrequency(FramesPerSecond(freq as f64)))
                 .unwrap();
             LRESULT(0)
         }

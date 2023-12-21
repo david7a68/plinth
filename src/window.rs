@@ -1,6 +1,6 @@
 use crate::{
     application::AppContext,
-    graphics::{Canvas, FrameStatistics, RefreshRate},
+    graphics::{Canvas, FrameInfo, FramesPerSecond, RefreshRate},
     input::{Axis, ButtonState, MouseButton},
     math::{Point, Scale, Size, Vec2},
 };
@@ -18,7 +18,7 @@ pub struct WindowSpec {
     pub max_size: Option<Size<Window>>,
     pub resizable: bool,
     pub visible: bool,
-    pub refresh_rate: Option<f32>,
+    pub refresh_rate: Option<FramesPerSecond>,
 }
 
 impl Default for WindowSpec {
@@ -52,7 +52,7 @@ impl Window {
         self.inner.close();
     }
 
-    pub fn set_animation_frequency(&mut self, freq: f32) {
+    pub fn set_animation_frequency(&mut self, freq: FramesPerSecond) {
         self.inner.set_animation_frequency(freq);
     }
 
@@ -93,7 +93,7 @@ pub trait WindowEventHandler {
 
     fn on_end_resize(&mut self) {}
 
-    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameStatistics);
+    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameInfo);
 
     #[allow(unused_variables)]
     fn on_mouse_button(

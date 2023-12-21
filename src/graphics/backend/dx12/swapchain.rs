@@ -25,7 +25,8 @@ use windows::{
 };
 
 use crate::graphics::{
-    backend::dx12::Dx12Image, Image, PresentInstant, PresentStatistics, ResizeOp, SubmissionId,
+    backend::dx12::Dx12Image, FramesPerSecond, Image, PresentInstant, PresentStatistics, ResizeOp,
+    SubmissionId,
 };
 
 use super::Dx12Device;
@@ -142,7 +143,7 @@ impl Dx12Swapchain {
             PresentInstant::from_ticks(statistics.nextEstimatedFrameTime as u64);
 
         PresentStatistics {
-            monitor_rate: current_rate as f32,
+            monitor_rate: FramesPerSecond(current_rate),
             prev_present_time,
             next_estimated_present_time,
         }

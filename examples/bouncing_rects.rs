@@ -1,6 +1,6 @@
 use clap::{command, Parser, ValueEnum};
 use plinth::{
-    graphics::{Canvas, Color, FrameInfo, GraphicsConfig, PresentInstant, Srgb},
+    graphics::{Canvas, Color, FrameInfo, GraphicsConfig, PresentInstant},
     math::{Rect, Size, Translate},
     time::FramesPerSecond,
     Application, Window, WindowEventHandler, WindowSpec,
@@ -8,7 +8,7 @@ use plinth::{
 
 struct DemoRect {
     rect: Rect<Window>,
-    color: Color<Srgb>,
+    color: Color,
     velocity: Translate<Window, Window>,
 }
 

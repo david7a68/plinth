@@ -2,7 +2,7 @@ use crate::math::Rect;
 
 use super::{
     backend::{GraphicsCommandList, Image, ResourceState},
-    Color, DefaultColorSpace,
+    Color,
 };
 
 pub(crate) struct DrawData {
@@ -69,13 +69,13 @@ impl<'a, U> Canvas<'a, U> {
         &self.bounds
     }
 
-    pub fn clear(&mut self, color: Color<DefaultColorSpace>) {
+    pub fn clear(&mut self, color: Color) {
         self.data
             .command_list
             .clear([color.r, color.g, color.b, color.a]);
     }
 
-    pub fn draw_rect(&mut self, rect: impl Into<Rect<U>>, color: Color<DefaultColorSpace>) {
+    pub fn draw_rect(&mut self, rect: impl Into<Rect<U>>, color: Color) {
         // todo, no-op
     }
 }

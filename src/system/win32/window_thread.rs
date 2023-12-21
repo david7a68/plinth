@@ -16,7 +16,7 @@ use crate::{
     graphics::{
         backend::{ResizeOp, SubmissionId, Swapchain},
         Canvas, DrawData, FrameInfo, FramesPerSecond, Graphics, Present, PresentInstant,
-        PresentStatistics, SecondsPerFrame,
+        PresentStatistics, RefreshRate, SecondsPerFrame,
     },
     math::Scale,
     window::{Window, WindowEventHandler},
@@ -137,8 +137,13 @@ where
 
                 self.swapchain.wait_for_vsync();
 
-                self.repaint_clock
-                    .update(&self.swapchain.present_statistics());
+                let present_info = self.swapchain.present_statistics();
+                self.repaint_clock.update(&present_info);
+                self.shared_state.write().refresh_rate = RefreshRate {
+                    min_fps: FramesPerSecond(0.0),
+                    max_fps: present_info.monitor_rate,
+                    optimal_fps: self.repaint_clock.effective_refresh_rate,
+                };
             }
         }
     }
@@ -288,9 +293,8 @@ where
             canvas.finish()
         };
 
-        // copy geometry from the geometry buffer to a temp buffer and
-
         draw_data.finish();
+        // copy geometry from the geometry buffer to a temp buffer and
         let submit_id = self.graphics.draw(draw_data);
 
         self.submission_id = Some(submit_id);
@@ -369,9 +373,26 @@ impl RepaintClock {
         // on the previous frame.
         let estimated_render_complete_time = PresentInstant::now() + estimated_render_time;
 
+        tracing::info!("estimated_render_time: {:?}", estimated_render_time);
+
+        tracing::info!(
+            "estimated_render_complete_time: {:?}",
+            estimated_render_complete_time
+        );
+
+        tracing::info!(
+            "next_target_present_time: {:?}",
+            self.next_target_present_time
+        );
+
         // The estimated time until we are able to present the next frame
         // (rendering is complete).
         let estimated_time_until_present = estimated_render_complete_time - self.prev_present_time;
+
+        tracing::info!(
+            "estimated_time_until_present: {:?}",
+            estimated_time_until_present
+        );
 
         // The number of monitor refreshes until we are next able to present,
         // adjusted to the next vsync.
@@ -379,7 +400,13 @@ impl RepaintClock {
             .monitor_refresh_time
             .interval_over(estimated_time_until_present);
 
+        tracing::info!("estimated_intervals: {:?}", estimated_intervals);
+
+        tracing::info!("prev_present_time: {:?}", self.prev_present_time);
+
         let estimated_present_time = self.prev_present_time + estimated_intervals.time;
+
+        tracing::info!("estimated_present_time: {:?}", estimated_present_time);
 
         FrameInfo {
             prev_present: Present {

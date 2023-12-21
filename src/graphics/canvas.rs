@@ -1,19 +1,23 @@
+use std::cell::RefCell;
+
 use crate::math::Rect;
 
 use super::{
-    backend::{GraphicsCommandList, Image, ResourceState},
+    backend::{Buffer, Device, GraphicsCommandList, Image, ResourceState},
     Color, RoundRect,
 };
 
 pub(crate) struct DrawData {
     pub rects: Vec<RoundRect<()>>,
+    pub buffer: RefCell<Buffer>,
     pub command_list: GraphicsCommandList,
 }
 
 impl DrawData {
-    pub fn new(command_list: GraphicsCommandList) -> Self {
+    pub fn new(buffer: Buffer, command_list: GraphicsCommandList) -> Self {
         Self {
-            rects: Vec::new(),
+            rects: vec![],
+            buffer: RefCell::new(buffer),
             command_list,
         }
     }
@@ -23,9 +27,28 @@ impl DrawData {
         self.rects.clear();
     }
 
-    /// Closese the command list and copies the data to the GPU for rendering.
-    pub fn finish(&mut self) {
+    /// Makes the draw data ready for rendering.
+    pub(crate) fn finish(&mut self) {
         self.command_list.finish();
+    }
+
+    pub(super) fn sync_to_gpu(&self, device: &Device) {
+        let mut buffer = self.buffer.borrow_mut();
+
+        let rect_size = std::mem::size_of_val(self.rects.as_slice());
+        let buffer_size = rect_size;
+
+        if buffer_size > buffer.size() as usize {
+            device.resize_memory(&mut buffer, rect_size as u64);
+        }
+
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                self.rects.as_ptr() as *const u8,
+                buffer.as_mut_slice().as_mut_ptr(),
+                rect_size,
+            );
+        }
     }
 }
 

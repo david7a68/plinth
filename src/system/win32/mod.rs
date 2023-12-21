@@ -26,7 +26,7 @@ pub fn present_time_now() -> Duration {
     Duration::from_micros(micros as u64)
 }
 
-pub fn present_time_from_ticks(ticks: u64) -> Duration {
-    let micros = (ticks * 1_000_000) / *QPF_FREQUENCY as u64;
+pub fn present_time_from_ticks(ticks: u64, frequency: u64) -> Duration {
+    let micros = (ticks * 1_000_000) / frequency as u64;
     Duration::from_micros(micros as u64)
 }

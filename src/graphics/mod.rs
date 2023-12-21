@@ -52,12 +52,13 @@ impl Graphics {
 
     pub fn create_draw_buffer(&self) -> DrawData {
         let command_list = self.device.create_graphics_command_list();
-        DrawData::new(command_list)
+        let buffer = self.device.allocate_memory(1024 * 1024);
+        DrawData::new(buffer, command_list)
     }
 
-    pub fn draw(&self, buffer: &DrawData) -> SubmissionId {
-        self.device
-            .submit_graphics_command_list(&buffer.command_list)
+    pub fn draw(&self, data: &DrawData) -> SubmissionId {
+        data.sync_to_gpu(&self.device);
+        self.device.submit_graphics_command_list(&data.command_list)
     }
 
     pub fn wait_for_submission(&self, submission_id: SubmissionId) {

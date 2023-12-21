@@ -49,9 +49,9 @@ impl PresentInstant {
         system::present_time_now() - self.time
     }
 
-    pub(crate) fn from_ticks(ticks: u64) -> Self {
+    pub(crate) fn from_ticks(ticks: u64, frequency: u64) -> Self {
         Self {
-            time: system::present_time_from_ticks(ticks),
+            time: system::present_time_from_ticks(ticks, frequency),
         }
     }
 }
@@ -99,7 +99,7 @@ pub(crate) struct PresentStatistics {
     pub next_estimated_present_time: PresentInstant,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RefreshRate {
     /// The slowest acceptable refresh rate.
     ///

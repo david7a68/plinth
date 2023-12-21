@@ -1,4 +1,6 @@
-use dx12::{Dx12Device, Dx12GraphicsCommandList, Dx12Image, Dx12Swapchain};
+use std::ptr::NonNull;
+
+use dx12::{Dx12Buffer, Dx12Device, Dx12GraphicsCommandList, Dx12Image, Dx12Swapchain};
 use windows::Win32::Foundation::HWND;
 
 use super::{GraphicsConfig, PresentStatistics};
@@ -156,6 +158,28 @@ enum GraphicsCommandListImpl {
     Dx12(Dx12GraphicsCommandList),
 }
 
+pub(crate) struct Buffer {
+    memory: BufferImpl,
+}
+
+impl Buffer {
+    pub fn size(&self) -> u64 {
+        match &self.memory {
+            BufferImpl::Dx12(memory) => memory.size(),
+        }
+    }
+
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        match &mut self.memory {
+            BufferImpl::Dx12(memory) => memory.as_mut_slice(),
+        }
+    }
+}
+
+enum BufferImpl {
+    Dx12(Dx12Buffer),
+}
+
 pub(crate) struct Device {
     device: DeviceImpl,
 }
@@ -177,6 +201,25 @@ impl Device {
 
     pub fn resize_swapchain(&self, swapchain: &mut Swapchain, op: ResizeOp) {
         swapchain.resize(self, op);
+    }
+
+    pub fn allocate_memory(&self, size: u64) -> Buffer {
+        match &self.device {
+            DeviceImpl::Dx12(device) => Buffer {
+                memory: BufferImpl::Dx12(device.allocate_buffer(size)),
+            },
+        }
+    }
+
+    pub fn resize_memory(&self, memory: &mut Buffer, size: u64) {
+        match &mut memory.memory {
+            BufferImpl::Dx12(memory) => {
+                let DeviceImpl::Dx12(device) = &self.device else {
+                    panic!()
+                };
+                memory.resize(device, size);
+            }
+        }
     }
 
     pub fn create_graphics_command_list(&self) -> GraphicsCommandList {

@@ -1,4 +1,4 @@
-use std::{sync::OnceLock, thread::current};
+use std::sync::OnceLock;
 
 use windows::{
     core::{w, ComInterface},
@@ -138,9 +138,14 @@ impl Dx12Swapchain {
         let den = statistics.currentCompositionRate.Denominator as f64;
         let current_rate = num / den;
 
-        let prev_present_time = PresentInstant::from_ticks(statistics.lastFrameTime as u64);
-        let next_estimated_present_time =
-            PresentInstant::from_ticks(statistics.nextEstimatedFrameTime as u64);
+        let prev_present_time = PresentInstant::from_ticks(
+            statistics.lastFrameTime as u64,
+            statistics.timeFrequency as u64,
+        );
+        let next_estimated_present_time = PresentInstant::from_ticks(
+            statistics.nextEstimatedFrameTime as u64,
+            statistics.timeFrequency as u64,
+        );
 
         PresentStatistics {
             monitor_rate: FramesPerSecond(current_rate),

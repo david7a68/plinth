@@ -1,80 +1,127 @@
-use arrayvec::ArrayVec;
-
-use windows::Win32::Graphics::Direct3D12::{
-    ID3D12DescriptorHeap, ID3D12Device, D3D12_CPU_DESCRIPTOR_HANDLE, D3D12_DESCRIPTOR_HEAP_DESC,
-    D3D12_DESCRIPTOR_HEAP_FLAG_NONE, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
-    D3D12_DESCRIPTOR_HEAP_TYPE, D3D12_GPU_DESCRIPTOR_HANDLE,
+use std::{
+    ffi::c_void,
+    mem::{ManuallyDrop, MaybeUninit},
+    ptr::NonNull,
 };
 
-pub struct SimpleDescriptorHeap<const COUNT: usize> {
-    cpu_heap_start: D3D12_CPU_DESCRIPTOR_HANDLE,
-    gpu_heap_start: D3D12_GPU_DESCRIPTOR_HANDLE,
-    handle_size: u32,
-    indices: ArrayVec<u16, COUNT>,
-    heap: ID3D12DescriptorHeap,
+use windows::Win32::Graphics::{
+    Direct3D12::{
+        ID3D12Resource, D3D12_CPU_PAGE_PROPERTY_UNKNOWN, D3D12_HEAP_FLAG_NONE,
+        D3D12_HEAP_PROPERTIES, D3D12_HEAP_TYPE_UPLOAD, D3D12_MEMORY_POOL_UNKNOWN,
+        D3D12_RESOURCE_DESC, D3D12_RESOURCE_DIMENSION_BUFFER, D3D12_RESOURCE_FLAG_NONE,
+        D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+    },
+    Dxgi::Common::{DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC},
+};
+
+use super::Dx12Device;
+
+pub(crate) struct Dx12Buffer {
+    // Use this instead of querying the buffer to avoid a virtual call.
+    size: u64,
+
+    // We currently assume that we're only working with upload buffers. This may
+    // (probably will) change in the future.
+    mapped: NonNull<c_void>,
+
+    // This allows us to free the resource before allocating a new one to
+    // replace it.
+    buffer: MaybeUninit<ID3D12Resource>,
 }
 
-impl<const COUNT: usize> SimpleDescriptorHeap<COUNT> {
-    pub fn new(
-        device: &ID3D12Device,
-        kind: D3D12_DESCRIPTOR_HEAP_TYPE,
-        shader_visible: bool,
-    ) -> Self {
-        let heap_desc = D3D12_DESCRIPTOR_HEAP_DESC {
-            Type: kind,
-            NumDescriptors: COUNT as u32,
-            Flags: if shader_visible {
-                D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE
-            } else {
-                D3D12_DESCRIPTOR_HEAP_FLAG_NONE
-            },
-            NodeMask: 0,
+impl Dx12Buffer {
+    pub fn new(device: &Dx12Device, size: u64) -> Self {
+        let buffer = alloc_buffer(device, size);
+
+        let mapped = {
+            let mut mapped = std::ptr::null_mut();
+            unsafe { buffer.Map(0, None, Some(&mut mapped)) }.unwrap();
+            NonNull::new(mapped).unwrap()
         };
 
-        let heap: ID3D12DescriptorHeap = unsafe { device.CreateDescriptorHeap(&heap_desc) }
-            .unwrap_or_else(|e| {
-                tracing::error!("Failed to create descriptor heap: {:?}", e);
-                panic!()
-            });
-
-        debug_assert!(COUNT <= u16::MAX as usize);
-
         Self {
-            cpu_heap_start: unsafe { heap.GetCPUDescriptorHandleForHeapStart() },
-            gpu_heap_start: shader_visible
-                .then(|| unsafe { heap.GetGPUDescriptorHandleForHeapStart() })
-                .unwrap_or_default(),
-            handle_size: unsafe { device.GetDescriptorHandleIncrementSize(kind) },
-            indices: (0..COUNT).map(|i| i as u16).collect(),
-            heap,
+            size,
+            mapped,
+            buffer: MaybeUninit::new(buffer),
         }
     }
 
-    pub fn gpu_handle(
-        &self,
-        cpu_handle: D3D12_CPU_DESCRIPTOR_HANDLE,
-    ) -> D3D12_GPU_DESCRIPTOR_HANDLE {
-        D3D12_GPU_DESCRIPTOR_HANDLE {
-            ptr: self.gpu_heap_start.ptr + self.check_cpu_offset(cpu_handle) as u64,
+    pub fn size(&self) -> u64 {
+        self.size
+    }
+
+    pub fn resize(&mut self, device: &Dx12Device, size: u64) {
+        unsafe {
+            self.buffer.assume_init_ref().Unmap(0, None);
+            self.buffer.assume_init_drop();
+        }
+
+        let buffer = alloc_buffer(device, size);
+
+        self.mapped = {
+            let mut mapped = std::ptr::null_mut();
+            unsafe { buffer.Map(0, None, Some(&mut mapped)) }.unwrap();
+            NonNull::new(mapped).unwrap()
+        };
+
+        self.buffer = MaybeUninit::new(buffer);
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        unsafe { std::slice::from_raw_parts(self.mapped.as_ptr() as *const u8, self.size as usize) }
+    }
+
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        unsafe {
+            std::slice::from_raw_parts_mut(self.mapped.as_ptr() as *mut u8, self.size as usize)
         }
     }
+}
 
-    pub fn allocate(&mut self) -> Option<D3D12_CPU_DESCRIPTOR_HANDLE> {
-        self.indices.pop().map(|i| D3D12_CPU_DESCRIPTOR_HANDLE {
-            ptr: self.cpu_heap_start.ptr + usize::try_from(i as u32 * self.handle_size).unwrap(),
-        })
+impl Drop for Dx12Buffer {
+    fn drop(&mut self) {
+        unsafe { self.buffer.assume_init_drop() };
     }
+}
 
-    pub fn deallocate(&mut self, handle: D3D12_CPU_DESCRIPTOR_HANDLE) {
-        let index = self.check_cpu_offset(handle) / self.handle_size as usize;
-        debug_assert!(!self.indices.contains(&(index as u16)));
-        self.indices.push(index as u16);
-    }
+fn alloc_buffer(device: &Dx12Device, size: u64) -> ID3D12Resource {
+    let heap_desc = D3D12_HEAP_PROPERTIES {
+        Type: D3D12_HEAP_TYPE_UPLOAD,
+        CPUPageProperty: D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+        MemoryPoolPreference: D3D12_MEMORY_POOL_UNKNOWN,
+        CreationNodeMask: 0,
+        VisibleNodeMask: 0,
+    };
 
-    fn check_cpu_offset(&self, handle: D3D12_CPU_DESCRIPTOR_HANDLE) -> usize {
-        let offset = handle.ptr - self.cpu_heap_start.ptr;
-        debug_assert!((0..self.handle_size as usize * COUNT).contains(&offset));
-        debug_assert!(offset % self.handle_size as usize == 0);
-        offset
+    let buffer_desc = D3D12_RESOURCE_DESC {
+        Dimension: D3D12_RESOURCE_DIMENSION_BUFFER,
+        Alignment: 0,
+        Width: size,
+        Height: 1,
+        DepthOrArraySize: 1,
+        MipLevels: 1,
+        Format: DXGI_FORMAT_UNKNOWN,
+        SampleDesc: DXGI_SAMPLE_DESC {
+            Count: 1,
+            Quality: 0,
+        },
+        Layout: D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+        Flags: D3D12_RESOURCE_FLAG_NONE,
+    };
+
+    let mut buffer = None;
+
+    unsafe {
+        device.device.CreateCommittedResource(
+            &heap_desc,
+            D3D12_HEAP_FLAG_NONE,
+            &buffer_desc,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            None,
+            &mut buffer,
+        )
     }
+    .unwrap();
+
+    buffer.unwrap()
 }

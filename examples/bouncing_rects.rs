@@ -72,6 +72,8 @@ impl WindowEventHandler for DemoWindow {
     }
 
     fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timings: &FrameInfo) {
+        tracing::info!("timings: {:?}", timings);
+
         let delta = timings.next_present.time - self.last_present_time;
 
         let canvas_rect = canvas.rect();
@@ -114,11 +116,13 @@ struct Cli {
     #[arg(short, long, default_value = "true")]
     throttle_animation: bool,
 
-    #[arg(short, long, default_value = "Count::One")]
+    #[arg(short, long, default_value = "one")]
     count: Count,
 }
 
 fn main() {
+    tracing_subscriber::fmt().pretty().init();
+
     let args = Cli::parse();
     let throttle = args.throttle_animation;
 

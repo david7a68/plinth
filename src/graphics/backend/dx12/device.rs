@@ -26,7 +26,7 @@ use windows::{
 
 use crate::{graphics::GraphicsConfig, graphics::SubmissionId};
 
-use super::{Dx12GraphicsCommandList, Dx12Swapchain, Queue, SimpleDescriptorHeap};
+use super::{Dx12Buffer, Dx12GraphicsCommandList, Dx12Swapchain, Queue, SimpleDescriptorHeap};
 
 pub const MAX_RENDER_TARGETS: usize = 32;
 
@@ -34,7 +34,6 @@ pub(crate) struct Dx12Device {
     pub dxgi_factory: IDXGIFactory2,
     pub compositor: IDCompositionDevice,
     pub device: ID3D12Device,
-
     pub graphics_queue: Queue,
     pub render_target_descriptor_heap: Mutex<SimpleDescriptorHeap<MAX_RENDER_TARGETS>>,
 }
@@ -121,6 +120,10 @@ impl Dx12Device {
 
     pub fn create_swapchain(&self, window: HWND) -> Dx12Swapchain {
         Dx12Swapchain::new(self, window)
+    }
+
+    pub fn allocate_buffer(&self, size: u64) -> Dx12Buffer {
+        Dx12Buffer::new(self, size)
     }
 
     #[tracing::instrument(skip(self))]

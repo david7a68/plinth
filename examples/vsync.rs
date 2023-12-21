@@ -60,7 +60,7 @@ pub fn main() {
     tracing_subscriber::fmt().pretty().init();
 
     let mut app = Application::new(&GraphicsConfig {
-        debug_mode: false,
+        debug_mode: true,
         ..Default::default()
     });
 

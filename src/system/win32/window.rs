@@ -45,6 +45,8 @@ pub(super) struct SharedState {
     /// The most recent position of the cursor, or `None` if the cursor is not
     /// in the window's client area.
     pub(super) pointer_location: Option<Point<Window>>,
+
+    pub(super) refresh_rate: RefreshRate,
 }
 
 pub struct WindowImpl {
@@ -75,7 +77,7 @@ impl WindowImpl {
     }
 
     pub fn refresh_rate(&self) -> RefreshRate {
-        todo!()
+        self.shared_state.read().refresh_rate
     }
 
     pub fn size(&self) -> Size<Window> {

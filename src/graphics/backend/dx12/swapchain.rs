@@ -25,7 +25,7 @@ use windows::{
 };
 
 use crate::graphics::{
-    backend::dx12::Dx12Image, Image, PresentStatistics, PresentTime, ResizeOp, SubmissionId,
+    backend::dx12::Dx12Image, Image, PresentInstant, PresentStatistics, ResizeOp, SubmissionId,
 };
 
 use super::Dx12Device;
@@ -137,12 +137,12 @@ impl Dx12Swapchain {
         let den = statistics.currentCompositionRate.Denominator as f64;
         let current_rate = num / den;
 
-        let prev_present_time = PresentTime::from_ticks(statistics.lastFrameTime as u64);
+        let prev_present_time = PresentInstant::from_ticks(statistics.lastFrameTime as u64);
         let next_estimated_present_time =
-            PresentTime::from_ticks(statistics.nextEstimatedFrameTime as u64);
+            PresentInstant::from_ticks(statistics.nextEstimatedFrameTime as u64);
 
         PresentStatistics {
-            current_rate: current_rate as f32,
+            monitor_rate: current_rate as f32,
             prev_present_time,
             next_estimated_present_time,
         }

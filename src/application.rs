@@ -1,9 +1,8 @@
 use crate::window::{Window, WindowEventHandler, WindowSpec};
 
+use crate::graphics::GraphicsConfig;
 #[cfg(target_os = "windows")]
 use crate::system;
-
-pub use crate::graphics::{GraphicsConfig, PowerPreference};
 
 pub struct Application {
     inner: system::ApplicationImpl,

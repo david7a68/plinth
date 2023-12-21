@@ -1,9 +1,9 @@
 use clap::{command, Parser, ValueEnum};
 use plinth::{
-    application::{Application, GraphicsConfig},
-    graphics::{Canvas, Color, FrameInfo, FramesPerSecond, PresentInstant, Srgb},
+    graphics::{Canvas, Color, FrameInfo, GraphicsConfig, PresentInstant, Srgb},
     math::{Rect, Size, Translate},
-    window::{Window, WindowEventHandler, WindowSpec},
+    time::FramesPerSecond,
+    Application, Window, WindowEventHandler, WindowSpec,
 };
 
 struct DemoRect {

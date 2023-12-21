@@ -1,5 +1,3 @@
-use std::time::Instant;
-
 use dx12::{Dx12Device, Dx12GraphicsCommandList, Dx12Image, Dx12Swapchain};
 use windows::Win32::Foundation::HWND;
 
@@ -52,7 +50,7 @@ pub enum ResizeOp {
     Flex { width: u32, height: u32, flex: f32 },
 }
 
-pub struct Swapchain {
+pub(crate) struct Swapchain {
     swapchain: SwapchainImpl,
 }
 
@@ -158,7 +156,7 @@ enum GraphicsCommandListImpl {
     Dx12(Dx12GraphicsCommandList),
 }
 
-pub struct Device {
+pub(crate) struct Device {
     device: DeviceImpl,
 }
 

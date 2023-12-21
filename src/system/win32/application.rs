@@ -4,8 +4,7 @@ use std::sync::{
 };
 
 use crate::{
-    application::GraphicsConfig,
-    graphics::{self},
+    graphics,
     window::{WindowEventHandler, WindowSpec},
 };
 
@@ -24,7 +23,7 @@ pub struct ApplicationImpl {
 }
 
 impl ApplicationImpl {
-    pub fn new(graphics: &GraphicsConfig) -> Self {
+    pub fn new(graphics: &graphics::GraphicsConfig) -> Self {
         // TODO: this bound is nonsense. actually figure out what it should be.
         let (sender, receiver) = std::sync::mpsc::channel();
 

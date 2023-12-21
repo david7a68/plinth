@@ -1,6 +1,6 @@
 use windows::Win32::Graphics::Direct3D12::{ID3D12Resource, D3D12_CPU_DESCRIPTOR_HANDLE};
 
-use crate::graphics::{backend::ImageImpl, Image};
+use crate::graphics::backend::{Image, ImageImpl};
 
 pub struct Dx12Image {
     pub handle: ID3D12Resource,

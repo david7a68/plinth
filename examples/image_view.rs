@@ -1,8 +1,8 @@
 use plinth::{
-    application::{Application, GraphicsConfig},
-    graphics::{Canvas, FrameInfo, FramesPerSecond},
+    graphics::{Canvas, FrameInfo, GraphicsConfig},
     input::Axis,
-    window::{Window, WindowEventHandler, WindowSpec},
+    time::FramesPerSecond,
+    Application, Window, WindowEventHandler, WindowSpec,
 };
 
 const SCROLL_SCALE: f64 = 1.1;

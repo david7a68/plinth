@@ -25,15 +25,15 @@ use windows::{
 };
 
 use crate::graphics::{
-    backend::dx12::Dx12Image, FramesPerSecond, Image, PresentInstant, PresentStatistics, ResizeOp,
-    SubmissionId,
+    backend::{dx12::Dx12Image, Image},
+    FramesPerSecond, PresentInstant, PresentStatistics, ResizeOp, SubmissionId,
 };
 
 use super::Dx12Device;
 
 static CAN_WAIT_FOR_COMPOSITOR_CLOCK: OnceLock<bool> = OnceLock::new();
 
-pub struct Dx12Swapchain {
+pub(crate) struct Dx12Swapchain {
     handle: IDXGISwapChain3,
 
     #[allow(dead_code)]

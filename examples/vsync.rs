@@ -1,13 +1,13 @@
 use std::time::Duration;
 
 use plinth::{
-    application::Application,
-    graphics::{Canvas, Color, FrameInfo, FramesPerSecond, GraphicsConfig},
+    graphics::{Canvas, Color, FrameInfo, GraphicsConfig},
     input::Axis,
-    window::{Window, WindowEventHandler, WindowSpec},
+    time::FramesPerSecond,
+    Application, Window, WindowEventHandler, WindowSpec,
 };
 
-const STARTING_REFRESH_RATE: FramesPerSecond = FramesPerSecond(60.0);
+const STARTING_REFRESH_RATE: FramesPerSecond = FramesPerSecond(120.0);
 
 // consume 100ms per frame (10fps), the clock should correct accordingly
 const SLEEP_PER_FRAME: Duration = Duration::from_millis(100);
@@ -42,8 +42,6 @@ impl WindowEventHandler for AppWindow {
             (timing.next_present - timing.prev_present).as_frames_per_second()
         );
         canvas.clear(Color::RED);
-
-        // std::thread::sleep(SLEEP_PER_FRAME);
     }
 
     fn on_scroll(&mut self, axis: Axis, delta: f32) {

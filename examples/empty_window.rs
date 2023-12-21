@@ -1,9 +1,8 @@
 use plinth::{
-    application::{Application, GraphicsConfig},
-    graphics::{Canvas, Color, FrameInfo},
+    graphics::{Canvas, Color, FrameInfo, GraphicsConfig},
     input::{Axis, ButtonState, MouseButton},
     math::{Point, Scale, Size, Vec2},
-    window::{Window, WindowEventHandler, WindowSpec},
+    Application, Window, WindowEventHandler, WindowSpec,
 };
 
 pub struct AppWindow {

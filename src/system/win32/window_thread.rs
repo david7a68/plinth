@@ -14,8 +14,9 @@ use parking_lot::RwLock;
 
 use crate::{
     graphics::{
+        backend::{ResizeOp, SubmissionId, Swapchain},
         Canvas, DrawData, FrameInfo, FramesPerSecond, Graphics, Present, PresentInstant,
-        PresentStatistics, ResizeOp, SecondsPerFrame, SubmissionId, Swapchain,
+        PresentStatistics, SecondsPerFrame,
     },
     math::Scale,
     window::{Window, WindowEventHandler},
@@ -276,7 +277,7 @@ where
             self.graphics.wait_for_submission(submission_id);
         }
 
-        let stats = self.repaint_clock.next_present_info();
+        let stats = self.repaint_clock.next_present_info(self.last_frame_time);
 
         let draw_data = {
             self.draw_data.reset();
@@ -363,7 +364,23 @@ impl RepaintClock {
         self.requested_refresh_rate = rate;
     }
 
-    fn next_present_info(&self) -> FrameInfo {
+    fn next_present_info(&self, estimated_render_time: Duration) -> FrameInfo {
+        // When we estimate rendering will complete if we draw right now based
+        // on the previous frame.
+        let estimated_render_complete_time = PresentInstant::now() + estimated_render_time;
+
+        // The estimated time until we are able to present the next frame
+        // (rendering is complete).
+        let estimated_time_until_present = estimated_render_complete_time - self.prev_present_time;
+
+        // The number of monitor refreshes until we are next able to present,
+        // adjusted to the next vsync.
+        let estimated_intervals = self
+            .monitor_refresh_time
+            .interval_over(estimated_time_until_present);
+
+        let estimated_present_time = self.prev_present_time + estimated_intervals.time;
+
         FrameInfo {
             prev_present: Present {
                 id: self.prev_present_id,
@@ -371,7 +388,7 @@ impl RepaintClock {
             },
             next_present: Present {
                 id: self.prev_present_id + 1,
-                time: self.next_target_present_time,
+                time: estimated_present_time,
             },
         }
     }
@@ -413,27 +430,5 @@ impl RepaintClock {
         // Return true if rendering now will place us within one _monitor_
         // refresh of the target present time.
         estimated_render_complete_time + self.monitor_refresh_time >= self.next_target_present_time
-    }
-
-    /// An estimate of when the next frame is likely to be presented.
-    ///
-    /// This takes into account the estimated render time and aligns it to the
-    /// next monitor refresh.
-    fn next_present_time(&self, estimated_render_time: Duration) -> PresentInstant {
-        // When we estimate rendering will complete if we draw right now based
-        // on the previous frame.
-        let estimated_render_complete_time = PresentInstant::now() + estimated_render_time;
-
-        // The estimated time until we are able to present the next frame
-        // (rendering is complete).
-        let estimated_time_until_present = estimated_render_complete_time - self.prev_present_time;
-
-        // The number of monitor refreshes until we are next able to present,
-        // adjusted to the next vsync.
-        let estimated_intervals = self
-            .monitor_refresh_time
-            .interval_over(estimated_time_until_present);
-
-        self.prev_present_time + estimated_intervals.time
     }
 }

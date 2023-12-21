@@ -10,11 +10,11 @@ use windows::{
     },
 };
 
-use crate::graphics::{backend::ResourceState, Image};
+use crate::graphics::backend::{Image, ResourceState};
 
 use super::{Dx12Device, Dx12Image};
 
-pub struct Dx12GraphicsCommandList {
+pub(crate) struct Dx12GraphicsCommandList {
     pub command_list: ID3D12GraphicsCommandList,
     pub command_allocator: ID3D12CommandAllocator,
 

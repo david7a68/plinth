@@ -24,13 +24,13 @@ use windows::{
     },
 };
 
-use crate::{application::GraphicsConfig, graphics::SubmissionId};
+use crate::{graphics::GraphicsConfig, graphics::SubmissionId};
 
 use super::{Dx12GraphicsCommandList, Dx12Swapchain, Queue, SimpleDescriptorHeap};
 
 pub const MAX_RENDER_TARGETS: usize = 32;
 
-pub struct Dx12Device {
+pub(crate) struct Dx12Device {
     pub dxgi_factory: IDXGIFactory2,
     pub compositor: IDCompositionDevice,
     pub device: ID3D12Device,

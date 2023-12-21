@@ -1,8 +1,8 @@
 use crate::math::Rect;
 
 use super::{
-    backend::{GraphicsCommandList, ResourceState},
-    Color, DefaultColorSpace, Image,
+    backend::{GraphicsCommandList, Image, ResourceState},
+    Color, DefaultColorSpace,
 };
 
 pub(crate) struct DrawData {

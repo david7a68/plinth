@@ -2,6 +2,7 @@ pub(crate) mod backend;
 mod canvas;
 mod color;
 mod frame_statistics;
+mod primitives;
 
 use windows::Win32::Foundation::HWND;
 
@@ -9,6 +10,7 @@ use self::backend::{Device, ResizeOp, SubmissionId, Swapchain};
 pub use self::canvas::*;
 pub use self::color::*;
 pub use self::frame_statistics::*;
+pub use self::primitives::*;
 
 pub enum PowerPreference {
     LowPower,

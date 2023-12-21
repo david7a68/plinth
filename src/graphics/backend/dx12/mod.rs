@@ -5,9 +5,9 @@ mod memory;
 mod queue;
 mod swapchain;
 
-pub use command_list::*;
+pub(crate) use command_list::*;
 pub use device::*;
 pub use image::*;
 pub use memory::*;
 pub use queue::*;
-pub use swapchain::*;
+pub(crate) use swapchain::*;

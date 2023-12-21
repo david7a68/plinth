@@ -55,6 +55,10 @@ impl<U> Rect<U> {
         )
     }
 
+    pub fn retype<U2>(&self) -> Rect<U2> {
+        Rect::new(self.x, self.y, self.width, self.height)
+    }
+
     pub fn center(&self) -> Point<U> {
         Point::new(self.x + self.width / 2.0, self.y + self.height / 2.0)
     }

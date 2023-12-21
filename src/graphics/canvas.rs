@@ -2,29 +2,25 @@ use crate::math::Rect;
 
 use super::{
     backend::{GraphicsCommandList, Image, ResourceState},
-    Color,
+    Color, RoundRect,
 };
 
 pub(crate) struct DrawData {
-    // todo: this will be something else soon
-    pub vertices: Vec<f32>,
-    pub indices: Vec<u32>,
+    pub rects: Vec<RoundRect<()>>,
     pub command_list: GraphicsCommandList,
 }
 
 impl DrawData {
     pub fn new(command_list: GraphicsCommandList) -> Self {
         Self {
-            vertices: Vec::new(),
-            indices: Vec::new(),
+            rects: Vec::new(),
             command_list,
         }
     }
 
     pub fn reset(&mut self) {
         self.command_list.reset();
-        self.vertices.clear();
-        self.indices.clear();
+        self.rects.clear();
     }
 
     /// Closese the command list and copies the data to the GPU for rendering.
@@ -56,6 +52,8 @@ impl<'a, U> Canvas<'a, U> {
     }
 
     pub(crate) fn finish(self) -> &'a mut DrawData {
+        // self.data.command_list.draw_instanced(...);
+
         self.data.command_list.image_barrier(
             self.target,
             ResourceState::RenderTarget,
@@ -75,7 +73,7 @@ impl<'a, U> Canvas<'a, U> {
             .clear([color.r, color.g, color.b, color.a]);
     }
 
-    pub fn draw_rect(&mut self, rect: impl Into<Rect<U>>, color: Color) {
-        // todo, no-op
+    pub fn draw_rect(&mut self, rect: impl Into<RoundRect<U>>) {
+        self.data.rects.push(rect.into().retype());
     }
 }

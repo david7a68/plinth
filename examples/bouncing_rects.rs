@@ -1,6 +1,6 @@
 use clap::{command, Parser, ValueEnum};
 use plinth::{
-    graphics::{Canvas, Color, FrameInfo, GraphicsConfig, PresentInstant},
+    graphics::{Canvas, Color, FrameInfo, GraphicsConfig, PresentInstant, RoundRect},
     math::{Rect, Size, Translate},
     time::FramesPerSecond,
     Application, Window, WindowEventHandler, WindowSpec,
@@ -94,7 +94,7 @@ impl WindowEventHandler for DemoWindow {
         canvas.clear(Color::BLACK);
 
         for rect in &self.rects {
-            canvas.draw_rect(rect.rect, rect.color.into());
+            canvas.draw_rect(RoundRect::builder(rect.rect).color(rect.color));
         }
 
         // canvas repaint

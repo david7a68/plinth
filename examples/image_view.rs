@@ -5,7 +5,7 @@ use plinth::{
     Application, Window, WindowEventHandler, WindowSpec,
 };
 
-const SCROLL_SCALE: f64 = 1.1;
+// const SCROLL_SCALE: f64 = 1.1;
 
 pub struct DemoWindow {
     window: Window,
@@ -33,16 +33,16 @@ impl WindowEventHandler for DemoWindow {
 
     fn on_resize(
         &mut self,
-        size: plinth::math::Size<Window>,
-        scale: plinth::math::Scale<Window, Window>,
+        _size: plinth::math::Size<Window>,
+        _scale: plinth::math::Scale<Window, Window>,
     ) {
     }
 
-    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, _timing: &FrameInfo) {
+    fn on_repaint(&mut self, _canvas: &mut Canvas<Window>, _timing: &FrameInfo) {
         // todo
     }
 
-    fn on_scroll(&mut self, _axis: Axis, delta: f32) {
+    fn on_scroll(&mut self, _axis: Axis, _delta: f32) {
         // todo: commented out because scenes have been removed
 
         // let pointer = self.window.pointer_location() * self.window.scale();

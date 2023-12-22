@@ -3,8 +3,6 @@ mod event_thread;
 mod window;
 mod window_thread;
 
-use std::time::Duration;
-
 pub use application::{AppContextImpl, ApplicationImpl};
 use lazy_static::lazy_static;
 pub use window::WindowImpl;
@@ -18,15 +16,12 @@ lazy_static! {
     };
 }
 
-pub fn present_time_now() -> Duration {
+pub fn present_time_now() -> f64 {
     let mut time = 0;
     unsafe { QueryPerformanceCounter(&mut time) }.unwrap();
-
-    let micros = (time * 1_000_000) / *QPF_FREQUENCY;
-    Duration::from_micros(micros as u64)
+    time as f64 / *QPF_FREQUENCY as f64
 }
 
-pub fn present_time_from_ticks(ticks: u64, frequency: u64) -> Duration {
-    let micros = (ticks * 1_000_000) / frequency as u64;
-    Duration::from_micros(micros as u64)
+pub fn present_time_from_ticks(ticks: u64, frequency: u64) -> f64 {
+    ticks as f64 / frequency as f64
 }

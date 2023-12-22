@@ -1,128 +1,278 @@
-use std::time::Duration;
+use std::{
+    iter::Sum,
+    ops::{Add, Div, Mul, Sub},
+};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Interval {
+pub struct FrameInterval {
     pub num_frames: i64,
     pub time: Duration,
 }
 
-impl Interval {
+impl FrameInterval {
     pub fn as_frames_per_second(&self) -> FramesPerSecond {
-        FramesPerSecond(self.num_frames as f64 / self.time.as_secs_f64())
+        FramesPerSecond(1.0 / self.time.0)
     }
 
     pub fn as_seconds_per_frame(&self) -> SecondsPerFrame {
-        SecondsPerFrame(self.time.as_secs_f64() / self.num_frames as f64)
+        SecondsPerFrame(self.time)
     }
 }
 
-macro_rules! binops {
-    ($unit:ty) => {
-        impl std::ops::Add for $unit {
-            type Output = Self;
-
-            fn add(self, rhs: Self) -> Self::Output {
-                Self(self.0 + rhs.0)
-            }
-        }
-
-        impl std::ops::Sub for $unit {
-            type Output = Self;
-
-            fn sub(self, rhs: Self) -> Self::Output {
-                Self(self.0 - rhs.0)
-            }
-        }
-
-        impl std::ops::Div for $unit {
-            type Output = f64;
-
-            fn div(self, rhs: Self) -> Self::Output {
-                self.0 as f64 / rhs.0 as f64
-            }
-        }
-
-        impl std::ops::Div<f64> for $unit {
-            type Output = Self;
-
-            fn div(self, rhs: f64) -> Self::Output {
-                Self(self.0 / rhs)
-            }
-        }
-
-        impl std::ops::Mul for $unit {
-            type Output = Self;
-
-            fn mul(self, rhs: Self) -> Self::Output {
-                Self(self.0 * rhs.0)
-            }
-        }
-
-        impl std::ops::Mul<f64> for $unit {
-            type Output = Self;
-
-            fn mul(self, rhs: f64) -> Self::Output {
-                Self(self.0 * rhs)
-            }
-        }
-
-        impl std::cmp::PartialOrd for $unit {
-            fn partial_cmp(&self, rhs: &Self) -> Option<std::cmp::Ordering> {
-                self.0.partial_cmp(&rhs.0)
-            }
-        }
-
-        impl std::cmp::PartialEq<f64> for $unit {
-            fn eq(&self, rhs: &f64) -> bool {
-                self.0 == *rhs
-            }
-        }
-
-        impl std::cmp::PartialOrd<f64> for $unit {
-            fn partial_cmp(&self, rhs: &f64) -> Option<std::cmp::Ordering> {
-                self.0.partial_cmp(rhs)
-            }
-        }
-
-        impl $unit {
-            pub fn min(self, rhs: Self) -> Self {
-                Self(self.0.min(rhs.0))
-            }
-
-            pub fn max(self, rhs: Self) -> Self {
-                Self(self.0.max(rhs.0))
-            }
-        }
-    };
+pub struct FrameTime {
+    pub index: u64,
+    pub time: f64,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FramesPerSecond(pub f64);
 
-binops!(FramesPerSecond);
-
 impl FramesPerSecond {
     pub const ZERO: Self = Self(0.0);
+
+    pub fn round(self) -> Self {
+        Self(self.0.round())
+    }
+
+    pub fn frame_time(self) -> SecondsPerFrame {
+        SecondsPerFrame(Duration(1.0) / self.0)
+    }
+
+    pub fn max(self, rhs: Self) -> Self {
+        Self(self.0.max(rhs.0))
+    }
+}
+
+impl PartialOrd for FramesPerSecond {
+    fn partial_cmp(&self, rhs: &Self) -> Option<std::cmp::Ordering> {
+        self.0.partial_cmp(&rhs.0)
+    }
+}
+
+impl PartialEq<f64> for FramesPerSecond {
+    fn eq(&self, rhs: &f64) -> bool {
+        self.0 == *rhs
+    }
+}
+
+impl PartialOrd<f64> for FramesPerSecond {
+    fn partial_cmp(&self, rhs: &f64) -> Option<std::cmp::Ordering> {
+        self.0.partial_cmp(rhs)
+    }
+}
+
+impl Add<f64> for FramesPerSecond {
+    type Output = Self;
+
+    fn add(self, rhs: f64) -> Self::Output {
+        Self(self.0 + rhs)
+    }
+}
+
+impl Div for FramesPerSecond {
+    type Output = f64;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        self.0 / rhs.0
+    }
+}
+
+impl Div<f64> for FramesPerSecond {
+    type Output = Self;
+
+    fn div(self, rhs: f64) -> Self::Output {
+        Self(self.0 / rhs)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct SecondsPerFrame(pub f64);
-
-binops!(SecondsPerFrame);
+pub struct SecondsPerFrame(pub Duration);
 
 impl SecondsPerFrame {
-    pub const ZERO: Self = Self(0.0);
-
-    /// Returns the smallest number of frames that would encompass the duration.
-    pub fn interval_over(self, time: Duration) -> Interval {
-        let num_frames = (time.as_secs_f64() / self.0).ceil() as i64;
-        let time = Duration::from_secs_f64(num_frames as f64 * self.0);
-        Interval { num_frames, time }
-    }
+    pub const ZERO: Self = Self(Duration::ZERO);
 }
 
 impl From<FramesPerSecond> for SecondsPerFrame {
     fn from(fps: FramesPerSecond) -> Self {
-        Self(1.0 / fps.0)
+        Self(Duration(1.0) / fps.0)
+    }
+}
+
+impl From<SecondsPerFrame> for Duration {
+    fn from(spf: SecondsPerFrame) -> Self {
+        spf.0
+    }
+}
+
+impl From<Duration> for SecondsPerFrame {
+    fn from(d: Duration) -> Self {
+        Self(d)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Instant(pub f64);
+
+impl Instant {
+    pub const ZERO: Self = Self(0.0);
+
+    pub fn now() -> Self {
+        Self(crate::system::present_time_now())
+    }
+
+    pub fn elapsed(&self) -> Duration {
+        Duration(crate::system::present_time_now() - self.0)
+    }
+
+    pub fn from_ticks(ticks: u64, frequency: u64) -> Self {
+        Self(crate::system::present_time_from_ticks(ticks, frequency))
+    }
+
+    pub fn max(&self, rhs: &Self) -> Self {
+        Self(self.0.max(rhs.0))
+    }
+
+    pub fn saturating_sub(&self, rhs: &Self) -> Duration {
+        Duration((self.0 - rhs.0).max(0.0))
+    }
+}
+
+impl Sub for Instant {
+    type Output = Duration;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Duration(self.0 - rhs.0)
+    }
+}
+
+impl Sub<Duration> for Instant {
+    type Output = Self;
+
+    fn sub(self, rhs: Duration) -> Self::Output {
+        Self(self.0 - rhs.0)
+    }
+}
+
+impl Add<Duration> for Instant {
+    type Output = Self;
+
+    fn add(self, rhs: Duration) -> Self::Output {
+        Self(self.0 + rhs.0)
+    }
+}
+
+impl PartialOrd for Instant {
+    fn partial_cmp(&self, rhs: &Self) -> Option<std::cmp::Ordering> {
+        self.0.partial_cmp(&rhs.0)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Duration(pub f64);
+
+impl Duration {
+    pub const ZERO: Self = Self(0.0);
+
+    /// The number of frames needed to cover the given duration.
+    pub fn frames_for(self, duration: Duration) -> FrameInterval {
+        let num_frames = (duration.0 / self.0).ceil() as i64;
+        let time = self.0 * num_frames as f64;
+
+        FrameInterval {
+            num_frames,
+            time: Self(time),
+        }
+    }
+}
+
+impl Add for Duration {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self(self.0 + rhs.0)
+    }
+}
+
+impl Sub for Duration {
+    type Output = Self;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        Self(self.0 - rhs.0)
+    }
+}
+
+impl Div for Duration {
+    type Output = f64;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        self.0 / rhs.0
+    }
+}
+
+impl Div<f64> for Duration {
+    type Output = Self;
+
+    fn div(self, rhs: f64) -> Self::Output {
+        Self(self.0 / rhs)
+    }
+}
+
+impl Div<Duration> for f64 {
+    type Output = f64;
+
+    fn div(self, rhs: Duration) -> Self::Output {
+        self / rhs.0
+    }
+}
+
+impl Mul<f64> for Duration {
+    type Output = Self;
+
+    fn mul(self, rhs: f64) -> Self::Output {
+        Self(self.0 * rhs)
+    }
+}
+
+impl Mul<Duration> for f64 {
+    type Output = Duration;
+
+    fn mul(self, rhs: Duration) -> Self::Output {
+        Duration(self * rhs.0)
+    }
+}
+
+impl PartialOrd for Duration {
+    fn partial_cmp(&self, rhs: &Self) -> Option<std::cmp::Ordering> {
+        self.0.partial_cmp(&rhs.0)
+    }
+}
+
+impl PartialEq<f64> for Duration {
+    fn eq(&self, rhs: &f64) -> bool {
+        self.0 == *rhs
+    }
+}
+
+impl PartialEq<Duration> for f64 {
+    fn eq(&self, rhs: &Duration) -> bool {
+        *self == rhs.0
+    }
+}
+
+impl PartialOrd<f64> for Duration {
+    fn partial_cmp(&self, rhs: &f64) -> Option<std::cmp::Ordering> {
+        self.0.partial_cmp(rhs)
+    }
+}
+
+impl Sum for Duration {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        iter.fold(Self::ZERO, |a, b| a + b)
+    }
+}
+
+impl<'a> Sum<&'a Duration> for Duration {
+    fn sum<I: Iterator<Item = &'a Self>>(iter: I) -> Self {
+        iter.fold(Self::ZERO, |a, b| a + *b)
     }
 }

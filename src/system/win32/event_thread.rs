@@ -205,6 +205,7 @@ fn mouse_coords(lparam: LPARAM) -> (i16, i16) {
     (x, y)
 }
 
+#[tracing::instrument(skip(state))]
 fn wndproc(state: &mut State, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
         WM_CLOSE => {

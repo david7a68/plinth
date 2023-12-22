@@ -81,12 +81,13 @@ impl Swapchain {
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn present(&mut self, submission_id: SubmissionId) {
+    pub fn present(&mut self, submission_id: SubmissionId, intervals: u32) {
         match &mut self.swapchain {
-            SwapchainImpl::Dx12(swapchain) => swapchain.present(submission_id),
+            SwapchainImpl::Dx12(swapchain) => swapchain.present(submission_id, intervals),
         }
     }
 
+    #[tracing::instrument(skip(self))]
     pub fn wait_for_vsync(&self) {
         match &self.swapchain {
             SwapchainImpl::Dx12(swapchain) => swapchain.wait_for_vsync(),

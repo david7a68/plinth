@@ -1,10 +1,13 @@
 use clap::{command, Parser, ValueEnum};
 use plinth::{
-    graphics::{Canvas, Color, FrameInfo, GraphicsConfig, PresentInstant, RoundRect},
+    graphics::{Canvas, Color, FrameInfo, GraphicsConfig, RoundRect},
     math::{Rect, Size, Translate},
     time::FramesPerSecond,
     Application, Window, WindowEventHandler, WindowSpec,
 };
+
+#[cfg(feature = "profile")]
+use tracing_subscriber::layer::SubscriberExt;
 
 struct DemoRect {
     rect: Rect<Window>,
@@ -16,7 +19,6 @@ struct DemoWindow {
     window: Window,
     rects: Vec<DemoRect>,
     throttle_animation: bool,
-    last_present_time: PresentInstant,
 }
 
 impl DemoWindow {
@@ -39,7 +41,6 @@ impl DemoWindow {
             window,
             rects,
             throttle_animation,
-            last_present_time: PresentInstant::now(),
         }
     }
 }
@@ -54,12 +55,12 @@ impl WindowEventHandler for DemoWindow {
             let freq = if self.throttle_animation {
                 // throttle to <= 30fps (might be e.g. 28.8 fps on a 144
                 // hz display at 1/5 refresh rate)
-                FramesPerSecond(30.0)
+                FramesPerSecond(60.0)
             } else {
                 // No throttling, default to display refresh rate. This
                 // is a polite fiction, since the display refresh rate
                 // may change at any time.
-                self.window.refresh_rate().optimal_fps
+                self.window.refresh_rate().max_fps
 
                 // alternatively
                 // Some(self.window.max_animation_frequency())
@@ -71,10 +72,11 @@ impl WindowEventHandler for DemoWindow {
         }
     }
 
+    #[tracing::instrument(skip(self, canvas))]
     fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timings: &FrameInfo) {
         tracing::info!("timings: {:?}", timings);
 
-        let delta = timings.next_present.time - self.last_present_time;
+        let delta = timings.next_present.time - timings.prev_present.time;
 
         let canvas_rect = canvas.rect();
 
@@ -98,9 +100,6 @@ impl WindowEventHandler for DemoWindow {
         for rect in &self.rects {
             canvas.draw_rect(RoundRect::builder(rect.rect).color(rect.color));
         }
-
-        // canvas repaint
-        self.last_present_time = timings.next_present.time;
     }
 }
 
@@ -121,7 +120,14 @@ struct Cli {
 }
 
 fn main() {
-    tracing_subscriber::fmt().pretty().init();
+    #[cfg(feature = "profile")]
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::registry().with(tracing_tracy::TracyLayer::new()),
+    )
+    .expect("set up the subscriber");
+
+    #[cfg(not(feature = "profile"))]
+    tracing_subscriber::fmt::fmt().pretty().init();
 
     let args = Cli::parse();
     let throttle = args.throttle_animation;

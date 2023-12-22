@@ -48,8 +48,7 @@ impl WindowEventHandler for AppWindow {
 
     fn on_scroll(&mut self, axis: Axis, delta: f32) {
         if axis == Axis::Y {
-            self.refresh_rate =
-                (self.refresh_rate + FramesPerSecond(delta as _)).max(FramesPerSecond::ZERO);
+            self.refresh_rate = (self.refresh_rate + delta as _).max(FramesPerSecond::ZERO);
 
             self.window.set_animation_frequency(self.refresh_rate);
         }

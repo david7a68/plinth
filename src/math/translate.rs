@@ -1,4 +1,4 @@
-use std::time::Duration;
+use crate::time::Duration;
 
 use super::{Scale, Vec2};
 
@@ -106,13 +106,13 @@ impl<Src, Dst> std::ops::Mul<Duration> for Translate<Src, Dst> {
     type Output = Translate<Src, Dst>;
 
     fn mul(self, rhs: Duration) -> Self::Output {
-        Self::new(self.x * rhs.as_secs_f64(), self.y * rhs.as_secs_f64())
+        Self::new(self.x * rhs.0, self.y * rhs.0)
     }
 }
 
 impl<Src, Dst> std::ops::MulAssign<Duration> for Translate<Src, Dst> {
     fn mul_assign(&mut self, rhs: Duration) {
-        let seconds = rhs.as_secs_f64();
+        let seconds = rhs.0;
         self.x *= seconds;
         self.y *= seconds;
     }
@@ -122,13 +122,13 @@ impl<Src, Dst> std::ops::Div<Duration> for Translate<Src, Dst> {
     type Output = Translate<Src, Dst>;
 
     fn div(self, rhs: Duration) -> Self::Output {
-        Self::new(self.x / rhs.as_secs_f64(), self.y / rhs.as_secs_f64())
+        Self::new(self.x / rhs.0, self.y / rhs.0)
     }
 }
 
 impl<Src, Dst> std::ops::DivAssign<Duration> for Translate<Src, Dst> {
     fn div_assign(&mut self, rhs: Duration) {
-        let seconds = rhs.as_secs_f64();
+        let seconds = rhs.0;
         self.x /= seconds;
         self.y /= seconds;
     }
@@ -241,7 +241,7 @@ mod tests {
         struct B;
 
         let a = Translate::<A, B>::new(1.0, 2.0);
-        let time = Duration::from_secs_f64(2.0);
+        let time = Duration(2.0);
 
         assert_eq!(a * time, Translate::<A, B>::new(2.0, 4.0));
         assert_eq!(a * time / time, a);

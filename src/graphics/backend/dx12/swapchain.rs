@@ -24,9 +24,12 @@ use windows::{
     },
 };
 
-use crate::graphics::{
-    backend::{dx12::Dx12Image, Image},
-    FramesPerSecond, PresentInstant, PresentStatistics, ResizeOp, SubmissionId,
+use crate::{
+    graphics::{
+        backend::{dx12::Dx12Image, Image},
+        FramesPerSecond, PresentStatistics, ResizeOp, SubmissionId,
+    },
+    time::Instant,
 };
 
 use super::Dx12Device;
@@ -138,11 +141,11 @@ impl Dx12Swapchain {
         let den = statistics.currentCompositionRate.Denominator as f64;
         let current_rate = num / den;
 
-        let prev_present_time = PresentInstant::from_ticks(
+        let prev_present_time = Instant::from_ticks(
             statistics.lastFrameTime as u64,
             statistics.timeFrequency as u64,
         );
-        let next_estimated_present_time = PresentInstant::from_ticks(
+        let next_estimated_present_time = Instant::from_ticks(
             statistics.nextEstimatedFrameTime as u64,
             statistics.timeFrequency as u64,
         );
@@ -227,7 +230,7 @@ impl Dx12Swapchain {
         (image, index)
     }
 
-    pub fn present(&mut self, submission_id: SubmissionId) {
+    pub fn present(&mut self, submission_id: SubmissionId, intervals: u32) {
         let flags = if self.was_resized {
             self.was_resized = false;
             DXGI_PRESENT_RESTART
@@ -235,7 +238,7 @@ impl Dx12Swapchain {
             0
         };
 
-        unsafe { self.handle.Present(1, flags) }.unwrap();
+        unsafe { self.handle.Present(intervals, flags) }.unwrap();
         self.last_present = Some(submission_id);
     }
 

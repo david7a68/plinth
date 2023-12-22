@@ -1,7 +1,5 @@
-use std::time::Duration;
-
-use crate::system;
-pub(crate) use crate::time::{FramesPerSecond, Interval, SecondsPerFrame};
+use crate::time::Instant;
+pub(crate) use crate::time::{FrameInterval, FramesPerSecond, SecondsPerFrame};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FrameInfo {
@@ -15,77 +13,16 @@ pub struct FrameInfo {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Present {
     pub id: u64,
-    pub time: PresentInstant,
+    pub time: Instant,
 }
 
 impl std::ops::Sub for Present {
-    type Output = Interval;
+    type Output = FrameInterval;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        Interval {
+        FrameInterval {
             num_frames: self.id as i64 - rhs.id as i64, // todo: overflow check
-            time: self.time - rhs.time,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PresentInstant {
-    time: Duration,
-}
-
-impl PresentInstant {
-    pub const ZERO: Self = Self {
-        time: Duration::ZERO,
-    };
-
-    pub fn now() -> Self {
-        Self {
-            time: system::present_time_now(),
-        }
-    }
-
-    pub fn elapsed(&self) -> Duration {
-        system::present_time_now() - self.time
-    }
-
-    pub(crate) fn from_ticks(ticks: u64, frequency: u64) -> Self {
-        Self {
-            time: system::present_time_from_ticks(ticks, frequency),
-        }
-    }
-}
-
-impl std::ops::Sub for PresentInstant {
-    type Output = Duration;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        self.time - rhs.time
-    }
-}
-
-impl std::ops::Add<Duration> for PresentInstant {
-    type Output = Self;
-
-    fn add(self, rhs: Duration) -> Self::Output {
-        Self {
-            time: self.time + rhs,
-        }
-    }
-}
-
-impl std::cmp::PartialOrd for PresentInstant {
-    fn partial_cmp(&self, rhs: &Self) -> Option<std::cmp::Ordering> {
-        self.time.partial_cmp(&rhs.time)
-    }
-}
-
-impl std::ops::Add<SecondsPerFrame> for PresentInstant {
-    type Output = Self;
-
-    fn add(self, rhs: SecondsPerFrame) -> Self::Output {
-        Self {
-            time: self.time + Duration::from_secs_f64(rhs.0),
+            time: (self.time - rhs.time).into(),
         }
     }
 }
@@ -94,9 +31,9 @@ impl std::ops::Add<SecondsPerFrame> for PresentInstant {
 pub(crate) struct PresentStatistics {
     pub monitor_rate: FramesPerSecond,
 
-    pub prev_present_time: PresentInstant,
+    pub prev_present_time: Instant,
 
-    pub next_estimated_present_time: PresentInstant,
+    pub next_estimated_present_time: Instant,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]

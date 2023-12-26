@@ -1,8 +1,4 @@
-use std::{
-    ffi::c_void,
-    mem::{ManuallyDrop, MaybeUninit},
-    ptr::NonNull,
-};
+use std::{ffi::c_void, mem::MaybeUninit, ptr::NonNull};
 
 use windows::Win32::Graphics::{
     Direct3D12::{

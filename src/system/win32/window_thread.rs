@@ -16,7 +16,7 @@ use parking_lot::RwLock;
 use crate::{
     graphics::{
         backend::{ResizeOp, SubmissionId, Swapchain},
-        Canvas, DrawData, FrameInfo, FramesPerSecond, Graphics, RefreshRate,
+        Canvas, DrawBuffer, DrawList, FrameInfo, FramesPerSecond, Graphics, RefreshRate,
     },
     math::Scale,
     window::{Window, WindowEventHandler},
@@ -81,17 +81,19 @@ where
 
     graphics: &'a Arc<Graphics>,
     swapchain: Swapchain,
-    draw_data: DrawData,
+
+    draw_list: DrawList,
+    draw_buffers: [DrawBuffer; 2],
 
     submission_id: Option<SubmissionId>,
 
     requested_refresh_rate: FramesPerSecond,
     actual_refresh_rate: FramesPerSecond,
     vblanks_per_frame: u32,
+    frame_count: u64,
 
     is_drag_resizing: bool,
     need_repaint: bool,
-    repaint_now: bool,
 }
 
 enum Mode {
@@ -111,7 +113,8 @@ where
         graphics: &'a Arc<Graphics>,
     ) -> Self {
         let swapchain = graphics.create_swapchain(hwnd);
-        let draw_data = graphics.create_draw_buffer();
+        let draw_list = DrawList::new();
+        let draw_buffers = [graphics.create_draw_buffer(), graphics.create_draw_buffer()];
 
         shared_state.write().refresh_rate = {
             let rate = swapchain.output().refresh_rate();
@@ -129,14 +132,15 @@ where
             shared_state,
             graphics,
             swapchain,
-            draw_data,
+            draw_list,
+            draw_buffers,
             submission_id: None,
             requested_refresh_rate: FramesPerSecond(0.0),
             actual_refresh_rate: FramesPerSecond(0.0),
             vblanks_per_frame: 0,
+            frame_count: 0,
             is_drag_resizing: false,
             need_repaint: false,
-            repaint_now: false,
         }
     }
 
@@ -307,7 +311,6 @@ where
             }
             Event::Repaint => {
                 self.need_repaint = true;
-                self.repaint_now = true;
             }
             Event::PointerMove(location) => {
                 let location = location.into();
@@ -356,27 +359,25 @@ where
             self.graphics.wait_for_submission(submission_id);
         }
 
-        let draw_data = {
-            self.draw_data.reset();
+        let draw_list = {
             let rect = self.shared_state.read().size.into();
-
-            let (image, _) = self.swapchain.get_back_buffer();
-            let mut canvas = Canvas::new(&mut self.draw_data, rect, image);
+            let mut canvas = Canvas::new(&mut self.draw_list, rect);
             self.handler.on_repaint(&mut canvas, &stats);
             canvas.finish()
         };
 
-        draw_data.finish();
-
-        // copy geometry from the geometry buffer to a temp buffer and
-        let submit_id = self.graphics.draw(draw_data);
-
-        self.submission_id = Some(submit_id);
+        let (image, _) = self.swapchain.get_back_buffer();
+        let submit_id = self.graphics.draw(
+            draw_list,
+            &mut self.draw_buffers[(self.frame_count % 2) as usize],
+            image,
+        );
 
         self.swapchain.present(submit_id, 1);
 
+        self.submission_id = Some(submit_id);
         self.need_repaint = false;
-        self.repaint_now = false;
+        self.frame_count += 1;
 
         #[cfg(feature = "profile")]
         {

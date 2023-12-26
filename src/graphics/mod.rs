@@ -6,7 +6,7 @@ mod primitives;
 
 use windows::Win32::Foundation::HWND;
 
-use self::backend::{Device, ResizeOp, SubmissionId, Swapchain};
+use self::backend::{Device, Image, ResizeOp, SubmissionId, Swapchain};
 pub use self::canvas::*;
 pub use self::color::*;
 pub use self::frame_statistics::*;
@@ -50,16 +50,17 @@ impl Graphics {
         self.device.resize_swapchain(swapchain, op);
     }
 
-    pub fn create_draw_buffer(&self) -> DrawData {
+    pub fn create_draw_buffer(&self) -> DrawBuffer {
         let command_list = self.device.create_graphics_command_list();
         let buffer = self.device.allocate_memory(1024 * 1024);
-        DrawData::new(buffer, command_list)
+        DrawBuffer::new(buffer, command_list)
     }
 
-    #[tracing::instrument(skip(self, data))]
-    pub fn draw(&self, data: &DrawData) -> SubmissionId {
-        data.sync_to_gpu(&self.device);
-        self.device.submit_graphics_command_list(&data.command_list)
+    #[tracing::instrument(skip(self, list, buffer, target))]
+    pub fn draw(&self, list: &DrawList, buffer: &mut DrawBuffer, target: &Image) -> SubmissionId {
+        buffer.copy_to_gpu(&self.device, target, list);
+        self.device
+            .submit_graphics_command_list(&buffer.command_list)
     }
 
     pub fn wait_for_submission(&self, submission_id: SubmissionId) {

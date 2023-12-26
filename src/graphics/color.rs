@@ -41,4 +41,8 @@ impl Color {
         b: 1.0,
         a: 1.0,
     };
+
+    pub fn to_array_f32(&self) -> [f32; 4] {
+        [self.r, self.g, self.b, self.a]
+    }
 }

@@ -1,9 +1,9 @@
-use std::ptr::NonNull;
-
 use dx12::{Dx12Buffer, Dx12Device, Dx12GraphicsCommandList, Dx12Image, Dx12Swapchain};
 use windows::Win32::Foundation::HWND;
 
-use super::{GraphicsConfig, PresentStatistics};
+use self::dx12::Dx12Output;
+
+use super::{GraphicsConfig, PresentStatistics, RefreshRate};
 
 mod dx12;
 
@@ -57,6 +57,12 @@ pub(crate) struct Swapchain {
 }
 
 impl Swapchain {
+    pub fn output(&self) -> &Output {
+        match &self.swapchain {
+            SwapchainImpl::Dx12(swapchain) => swapchain.output(),
+        }
+    }
+
     pub fn present_statistics(&self) -> PresentStatistics {
         match &self.swapchain {
             SwapchainImpl::Dx12(swapchain) => swapchain.present_statistics(),
@@ -86,17 +92,26 @@ impl Swapchain {
             SwapchainImpl::Dx12(swapchain) => swapchain.present(submission_id, intervals),
         }
     }
-
-    #[tracing::instrument(skip(self))]
-    pub fn wait_for_vsync(&self) {
-        match &self.swapchain {
-            SwapchainImpl::Dx12(swapchain) => swapchain.wait_for_vsync(),
-        }
-    }
 }
 
 enum SwapchainImpl {
     Dx12(Dx12Swapchain),
+}
+
+pub struct Output {
+    #[cfg(target_os = "windows")]
+    output: Dx12Output,
+}
+
+impl Output {
+    pub fn refresh_rate(&self) -> RefreshRate {
+        self.output.refresh_rate()
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub fn wait_for_vsync(&self) {
+        self.output.wait_for_vsync();
+    }
 }
 
 /// Uniquely identifies a submission to the GPU. Used to track when a submission

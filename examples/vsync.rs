@@ -1,5 +1,3 @@
-// use std::time::Duration;
-
 use plinth::{
     graphics::{Canvas, Color, FrameInfo, GraphicsConfig},
     input::Axis,
@@ -7,7 +5,10 @@ use plinth::{
     Application, Window, WindowEventHandler, WindowSpec,
 };
 
-const STARTING_REFRESH_RATE: FramesPerSecond = FramesPerSecond(120.0);
+#[cfg(feature = "profile")]
+use tracing_subscriber::layer::SubscriberExt;
+
+const STARTING_REFRESH_RATE: FramesPerSecond = FramesPerSecond(60.0);
 
 // consume 100ms per frame (10fps), the clock should correct accordingly
 // const SLEEP_PER_FRAME: Duration = Duration::from_millis(100);
@@ -35,11 +36,11 @@ impl WindowEventHandler for AppWindow {
         // print frame stats: last frame's present time, frame budget, and current refresh rate
         println!(
             "repaint:\n    prev present time: {:?}\n    present time: {:?}\n    frame budget: {:?}\n    target refresh rate: {:?}\n    estimated refresh rate: {:?}",
-            timing.prev_present,
-            timing.next_present,
-            timing.next_present - timing.prev_present,
+            timing.prev_present_time,
+            timing.next_present_time,
+            timing.next_present_time - timing.prev_present_time,
             self.refresh_rate,
-            (timing.next_present - timing.prev_present).as_frames_per_second()
+            timing.frame_rate,
         );
         canvas.clear(Color::RED);
 
@@ -56,7 +57,14 @@ impl WindowEventHandler for AppWindow {
 }
 
 pub fn main() {
-    tracing_subscriber::fmt().pretty().init();
+    #[cfg(feature = "profile")]
+    tracing::subscriber::set_global_default(
+        tracing_subscriber::registry().with(tracing_tracy::TracyLayer::new()),
+    )
+    .expect("set up the subscriber");
+
+    #[cfg(not(feature = "profile"))]
+    tracing_subscriber::fmt::fmt().pretty().init();
 
     let mut app = Application::new(&GraphicsConfig {
         debug_mode: true,

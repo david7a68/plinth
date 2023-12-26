@@ -90,6 +90,10 @@ pub struct SecondsPerFrame(pub Duration);
 
 impl SecondsPerFrame {
     pub const ZERO: Self = Self(Duration::ZERO);
+
+    pub fn as_frames_per_second(&self) -> FramesPerSecond {
+        FramesPerSecond(1.0 / self.0 .0)
+    }
 }
 
 impl From<FramesPerSecond> for SecondsPerFrame {
@@ -110,6 +114,46 @@ impl From<Duration> for SecondsPerFrame {
     }
 }
 
+impl Add<Instant> for SecondsPerFrame {
+    type Output = Instant;
+
+    fn add(self, rhs: Instant) -> Self::Output {
+        rhs + self.0
+    }
+}
+
+impl Add<SecondsPerFrame> for Instant {
+    type Output = Self;
+
+    fn add(self, rhs: SecondsPerFrame) -> Self::Output {
+        self + rhs.0
+    }
+}
+
+impl Add for SecondsPerFrame {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        Self(self.0 + rhs.0)
+    }
+}
+
+impl Mul<f64> for SecondsPerFrame {
+    type Output = Self;
+
+    fn mul(self, rhs: f64) -> Self::Output {
+        Self(self.0 * rhs)
+    }
+}
+
+impl Mul<SecondsPerFrame> for f64 {
+    type Output = Duration;
+
+    fn mul(self, rhs: SecondsPerFrame) -> Self::Output {
+        self * rhs.0
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Instant(pub f64);
 
@@ -124,8 +168,8 @@ impl Instant {
         Duration(crate::system::present_time_now() - self.0)
     }
 
-    pub fn from_ticks(ticks: u64, frequency: u64) -> Self {
-        Self(crate::system::present_time_from_ticks(ticks, frequency))
+    pub fn from_ticks(ticks: u64) -> Self {
+        Self(crate::system::present_time_from_ticks(ticks))
     }
 
     pub fn max(&self, rhs: &Self) -> Self {

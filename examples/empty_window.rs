@@ -47,7 +47,10 @@ impl WindowEventHandler for AppWindow {
 
     fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameInfo) {
         canvas.clear(Color::GREEN);
-        println!("Window repaint requested for {:?}", timing.next_present);
+        println!(
+            "Window repaint requested for {:?}",
+            timing.next_present_time
+        );
     }
 
     fn on_mouse_button(

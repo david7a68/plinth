@@ -6,18 +6,15 @@ use windows::{
         Foundation::HWND,
         Graphics::{
             Direct3D12::ID3D12Resource,
-            DirectComposition::{
-                DCompositionWaitForCompositorClock, IDCompositionDevice, IDCompositionTarget,
-                IDCompositionVisual, DCOMPOSITION_FRAME_STATISTICS,
-            },
+            DirectComposition::{IDCompositionDevice, IDCompositionTarget, IDCompositionVisual},
             Dxgi::{
                 Common::{
                     DXGI_ALPHA_MODE_IGNORE, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_UNKNOWN,
                     DXGI_SAMPLE_DESC,
                 },
-                IDXGISwapChain3, DXGI_PRESENT_RESTART, DXGI_RGBA, DXGI_SCALING_STRETCH,
-                DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
-                DXGI_USAGE_RENDER_TARGET_OUTPUT,
+                IDXGIOutput, IDXGISwapChain3, DXGI_FRAME_STATISTICS, DXGI_PRESENT_RESTART,
+                DXGI_RGBA, DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_DESC1,
+                DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT,
             },
         },
         UI::WindowsAndMessaging::GetClientRect,
@@ -26,13 +23,13 @@ use windows::{
 
 use crate::{
     graphics::{
-        backend::{dx12::Dx12Image, Image},
-        FramesPerSecond, PresentStatistics, ResizeOp, SubmissionId,
+        backend::{dx12::Dx12Image, Image, Output},
+        PresentStatistics, ResizeOp, SubmissionId,
     },
     time::Instant,
 };
 
-use super::Dx12Device;
+use super::{Dx12Device, Dx12Output};
 
 static CAN_WAIT_FOR_COMPOSITOR_CLOCK: OnceLock<bool> = OnceLock::new();
 
@@ -45,6 +42,7 @@ pub(crate) struct Dx12Swapchain {
     #[allow(dead_code)]
     visual: IDCompositionVisual,
 
+    output: crate::graphics::backend::Output,
     compositor: IDCompositionDevice,
 
     images: Option<[Image; 2]>,
@@ -117,15 +115,27 @@ impl Dx12Swapchain {
                 .unwrap();
         }
 
+        let main_output = unsafe {
+            // adapter 0 is always the main display
+            let adapter = device.dxgi_factory.EnumAdapters1(0).unwrap();
+            // output 0 is always the main display
+            adapter.EnumOutputs(0).unwrap()
+        };
+
         unsafe { visual.SetContent(&handle) }.unwrap();
         unsafe { device.compositor.Commit() }.unwrap();
 
         let images = Self::get_images(&handle, device);
 
+        let output = crate::graphics::backend::Output {
+            output: Dx12Output::new(main_output),
+        };
+
         Self {
             target,
             visual,
             handle,
+            output,
             compositor: device.compositor.clone(),
             images: Some(images),
             was_resized: false,
@@ -133,27 +143,23 @@ impl Dx12Swapchain {
         }
     }
 
+    pub fn output(&self) -> &Output {
+        &self.output
+    }
+
     pub fn present_statistics(&self) -> PresentStatistics {
-        let mut statistics = DCOMPOSITION_FRAME_STATISTICS::default();
-        unsafe { self.compositor.GetFrameStatistics(&mut statistics) }.unwrap();
+        let mut stats = DXGI_FRAME_STATISTICS::default();
 
-        let num = statistics.currentCompositionRate.Numerator as f64;
-        let den = statistics.currentCompositionRate.Denominator as f64;
-        let current_rate = num / den;
-
-        let prev_present_time = Instant::from_ticks(
-            statistics.lastFrameTime as u64,
-            statistics.timeFrequency as u64,
-        );
-        let next_estimated_present_time = Instant::from_ticks(
-            statistics.nextEstimatedFrameTime as u64,
-            statistics.timeFrequency as u64,
-        );
+        // this may fail on the first frame, or when waking from sleep. If that
+        // happens, just return the current time.
+        let prev_present_time = match unsafe { self.handle.GetFrameStatistics(&mut stats) } {
+            Ok(_) => Instant::from_ticks(stats.SyncQPCTime as u64),
+            Err(_) => Instant::now(),
+        };
 
         PresentStatistics {
-            monitor_rate: FramesPerSecond(current_rate),
+            monitor_rate: self.output.refresh_rate().now,
             prev_present_time,
-            next_estimated_present_time,
         }
     }
 
@@ -240,14 +246,6 @@ impl Dx12Swapchain {
 
         unsafe { self.handle.Present(intervals, flags) }.unwrap();
         self.last_present = Some(submission_id);
-    }
-
-    pub fn wait_for_vsync(&self) {
-        if *CAN_WAIT_FOR_COMPOSITOR_CLOCK.get().unwrap() {
-            unsafe { DCompositionWaitForCompositorClock(None, u32::MAX) };
-        } else {
-            todo!("wait for vsync without DCompositionWaitForCompositorClock")
-        }
     }
 
     #[tracing::instrument(skip(swapchain, device))]

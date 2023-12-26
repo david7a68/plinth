@@ -56,6 +56,7 @@ impl Graphics {
         DrawData::new(buffer, command_list)
     }
 
+    #[tracing::instrument(skip(self, data))]
     pub fn draw(&self, data: &DrawData) -> SubmissionId {
         data.sync_to_gpu(&self.device);
         self.device.submit_graphics_command_list(&data.command_list)

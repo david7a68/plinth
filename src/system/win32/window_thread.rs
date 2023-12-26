@@ -2,12 +2,13 @@
 //!
 //! Each window runs on its own thread, receiving events from a channel.
 
-use std::{
-    collections::VecDeque,
-    sync::{
-        mpsc::{Receiver, TryRecvError},
-        Arc,
-    },
+// reimplement cpu frame timing to account for long draw times
+//     use running average of N frames
+// allocate 2 frames in flight, split draw data into DrawList (cpu) and DrawBuffer (gpu)
+
+use std::sync::{
+    mpsc::{Receiver, TryRecvError},
+    Arc,
 };
 
 use parking_lot::RwLock;
@@ -15,11 +16,9 @@ use parking_lot::RwLock;
 use crate::{
     graphics::{
         backend::{ResizeOp, SubmissionId, Swapchain},
-        Canvas, DrawData, FrameInfo, FramesPerSecond, Graphics, Present, PresentStatistics,
-        RefreshRate,
+        Canvas, DrawData, FrameInfo, FramesPerSecond, Graphics, RefreshRate,
     },
     math::Scale,
-    time::{Duration, Instant},
     window::{Window, WindowEventHandler},
 };
 
@@ -72,12 +71,11 @@ pub(super) fn spawn<W, F>(
     });
 }
 
-const FRAME_TIME_WINDOW_SIZE: usize = 10;
-
 struct State<'a, W>
 where
     W: WindowEventHandler + 'static,
 {
+    mode: Mode,
     handler: W,
     shared_state: Arc<RwLock<SharedState>>,
 
@@ -85,12 +83,21 @@ where
     swapchain: Swapchain,
     draw_data: DrawData,
 
-    repaint_clock: RepaintClock,
-
     submission_id: Option<SubmissionId>,
+
+    requested_refresh_rate: FramesPerSecond,
+    actual_refresh_rate: FramesPerSecond,
+    vblanks_per_frame: u32,
+
     is_drag_resizing: bool,
     need_repaint: bool,
     repaint_now: bool,
+}
+
+enum Mode {
+    Idle,
+    Animating { vblanks_since_last_present: u32 },
+    Closed,
 }
 
 impl<'a, W> State<'a, W>
@@ -106,23 +113,27 @@ where
         let swapchain = graphics.create_swapchain(hwnd);
         let draw_data = graphics.create_draw_buffer();
 
-        let present_info = swapchain.present_statistics();
-        let repaint_clock = RepaintClock::new(present_info.monitor_rate);
+        shared_state.write().refresh_rate = {
+            let rate = swapchain.output().refresh_rate();
 
-        shared_state.write().refresh_rate = RefreshRate {
-            min_fps: FramesPerSecond(0.0),
-            max_fps: present_info.monitor_rate,
-            optimal_fps: repaint_clock.effective_refresh_rate,
+            RefreshRate {
+                min: rate.min,
+                max: rate.max,
+                now: FramesPerSecond(0.0),
+            }
         };
 
         Self {
+            mode: Mode::Idle,
             handler,
             shared_state,
             graphics,
             swapchain,
             draw_data,
-            repaint_clock,
             submission_id: None,
+            requested_refresh_rate: FramesPerSecond(0.0),
+            actual_refresh_rate: FramesPerSecond(0.0),
+            vblanks_per_frame: 0,
             is_drag_resizing: false,
             need_repaint: false,
             repaint_now: false,
@@ -130,40 +141,51 @@ where
     }
 
     fn run(&mut self, event_receiver: &Receiver<Event>) {
+        loop {
+            match self.mode {
+                Mode::Idle => self.run_idle(event_receiver),
+                Mode::Animating { .. } => self.run_animating(event_receiver),
+                Mode::Closed => break,
+            }
+        }
+    }
+
+    fn run_idle(&mut self, event_receiver: &Receiver<Event>) {
+        while self.process_pending::<true>(event_receiver) {
+            match &self.mode {
+                Mode::Idle => {
+                    if self.need_repaint {
+                        self.repaint();
+                    }
+                }
+                _ => {
+                    break;
+                }
+            }
+        }
+    }
+
+    fn run_animating(&mut self, event_receiver: &Receiver<Event>) {
         while self.process_pending::<false>(event_receiver) {
-            if self.repaint_clock.is_running() && self.shared_state.read().is_visible {
-                // use OR so that we don't overwrite a repaint request from the event loop
-                if self.repaint_clock.should_repaint() {
-                    self.need_repaint = true;
-                } else {
-                    self.swapchain.wait_for_vsync();
-                }
-            } else {
-                self.process_pending::<true>(event_receiver);
+            let Mode::Animating {
+                vblanks_since_last_present,
+            } = &mut self.mode
+            else {
+                break;
+            };
+
+            *vblanks_since_last_present += 1;
+
+            if *vblanks_since_last_present >= self.vblanks_per_frame {
+                *vblanks_since_last_present = 0;
+                self.need_repaint = true;
             }
 
-            // repaint after processing inputs
             if self.need_repaint {
-                let start = Instant::now();
                 self.repaint();
-                let elapsed = start.elapsed();
-
-                self.swapchain.wait_for_vsync();
-
-                let present_info = self.swapchain.present_statistics();
-
-                self.repaint_clock.update(&present_info, &elapsed);
-                self.shared_state.write().refresh_rate = RefreshRate {
-                    min_fps: FramesPerSecond(0.0),
-                    max_fps: present_info.monitor_rate,
-                    optimal_fps: self.repaint_clock.effective_refresh_rate,
-                };
-
-                #[cfg(feature = "profile")]
-                {
-                    tracing_tracy::client::frame_mark();
-                }
             }
+
+            self.swapchain.output().wait_for_vsync();
         }
     }
 
@@ -211,6 +233,7 @@ where
             }
             Event::Destroy => {
                 self.handler.on_destroy();
+                self.mode = Mode::Closed;
                 return false;
             }
             Event::Visible(is_visible) => {
@@ -262,7 +285,25 @@ where
                 self.handler.on_end_resize();
             }
             Event::SetAnimationFrequency(freq) => {
-                self.repaint_clock.requested_refresh_rate(freq);
+                if freq > 0.0 {
+                    let vblanks_per_frame = (self.swapchain.output().refresh_rate().now / freq)
+                        .floor()
+                        .max(1.0);
+
+                    let refresh_rate =
+                        self.swapchain.output().refresh_rate().now / vblanks_per_frame;
+
+                    self.vblanks_per_frame = vblanks_per_frame as u32;
+                    self.actual_refresh_rate = refresh_rate;
+                    self.requested_refresh_rate = freq;
+
+                    self.mode = Mode::Animating {
+                        // force a repaint on the first frame
+                        vblanks_since_last_present: self.vblanks_per_frame,
+                    };
+                } else {
+                    self.mode = Mode::Idle;
+                }
             }
             Event::Repaint => {
                 self.need_repaint = true;
@@ -299,39 +340,48 @@ where
 
     #[tracing::instrument(skip(self))]
     fn repaint(&mut self) {
-        let (image, _) = self.swapchain.get_back_buffer();
+        let stats = {
+            let prev_present_time = self.swapchain.present_statistics().prev_present_time;
+            let next_present_time = self.swapchain.output().refresh_rate().now.frame_time()
+                * self.vblanks_per_frame as f64;
+
+            FrameInfo {
+                frame_rate: self.actual_refresh_rate,
+                prev_present_time: prev_present_time,
+                next_present_time: prev_present_time + next_present_time.0,
+            }
+        };
 
         if let Some(submission_id) = self.submission_id {
             self.graphics.wait_for_submission(submission_id);
         }
 
-        let stats = self.repaint_clock.next_present_info();
-
         let draw_data = {
             self.draw_data.reset();
             let rect = self.shared_state.read().size.into();
 
+            let (image, _) = self.swapchain.get_back_buffer();
             let mut canvas = Canvas::new(&mut self.draw_data, rect, image);
             self.handler.on_repaint(&mut canvas, &stats);
             canvas.finish()
         };
 
         draw_data.finish();
+
         // copy geometry from the geometry buffer to a temp buffer and
         let submit_id = self.graphics.draw(draw_data);
 
         self.submission_id = Some(submit_id);
 
-        let interval = if self.repaint_now {
-            0
-        } else {
-            self.repaint_clock.derived_intervals_per_frame
-        };
-
-        self.swapchain.present(submit_id, interval);
+        self.swapchain.present(submit_id, 1);
 
         self.need_repaint = false;
         self.repaint_now = false;
+
+        #[cfg(feature = "profile")]
+        {
+            tracing_tracy::client::frame_mark();
+        }
     }
 }
 
@@ -341,196 +391,5 @@ where
 {
     fn drop(&mut self) {
         self.graphics.wait_for_idle();
-    }
-}
-
-/// Keeps track of presentation statistics and determines when to repaint.
-///
-/// This is mostly just to consolidate timing logic into one place.
-#[derive(Debug)]
-struct RepaintClock {
-    /// The refresh rate of the window. This may be different from the actual
-    /// monitor refresh rate if the window compositor is not synchronized to the
-    /// monitor.
-    ///
-    /// For example, the Windows compositor is synced to the primary monitor and
-    /// everything else just has to make do.
-    monitor_refresh_rate: FramesPerSecond,
-
-    /// The period between monitor refreshes.
-    monitor_refresh_time: Duration,
-
-    /// The refresh rate requested by the application.
-    requested_refresh_rate: FramesPerSecond,
-
-    /// The actual refresh rate that the application will get. This will be
-    /// faster than the requested refresh rate unless the requested refresh rate
-    /// exceeds the monitor refresh rate.
-    effective_refresh_rate: FramesPerSecond,
-
-    /// The period between frames at the effective refresh rate.
-    derived_frame_budget: Duration,
-    derived_intervals_per_frame: u32,
-
-    prev_present_time: Instant,
-    next_target_present_time: Instant,
-
-    historical_frame_times: VecDeque<Duration>,
-    mean_frame_time: Duration,
-
-    min_presentation_time: Duration,
-
-    prev_present_id: u64,
-}
-
-impl RepaintClock {
-    fn new(monitor_refresh_rate: FramesPerSecond) -> Self {
-        Self {
-            monitor_refresh_rate,
-            monitor_refresh_time: monitor_refresh_rate.frame_time().0,
-            requested_refresh_rate: monitor_refresh_rate,
-            effective_refresh_rate: monitor_refresh_rate,
-            derived_frame_budget: monitor_refresh_rate.frame_time().0,
-            derived_intervals_per_frame: 1,
-            prev_present_time: Instant::ZERO,
-            next_target_present_time: Instant::ZERO,
-            historical_frame_times: VecDeque::new(),
-            mean_frame_time: Duration::ZERO,
-            min_presentation_time: Duration::ZERO,
-            prev_present_id: 0,
-        }
-    }
-
-    fn is_running(&self) -> bool {
-        self.requested_refresh_rate.0 > 0.0
-    }
-
-    fn requested_refresh_rate(&mut self, rate: FramesPerSecond) {
-        self.requested_refresh_rate = rate;
-    }
-
-    fn next_present_info(&self) -> FrameInfo {
-        // When we estimate rendering will complete if we draw right now based
-        // on the previous frame.
-        let estimated_render_complete_time = Instant::now() + self.mean_frame_time;
-
-        assert!(
-            estimated_render_complete_time >= self.prev_present_time,
-            "estimated_render_complete_time: {:?}, self.prev_present_time: {:?}",
-            estimated_render_complete_time,
-            self.prev_present_time
-        );
-
-        // The estimated time until we are able to present the next frame
-        // (rendering is complete).
-        let estimated_time_until_present = estimated_render_complete_time - self.prev_present_time;
-
-        let estimated_present_time = estimated_render_complete_time + self.min_presentation_time;
-
-        // The number of monitor refreshes until we are next able to present,
-        // adjusted to the next vsync.
-        let estimated_intervals = self
-            .monitor_refresh_time
-            .frames_for(estimated_time_until_present);
-
-        assert!(
-            estimated_present_time >= estimated_render_complete_time,
-            "estimated_present_time: {:?}, self.prev_present_time: {:?}",
-            estimated_present_time,
-            self.prev_present_time
-        );
-
-        let prev_present = Present {
-            id: self.prev_present_id,
-            time: self.prev_present_time,
-        };
-
-        let next_present = Present {
-            id: self.prev_present_id + estimated_intervals.num_frames as u64,
-            time: estimated_present_time,
-        };
-
-        FrameInfo {
-            prev_present,
-            next_present,
-        }
-    }
-
-    fn update(&mut self, stats: &PresentStatistics, cpu_time: &Duration) {
-        #[cfg(feature = "profile")]
-        {
-            // plot delta between expected and actual present time
-            tracing_tracy::client::plot!(
-                "delta between expected and actual present time",
-                (stats.prev_present_time - self.next_target_present_time).0
-                    / self.monitor_refresh_time
-            );
-        }
-
-        // This may change every frame, depending on the compositor.
-        if self.monitor_refresh_rate != stats.monitor_rate {
-            self.monitor_refresh_rate = stats.monitor_rate;
-            self.monitor_refresh_time = stats.monitor_rate.frame_time().0;
-
-            if self.requested_refresh_rate > 0.0 {
-                // This can be zero, meaning that we want to draw every vsync.
-                let vblanks_per_frame = (stats.monitor_rate.round() / self.requested_refresh_rate)
-                    .floor()
-                    .max(1.0);
-
-                self.derived_intervals_per_frame = vblanks_per_frame as u32;
-                self.effective_refresh_rate = stats.monitor_rate.round() / vblanks_per_frame;
-                self.derived_frame_budget = (self.monitor_refresh_time * vblanks_per_frame).into();
-            }
-        }
-
-        self.historical_frame_times.push_back(*cpu_time);
-        if self.historical_frame_times.len() > FRAME_TIME_WINDOW_SIZE {
-            self.historical_frame_times.pop_front();
-        }
-
-        self.mean_frame_time = self.historical_frame_times.iter().sum::<Duration>()
-            / self.historical_frame_times.len() as f64;
-
-        self.prev_present_time = stats.prev_present_time;
-        self.next_target_present_time = stats.prev_present_time + self.derived_frame_budget;
-        self.prev_present_id += 1;
-
-        #[cfg(feature = "profile")]
-        {}
-    }
-
-    /// Tries to determine when it makes sense to repaint.
-    ///
-    /// The later we draw, the less input latency we have, but the more likely
-    /// we are to miss the presentation window. So, we want to draw such that we
-    /// expect to be finished within one monitor refresh of the target vblank.
-    ///
-    /// This will not save us if the estimated render time is longer than the
-    /// refresh interval.
-    fn should_repaint(&self) -> bool {
-        let now = Instant::now();
-
-        #[cfg(feature = "profile")]
-        {
-            tracing_tracy::client::plot!(
-                "time until present",
-                (self.next_target_present_time - now).0 / self.monitor_refresh_time
-            );
-        }
-
-        if self.prev_present_time > now {
-            // The previously submitted frame is still in flight.
-            return false;
-        } else if now >= self.next_target_present_time || (self.derived_intervals_per_frame == 1) {
-            // We missed the presentation window.x
-            return true;
-        }
-
-        // mean frame time, rounded to the next vsync
-        let mean_frame_time =
-            (self.mean_frame_time / self.monitor_refresh_time).ceil() * self.monitor_refresh_time;
-
-        (self.next_target_present_time - mean_frame_time - now) <= self.monitor_refresh_time
     }
 }

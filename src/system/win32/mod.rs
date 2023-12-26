@@ -22,6 +22,6 @@ pub fn present_time_now() -> f64 {
     time as f64 / *QPF_FREQUENCY as f64
 }
 
-pub fn present_time_from_ticks(ticks: u64, frequency: u64) -> f64 {
-    ticks as f64 / frequency as f64
+pub fn present_time_from_ticks(ticks: u64) -> f64 {
+    ticks as f64 / *QPF_FREQUENCY as f64
 }

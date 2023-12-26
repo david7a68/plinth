@@ -32,6 +32,7 @@ impl DrawData {
         self.command_list.finish();
     }
 
+    #[tracing::instrument(skip(self, device))]
     pub(super) fn sync_to_gpu(&self, device: &Device) {
         let mut buffer = self.buffer.borrow_mut();
 

@@ -25,7 +25,7 @@ impl WindowEventHandler for DemoWindow {
     fn on_visible(&mut self, visible: bool) {
         if visible {
             self.window
-                .set_animation_frequency(self.window.refresh_rate().optimal_fps);
+                .set_animation_frequency(self.window.refresh_rate().now);
         } else {
             self.window.set_animation_frequency(FramesPerSecond::ZERO);
         }

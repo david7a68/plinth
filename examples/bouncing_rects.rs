@@ -60,7 +60,7 @@ impl WindowEventHandler for DemoWindow {
                 // No throttling, default to display refresh rate. This
                 // is a polite fiction, since the display refresh rate
                 // may change at any time.
-                self.window.refresh_rate().max_fps
+                self.window.refresh_rate().max
 
                 // alternatively
                 // Some(self.window.max_animation_frequency())
@@ -72,11 +72,11 @@ impl WindowEventHandler for DemoWindow {
         }
     }
 
-    #[tracing::instrument(skip(self, canvas))]
+    #[tracing::instrument(skip(self, canvas, timings))]
     fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timings: &FrameInfo) {
         tracing::info!("timings: {:?}", timings);
 
-        let delta = timings.next_present.time - timings.prev_present.time;
+        let delta = timings.next_present_time - timings.prev_present_time;
 
         let canvas_rect = canvas.rect();
 

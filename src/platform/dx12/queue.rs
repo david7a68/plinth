@@ -10,7 +10,7 @@ use windows::Win32::{
     System::Threading::{CreateEventW, WaitForSingleObject, INFINITE},
 };
 
-use crate::graphics::SubmissionId;
+use crate::platform::gfx::SubmitId;
 
 /// A queue of GPU commands.
 ///
@@ -50,8 +50,8 @@ impl Queue {
     }
 
     /// Causes the CPU to wait until the given submission has completed.
-    #[tracing::instrument(skip(self))]
-    pub fn wait(&self, submission: SubmissionId) {
+    #[tracing::instrument(skip(self, submission))]
+    pub fn wait(&self, submission: SubmitId) {
         if self.is_done(submission) {
             return;
         }
@@ -98,13 +98,13 @@ impl Queue {
             // todo: relax ordering if possible
             let signal = self.num_submitted.fetch_add(1, Ordering::SeqCst);
             unsafe { self.queue.Signal(&self.fence, signal) }.unwrap();
-            SubmissionId(signal)
+            SubmitId(signal)
         };
 
         self.wait(id);
     }
 
-    pub fn is_done(&self, submission: SubmissionId) -> bool {
+    pub fn is_done(&self, submission: SubmitId) -> bool {
         if submission.0 > self.num_completed.load(Ordering::Acquire) {
             self.poll_fence();
         }
@@ -113,14 +113,14 @@ impl Queue {
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn submit(&self, commands: &ID3D12CommandList) -> SubmissionId {
+    pub fn submit(&self, commands: &ID3D12CommandList) -> SubmitId {
         // todo: relax ordering if possible
         let signal = self.num_submitted.fetch_add(1, Ordering::SeqCst);
 
         unsafe { self.queue.ExecuteCommandLists(&[Some(commands.clone())]) };
         unsafe { self.queue.Signal(&self.fence, signal) }.unwrap();
 
-        SubmissionId(signal)
+        SubmitId(signal)
     }
 
     fn poll_fence(&self) {

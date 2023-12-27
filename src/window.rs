@@ -6,7 +6,7 @@ use crate::{
 };
 
 #[cfg(target_os = "windows")]
-use crate::system;
+use crate::platform;
 
 pub const MAX_TITLE_LENGTH: usize = 255;
 
@@ -36,11 +36,11 @@ impl Default for WindowSpec {
 }
 
 pub struct Window {
-    inner: system::WindowImpl,
+    inner: platform::WindowImpl,
 }
 
 impl Window {
-    pub(crate) fn new(inner: system::WindowImpl) -> Self {
+    pub(crate) fn new(inner: platform::WindowImpl) -> Self {
         Self { inner }
     }
 

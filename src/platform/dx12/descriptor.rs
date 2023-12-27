@@ -37,7 +37,7 @@ impl<const COUNT: usize> SimpleDescriptorHeap<COUNT> {
                 panic!()
             });
 
-        debug_assert!(COUNT <= u16::MAX as usize);
+        debug_assert!(u16::try_from(COUNT).is_ok());
 
         Self {
             cpu_heap_start: unsafe { heap.GetCPUDescriptorHandleForHeapStart() },

@@ -2,16 +2,16 @@ use crate::window::{Window, WindowEventHandler, WindowSpec};
 
 use crate::graphics::GraphicsConfig;
 #[cfg(target_os = "windows")]
-use crate::system;
+use crate::platform;
 
 pub struct Application {
-    inner: system::ApplicationImpl,
+    inner: platform::ApplicationImpl,
 }
 
 impl Application {
     pub fn new(graphics: &GraphicsConfig) -> Self {
         Self {
-            inner: system::ApplicationImpl::new(graphics),
+            inner: platform::ApplicationImpl::new(graphics),
         }
     }
 
@@ -35,7 +35,7 @@ impl Application {
 #[derive(Clone)]
 #[repr(transparent)]
 pub struct AppContext {
-    pub(crate) inner: system::AppContextImpl,
+    pub(crate) inner: platform::AppContextImpl,
 }
 
 impl AppContext {
@@ -52,8 +52,8 @@ impl AppContext {
     }
 }
 
-impl From<system::AppContextImpl> for AppContext {
-    fn from(inner: system::AppContextImpl) -> Self {
+impl From<platform::AppContextImpl> for AppContext {
+    fn from(inner: platform::AppContextImpl) -> Self {
         Self { inner }
     }
 }

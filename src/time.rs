@@ -161,15 +161,15 @@ impl Instant {
     pub const ZERO: Self = Self(0.0);
 
     pub fn now() -> Self {
-        Self(crate::system::present_time_now())
+        Self(crate::platform::present_time_now())
     }
 
     pub fn elapsed(&self) -> Duration {
-        Duration(crate::system::present_time_now() - self.0)
+        Duration(crate::platform::present_time_now() - self.0)
     }
 
     pub fn from_ticks(ticks: u64) -> Self {
-        Self(crate::system::present_time_from_ticks(ticks))
+        Self(crate::platform::present_time_from_ticks(ticks))
     }
 
     pub fn max(&self, rhs: &Self) -> Self {

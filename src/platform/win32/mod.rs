@@ -1,5 +1,6 @@
 mod application;
 mod event_thread;
+mod swapchain;
 mod window;
 mod window_thread;
 

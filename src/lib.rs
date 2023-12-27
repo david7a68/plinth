@@ -4,7 +4,7 @@ pub mod math;
 pub mod time;
 
 mod application;
-mod system;
+mod platform;
 mod window;
 
 pub use application::Application;

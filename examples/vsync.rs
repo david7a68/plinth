@@ -34,14 +34,14 @@ impl WindowEventHandler for AppWindow {
 
     fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameInfo) {
         // print frame stats: last frame's present time, frame budget, and current refresh rate
-        println!(
-            "repaint:\n    prev present time: {:?}\n    present time: {:?}\n    frame budget: {:?}\n    target refresh rate: {:?}\n    estimated refresh rate: {:?}",
-            timing.prev_present_time,
-            timing.next_present_time,
-            timing.next_present_time - timing.prev_present_time,
-            self.refresh_rate,
-            timing.frame_rate,
-        );
+        // println!(
+        //     "repaint:\n    prev present time: {:?}\n    present time: {:?}\n    frame budget: {:?}\n    target refresh rate: {:?}\n    estimated refresh rate: {:?}",
+        //     timing.prev_present_time,
+        //     timing.next_present_time,
+        //     timing.next_present_time - timing.prev_present_time,
+        //     self.refresh_rate,
+        //     timing.frame_rate,
+        // );
         canvas.clear(Color::RED);
 
         // std::thread::sleep(SLEEP_PER_FRAME);

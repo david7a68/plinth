@@ -14,16 +14,19 @@ use std::sync::{
 use parking_lot::RwLock;
 
 use crate::{
-    graphics::{
-        backend::{ResizeOp, SubmissionId, Swapchain},
-        Canvas, DrawBuffer, DrawList, FrameInfo, FramesPerSecond, Graphics, RefreshRate,
-    },
+    graphics::{Canvas, FrameInfo, RefreshRate},
     math::Scale,
+    platform::{
+        dx12::Frame,
+        gfx::{Device, DrawList, SubmitId},
+    },
+    time::{FramesPerSecond, Instant},
     window::{Window, WindowEventHandler},
 };
 
 use super::{
     application::{AppContextImpl, AppMessage},
+    swapchain::Swapchain,
     window::{Event, SharedState, WindowImpl},
 };
 
@@ -42,20 +45,17 @@ pub(super) fn spawn<W, F>(
     F: FnMut(Window) -> W + Send + 'static,
 {
     std::thread::spawn(move || {
-        let AppContextImpl { graphics, sender } = context.clone();
+        let ctx = context.clone();
 
         let shared_state = Arc::new(RwLock::new(SharedState::default()));
 
         let (hwnd, handler) = {
             let hwnd = match event_receiver.recv().unwrap() {
                 Event::Create(hwnd) => hwnd,
-                msg => panic!(
-                    "First message must be Event::Create(hwnd). Got {:?} instead.",
-                    msg
-                ),
+                msg => panic!("First message must be Event::Create(hwnd). Got {msg:?} instead."),
             };
 
-            sender.send(AppMessage::WindowCreated).unwrap();
+            ctx.sender.send(AppMessage::WindowCreated).unwrap();
             (
                 hwnd,
                 constructor(Window::new(WindowImpl {
@@ -66,8 +66,10 @@ pub(super) fn spawn<W, F>(
             )
         };
 
-        State::new(hwnd, handler, shared_state, &graphics).run(&event_receiver);
-        sender.send(AppMessage::WindowClosed).unwrap();
+        let swapchain = ctx.create_swapchain(hwnd);
+
+        State::new(swapchain, handler, shared_state, &ctx).run(&event_receiver);
+        ctx.sender.send(AppMessage::WindowClosed).unwrap();
     });
 }
 
@@ -79,13 +81,14 @@ where
     handler: W,
     shared_state: Arc<RwLock<SharedState>>,
 
-    graphics: &'a Arc<Graphics>,
+    context: &'a AppContextImpl,
+
     swapchain: Swapchain,
 
     draw_list: DrawList,
-    draw_buffers: [DrawBuffer; 2],
+    draw_buffers: [Frame; 2],
 
-    submission_id: Option<SubmissionId>,
+    submit_id: Option<SubmitId>,
 
     requested_refresh_rate: FramesPerSecond,
     actual_refresh_rate: FramesPerSecond,
@@ -107,21 +110,20 @@ where
     W: WindowEventHandler + 'static,
 {
     fn new(
-        hwnd: windows::Win32::Foundation::HWND,
+        swapchain: Swapchain,
         handler: W,
         shared_state: Arc<RwLock<SharedState>>,
-        graphics: &'a Arc<Graphics>,
+        context: &'a AppContextImpl,
     ) -> Self {
-        let swapchain = graphics.create_swapchain(hwnd);
         let draw_list = DrawList::new();
-        let draw_buffers = [graphics.create_draw_buffer(), graphics.create_draw_buffer()];
+        let draw_buffers = [context.dx12.create_frame(), context.dx12.create_frame()];
 
         shared_state.write().refresh_rate = {
-            let rate = swapchain.output().refresh_rate();
+            let rate = context.composition_rate();
 
             RefreshRate {
-                min: rate.min,
-                max: rate.max,
+                min: FramesPerSecond(0.0),
+                max: rate,
                 now: FramesPerSecond(0.0),
             }
         };
@@ -130,11 +132,11 @@ where
             mode: Mode::Idle,
             handler,
             shared_state,
-            graphics,
+            context,
             swapchain,
             draw_list,
             draw_buffers,
-            submission_id: None,
+            submit_id: None,
             requested_refresh_rate: FramesPerSecond(0.0),
             actual_refresh_rate: FramesPerSecond(0.0),
             vblanks_per_frame: 0,
@@ -189,7 +191,7 @@ where
                 self.repaint();
             }
 
-            self.swapchain.output().wait_for_vsync();
+            self.context.wait_for_main_monitor_vblank();
         }
     }
 
@@ -252,17 +254,9 @@ where
                 height,
                 scale,
             } => {
-                let op = if self.is_drag_resizing {
-                    ResizeOp::Flex {
-                        width,
-                        height,
-                        flex: 2.0,
-                    }
-                } else {
-                    ResizeOp::Fixed { width, height }
-                };
-
-                self.graphics.resize_swapchain(&mut self.swapchain, op);
+                self.context.dx12.wait_for_idle();
+                self.swapchain
+                    .resize(width, height, self.is_drag_resizing.then_some(2.0));
 
                 let size = (width, height).into();
 
@@ -278,24 +272,18 @@ where
                 self.is_drag_resizing = false;
 
                 let size = self.shared_state.read().size;
-                self.graphics.resize_swapchain(
-                    &mut self.swapchain,
-                    ResizeOp::Fixed {
-                        width: size.width as u32,
-                        height: size.height as u32,
-                    },
-                );
+
+                self.context.dx12.wait_for_idle();
+                self.swapchain
+                    .resize(size.width as u32, size.height as u32, None);
 
                 self.handler.on_end_resize();
             }
             Event::SetAnimationFrequency(freq) => {
                 if freq > 0.0 {
-                    let vblanks_per_frame = (self.swapchain.output().refresh_rate().now / freq)
-                        .floor()
-                        .max(1.0);
-
-                    let refresh_rate =
-                        self.swapchain.output().refresh_rate().now / vblanks_per_frame;
+                    let composition_rate = self.context.composition_rate();
+                    let vblanks_per_frame = (composition_rate / freq).floor().max(1.0);
+                    let refresh_rate = composition_rate / vblanks_per_frame;
 
                     self.vblanks_per_frame = vblanks_per_frame as u32;
                     self.actual_refresh_rate = refresh_rate;
@@ -344,9 +332,9 @@ where
     #[tracing::instrument(skip(self))]
     fn repaint(&mut self) {
         let stats = {
-            let prev_present_time = self.swapchain.present_statistics().prev_present_time;
-            let next_present_time = self.swapchain.output().refresh_rate().now.frame_time()
-                * self.vblanks_per_frame as f64;
+            let prev_present_time = self.swapchain.prev_present_time().unwrap_or(Instant::ZERO);
+            let next_present_time =
+                self.context.composition_rate().frame_time() * self.vblanks_per_frame as f64;
 
             FrameInfo {
                 frame_rate: self.actual_refresh_rate,
@@ -355,8 +343,8 @@ where
             }
         };
 
-        if let Some(submission_id) = self.submission_id {
-            self.graphics.wait_for_submission(submission_id);
+        if let Some(submission_id) = self.submit_id {
+            self.context.dx12.wait(submission_id);
         }
 
         let draw_list = {
@@ -367,15 +355,16 @@ where
         };
 
         let (image, _) = self.swapchain.get_back_buffer();
-        let submit_id = self.graphics.draw(
+
+        let submit_id = self.context.dx12.draw(
             draw_list,
             &mut self.draw_buffers[(self.frame_count % 2) as usize],
             image,
         );
 
-        self.swapchain.present(submit_id, 1);
+        self.swapchain.present();
 
-        self.submission_id = Some(submit_id);
+        self.submit_id = Some(submit_id);
         self.need_repaint = false;
         self.frame_count += 1;
 
@@ -391,6 +380,6 @@ where
     W: WindowEventHandler + 'static,
 {
     fn drop(&mut self) {
-        self.graphics.wait_for_idle();
+        self.context.dx12.wait_for_idle();
     }
 }

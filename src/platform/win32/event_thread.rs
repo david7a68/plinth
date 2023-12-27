@@ -3,7 +3,10 @@
 //! The message pump is located on its own thread and events are sent to an
 //! event handler via a channel.
 
-use std::sync::{mpsc::Sender, OnceLock};
+use std::{
+    ptr::addr_of_mut,
+    sync::{mpsc::Sender, OnceLock},
+};
 
 use arrayvec::ArrayVec;
 use windows::{
@@ -114,7 +117,7 @@ pub(super) fn spawn(spec: WindowSpec, sender: Sender<Event>) {
             pointer_in_client_area: false,
         };
 
-        unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, &mut state as *mut _ as _) };
+        unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, addr_of_mut!(state) as _) };
 
         if spec.visible {
             unsafe { ShowWindow(hwnd, SW_SHOW) };
@@ -191,11 +194,11 @@ unsafe extern "system" fn wndproc_trampoline(
 ) -> LRESULT {
     let state = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
 
-    if state != 0 {
+    if state == 0 {
+        unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+    } else {
         let state = state as *mut State;
         wndproc(&mut *state, hwnd, msg, wparam, lparam)
-    } else {
-        unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
     }
 }
 
@@ -274,7 +277,7 @@ fn wndproc(state: &mut State, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
             let freq = f64::from_bits(wparam.0 as u64);
             state
                 .sender
-                .send(Event::SetAnimationFrequency(FramesPerSecond(freq as f64)))
+                .send(Event::SetAnimationFrequency(FramesPerSecond(freq)))
                 .unwrap();
             LRESULT(0)
         }

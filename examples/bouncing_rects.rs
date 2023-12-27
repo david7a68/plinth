@@ -132,7 +132,10 @@ fn main() {
     let args = Cli::parse();
     let throttle = args.throttle_animation;
 
-    let mut app = Application::new(&GraphicsConfig::default());
+    let mut app = Application::new(&GraphicsConfig {
+        debug_mode: true,
+        ..Default::default()
+    });
 
     match args.count {
         Count::One => run_one(&mut app, throttle),

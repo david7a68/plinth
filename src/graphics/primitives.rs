@@ -3,8 +3,8 @@ use crate::math::Rect;
 use super::Color;
 
 pub struct RoundRect<U> {
-    rect: Rect<U>,
-    color: Color,
+    pub rect: Rect<U>,
+    pub color: Color,
 }
 
 impl<U> RoundRect<U> {

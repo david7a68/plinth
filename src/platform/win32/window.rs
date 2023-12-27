@@ -26,7 +26,7 @@ pub(super) enum Event {
     Destroy,
     Visible(bool),
     BeginResize,
-    Resize { width: u32, height: u32, scale: f64 },
+    Resize { width: u32, height: u32, scale: f32 },
     EndResize,
     Repaint,
     MouseButton(MouseButton, ButtonState, (i16, i16)),

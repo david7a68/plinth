@@ -1,39 +1,22 @@
-use crate::{
-    math::Rect,
-    platform::gfx::{DrawCommand, DrawList},
-};
+use crate::{math::Rect, platform::gfx::DrawList};
 
 use super::{Color, RoundRect};
 
 pub struct Canvas<'a, U> {
     bounds: Rect<U>,
     data: &'a mut DrawList,
-
-    n_rects: u32,
 }
 
 impl<'a, U> Canvas<'a, U> {
     pub(crate) fn new(data: &'a mut DrawList, bounds: Rect<U>) -> Self {
-        data.rects.clear();
-        data.commands.clear();
-        data.commands.push(DrawCommand::Begin);
+        data.reset();
+        data.begin(bounds);
 
-        Self {
-            bounds,
-            data,
-            n_rects: 0,
-        }
+        Self { bounds, data }
     }
 
     pub(crate) fn finish(self) -> &'a mut DrawList {
-        if self.n_rects < self.data.rects.len() as u32 {
-            self.data.commands.push(DrawCommand::DrawRects {
-                first: self.n_rects,
-                count: self.data.rects.len() as u32 - self.n_rects,
-            });
-        }
-
-        self.data.commands.push(DrawCommand::End);
+        self.data.end();
         self.data
     }
 
@@ -42,10 +25,10 @@ impl<'a, U> Canvas<'a, U> {
     }
 
     pub fn clear(&mut self, color: Color) {
-        self.data.commands.push(DrawCommand::Clear(color));
+        self.data.clear(color);
     }
 
     pub fn draw_rect(&mut self, rect: impl Into<RoundRect<U>>) {
-        self.data.rects.push(rect.into().retype());
+        self.data.draw_rect(rect);
     }
 }

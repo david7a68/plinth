@@ -1,13 +1,13 @@
 use super::{scale::Scale, Vec2};
 
 pub struct Size<U> {
-    pub width: f64,
-    pub height: f64,
+    pub width: f32,
+    pub height: f32,
     _unit: std::marker::PhantomData<U>,
 }
 
 impl<U> Size<U> {
-    pub fn new(width: f64, height: f64) -> Self {
+    pub fn new(width: f32, height: f32) -> Self {
         Self {
             width,
             height,
@@ -16,31 +16,31 @@ impl<U> Size<U> {
     }
 }
 
-impl<U> std::ops::Mul<f64> for Size<U> {
+impl<U> std::ops::Mul<f32> for Size<U> {
     type Output = Self;
 
-    fn mul(self, rhs: f64) -> Self::Output {
+    fn mul(self, rhs: f32) -> Self::Output {
         Self::new(self.width * rhs, self.height * rhs)
     }
 }
 
-impl<U> std::ops::MulAssign<f64> for Size<U> {
-    fn mul_assign(&mut self, rhs: f64) {
+impl<U> std::ops::MulAssign<f32> for Size<U> {
+    fn mul_assign(&mut self, rhs: f32) {
         self.width *= rhs;
         self.height *= rhs;
     }
 }
 
-impl<U> std::ops::Div<f64> for Size<U> {
+impl<U> std::ops::Div<f32> for Size<U> {
     type Output = Self;
 
-    fn div(self, rhs: f64) -> Self::Output {
+    fn div(self, rhs: f32) -> Self::Output {
         Self::new(self.width / rhs, self.height / rhs)
     }
 }
 
-impl<U> std::ops::DivAssign<f64> for Size<U> {
-    fn div_assign(&mut self, rhs: f64) {
+impl<U> std::ops::DivAssign<f32> for Size<U> {
+    fn div_assign(&mut self, rhs: f32) {
         self.width /= rhs;
         self.height /= rhs;
     }
@@ -111,14 +111,14 @@ macro_rules! from_tuple {
         $(
             impl<U> From<($kind, $kind)> for Size<U> {
                 fn from((x, y): ($kind, $kind)) -> Self {
-                    Self::new(x as f64, y as f64)
+                    Self::new(x as f32, y as f32)
                 }
             }
         )+
     };
 }
 
-from_tuple!(u8, u16, u32, i8, i16, i32, f32, f64);
+from_tuple!(u8, u16, u32, i8, i16, i32, f32);
 
 impl<U> From<Vec2<U>> for Size<U> {
     fn from(vec: Vec2<U>) -> Self {

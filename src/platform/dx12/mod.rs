@@ -9,28 +9,32 @@ use std::{
 use parking_lot::Mutex;
 use windows::{
     core::{ComInterface, PCSTR},
-    Win32::Graphics::{
-        Direct3D::D3D_FEATURE_LEVEL_12_0,
-        Direct3D12::{
-            D3D12CreateDevice, ID3D12CommandAllocator, ID3D12CommandQueue, ID3D12Device,
-            ID3D12GraphicsCommandList, ID3D12InfoQueue1, ID3D12Resource,
-            D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_CPU_DESCRIPTOR_HANDLE,
-            D3D12_CPU_PAGE_PROPERTY_UNKNOWN, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_HEAP_FLAG_NONE,
-            D3D12_HEAP_PROPERTIES, D3D12_HEAP_TYPE_UPLOAD, D3D12_MEMORY_POOL_UNKNOWN,
-            D3D12_MESSAGE_CALLBACK_FLAG_NONE, D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_ID,
-            D3D12_MESSAGE_SEVERITY, D3D12_MESSAGE_SEVERITY_CORRUPTION,
-            D3D12_MESSAGE_SEVERITY_ERROR, D3D12_MESSAGE_SEVERITY_INFO,
-            D3D12_MESSAGE_SEVERITY_MESSAGE, D3D12_MESSAGE_SEVERITY_WARNING, D3D12_RESOURCE_BARRIER,
-            D3D12_RESOURCE_BARRIER_0, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-            D3D12_RESOURCE_BARRIER_FLAG_NONE, D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-            D3D12_RESOURCE_DESC, D3D12_RESOURCE_DIMENSION_BUFFER, D3D12_RESOURCE_FLAG_NONE,
-            D3D12_RESOURCE_STATES, D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_PRESENT,
-            D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_TRANSITION_BARRIER,
-            D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-        },
-        Dxgi::{
-            Common::{DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC},
-            IDXGIFactory2,
+    Win32::{
+        Foundation::RECT,
+        Graphics::{
+            Direct3D::D3D_FEATURE_LEVEL_12_0,
+            Direct3D12::{
+                D3D12CreateDevice, ID3D12CommandAllocator, ID3D12CommandQueue, ID3D12Device,
+                ID3D12GraphicsCommandList, ID3D12InfoQueue1, ID3D12Resource,
+                D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_CPU_DESCRIPTOR_HANDLE,
+                D3D12_CPU_PAGE_PROPERTY_UNKNOWN, D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
+                D3D12_HEAP_FLAG_NONE, D3D12_HEAP_PROPERTIES, D3D12_HEAP_TYPE_UPLOAD,
+                D3D12_MEMORY_POOL_UNKNOWN, D3D12_MESSAGE_CALLBACK_FLAG_NONE,
+                D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_ID, D3D12_MESSAGE_SEVERITY,
+                D3D12_MESSAGE_SEVERITY_CORRUPTION, D3D12_MESSAGE_SEVERITY_ERROR,
+                D3D12_MESSAGE_SEVERITY_INFO, D3D12_MESSAGE_SEVERITY_MESSAGE,
+                D3D12_MESSAGE_SEVERITY_WARNING, D3D12_RESOURCE_BARRIER, D3D12_RESOURCE_BARRIER_0,
+                D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_BARRIER_FLAG_NONE,
+                D3D12_RESOURCE_BARRIER_TYPE_TRANSITION, D3D12_RESOURCE_DESC,
+                D3D12_RESOURCE_DIMENSION_BUFFER, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATES,
+                D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_PRESENT,
+                D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_TRANSITION_BARRIER,
+                D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+            },
+            Dxgi::{
+                Common::{DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC},
+                IDXGIFactory2,
+            },
         },
     },
 };
@@ -39,7 +43,7 @@ use crate::graphics::GraphicsConfig;
 
 use self::descriptor::SimpleDescriptorHeap;
 
-use super::gfx::{self, DrawList};
+use super::gfx::{self, DrawCommand, DrawList};
 
 const DEFAULT_DRAW_BUFFER_SIZE: u64 = 64 * 1024;
 const MAX_RENDER_TARGET_VIEWS: usize = 128; // 128 / 2 = 64 windows
@@ -156,7 +160,7 @@ impl Frame {
         to: D3D12_RESOURCE_STATES,
     ) {
         let transition = D3D12_RESOURCE_TRANSITION_BARRIER {
-            pResource: unsafe { std::mem::transmute_copy(&image) },
+            pResource: unsafe { std::mem::transmute_copy(image) },
             Subresource: D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
             StateBefore: from,
             StateAfter: to,
@@ -215,13 +219,18 @@ impl Frame {
                 .CreateRenderTargetView(target, None, self.target_rtv);
         }
 
-        for command in &draw_list.commands {
+        let mut rect_idx = 0;
+        let mut area_idx = 0;
+        let mut color_idx = 0;
+
+        for (command, idx) in &draw_list.commands {
             match command {
-                gfx::DrawCommand::Begin => unsafe {
+                DrawCommand::Begin => unsafe {
                     self.command_list_mem.Reset().unwrap();
                     self.command_list
                         .Reset(&self.command_list_mem, None)
                         .unwrap();
+
                     self.image_barrier(
                         target,
                         D3D12_RESOURCE_STATE_PRESENT,
@@ -231,7 +240,7 @@ impl Frame {
                     self.command_list
                         .OMSetRenderTargets(1, Some(&self.target_rtv), false, None);
                 },
-                gfx::DrawCommand::End => unsafe {
+                DrawCommand::End => unsafe {
                     self.image_barrier(
                         target,
                         D3D12_RESOURCE_STATE_RENDER_TARGET,
@@ -239,15 +248,30 @@ impl Frame {
                     );
                     self.command_list.Close().unwrap();
                 },
-                gfx::DrawCommand::Clear(color) => unsafe {
-                    self.command_list.ClearRenderTargetView(
-                        self.target_rtv,
-                        &color.to_array_f32(),
-                        None,
-                    );
-                },
-                gfx::DrawCommand::DrawRects { first, count } => {
-                    // todo
+                DrawCommand::Clip => {
+                    let scissor = RECT {
+                        left: draw_list.areas[area_idx].left() as i32,
+                        top: draw_list.areas[area_idx].top() as i32,
+                        right: draw_list.areas[area_idx].right() as i32,
+                        bottom: draw_list.areas[area_idx].bottom() as i32,
+                    };
+                    unsafe { self.command_list.RSSetScissorRects(&[scissor]) };
+                    area_idx += 1;
+                }
+                DrawCommand::Clear => {
+                    unsafe {
+                        self.command_list.ClearRenderTargetView(
+                            self.target_rtv,
+                            &draw_list.clears[color_idx].to_array_f32(),
+                            None,
+                        );
+                    }
+                    color_idx += 1;
+                }
+                DrawCommand::DrawRects => {
+                    // todo: suspect an off-by-one error here
+                    let _num_rects = *idx - rect_idx;
+                    rect_idx = *idx;
                 }
             }
         }

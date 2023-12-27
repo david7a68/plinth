@@ -3,13 +3,13 @@ use crate::time::Duration;
 use super::{Scale, Vec2};
 
 pub struct Translate<Src, Dst> {
-    pub x: f64,
-    pub y: f64,
+    pub x: f32,
+    pub y: f32,
     _unit: std::marker::PhantomData<(Src, Dst)>,
 }
 
 impl<Src, Dst> Translate<Src, Dst> {
-    pub fn new(x: f64, y: f64) -> Self {
+    pub fn new(x: f32, y: f32) -> Self {
         Self {
             x,
             y,
@@ -56,31 +56,31 @@ impl<Src, Dst> std::ops::SubAssign for Translate<Src, Dst> {
     }
 }
 
-impl<Src, Dst> std::ops::Mul<f64> for Translate<Src, Dst> {
+impl<Src, Dst> std::ops::Mul<f32> for Translate<Src, Dst> {
     type Output = Self;
 
-    fn mul(self, rhs: f64) -> Self::Output {
+    fn mul(self, rhs: f32) -> Self::Output {
         Self::new(self.x * rhs, self.y * rhs)
     }
 }
 
-impl<Src, Dst> std::ops::MulAssign<f64> for Translate<Src, Dst> {
-    fn mul_assign(&mut self, rhs: f64) {
+impl<Src, Dst> std::ops::MulAssign<f32> for Translate<Src, Dst> {
+    fn mul_assign(&mut self, rhs: f32) {
         self.x *= rhs;
         self.y *= rhs;
     }
 }
 
-impl<Src, Dst> std::ops::Div<f64> for Translate<Src, Dst> {
+impl<Src, Dst> std::ops::Div<f32> for Translate<Src, Dst> {
     type Output = Self;
 
-    fn div(self, rhs: f64) -> Self::Output {
+    fn div(self, rhs: f32) -> Self::Output {
         Self::new(self.x / rhs, self.y / rhs)
     }
 }
 
-impl<Src, Dst> std::ops::DivAssign<f64> for Translate<Src, Dst> {
-    fn div_assign(&mut self, rhs: f64) {
+impl<Src, Dst> std::ops::DivAssign<f32> for Translate<Src, Dst> {
+    fn div_assign(&mut self, rhs: f32) {
         self.x /= rhs;
         self.y /= rhs;
     }
@@ -106,15 +106,18 @@ impl<Src, Dst> std::ops::Mul<Duration> for Translate<Src, Dst> {
     type Output = Translate<Src, Dst>;
 
     fn mul(self, rhs: Duration) -> Self::Output {
-        Self::new(self.x * rhs.0, self.y * rhs.0)
+        Self::new(
+            (self.x as f64 * rhs.0) as f32,
+            (self.y as f64 * rhs.0) as f32,
+        )
     }
 }
 
 impl<Src, Dst> std::ops::MulAssign<Duration> for Translate<Src, Dst> {
     fn mul_assign(&mut self, rhs: Duration) {
         let seconds = rhs.0;
-        self.x *= seconds;
-        self.y *= seconds;
+        self.x = (self.x as f64 * seconds) as f32;
+        self.y = (self.y as f64 * seconds) as f32;
     }
 }
 
@@ -122,15 +125,18 @@ impl<Src, Dst> std::ops::Div<Duration> for Translate<Src, Dst> {
     type Output = Translate<Src, Dst>;
 
     fn div(self, rhs: Duration) -> Self::Output {
-        Self::new(self.x / rhs.0, self.y / rhs.0)
+        Self::new(
+            (self.x as f64 / rhs.0) as f32,
+            (self.y as f64 / rhs.0) as f32,
+        )
     }
 }
 
 impl<Src, Dst> std::ops::DivAssign<Duration> for Translate<Src, Dst> {
     fn div_assign(&mut self, rhs: Duration) {
         let seconds = rhs.0;
-        self.x /= seconds;
-        self.y /= seconds;
+        self.x = (self.x as f64 / seconds) as f32;
+        self.y = (self.y as f64 / seconds) as f32;
     }
 }
 
@@ -165,8 +171,8 @@ impl<Src, Dst> PartialEq for Translate<Src, Dst> {
     }
 }
 
-impl<Src, Dst> From<(f64, f64)> for Translate<Src, Dst> {
-    fn from((x, y): (f64, f64)) -> Self {
+impl<Src, Dst> From<(f32, f32)> for Translate<Src, Dst> {
+    fn from((x, y): (f32, f32)) -> Self {
         Self::new(x, y)
     }
 }

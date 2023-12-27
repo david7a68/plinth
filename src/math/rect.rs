@@ -1,15 +1,17 @@
 use super::{point::Point, scale::Scale, size::Size, translate::Translate};
 
 pub struct Rect<U> {
-    pub x: f64,
-    pub y: f64,
-    pub width: f64,
-    pub height: f64,
+    pub x: f32,
+    pub y: f32,
+    pub width: f32,
+    pub height: f32,
     _unit: std::marker::PhantomData<U>,
 }
 
 impl<U> Rect<U> {
-    pub fn new(x: f64, y: f64, width: f64, height: f64) -> Self {
+    pub const ZERO: Self = Self::new(0.0, 0.0, 0.0, 0.0);
+
+    pub const fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
         Self {
             x,
             y,
@@ -76,19 +78,19 @@ impl<U> Rect<U> {
         }
     }
 
-    pub fn top(&self) -> f64 {
+    pub fn top(&self) -> f32 {
         self.y
     }
 
-    pub fn bottom(&self) -> f64 {
+    pub fn bottom(&self) -> f32 {
         self.y + self.height
     }
 
-    pub fn left(&self) -> f64 {
+    pub fn left(&self) -> f32 {
         self.x
     }
 
-    pub fn right(&self) -> f64 {
+    pub fn right(&self) -> f32 {
         self.x + self.width
     }
 
@@ -106,6 +108,11 @@ impl<U> Rect<U> {
 
     pub fn bottom_right(&self) -> Point<U> {
         Point::new(self.x + self.width, self.y + self.height)
+    }
+
+    #[inline]
+    pub fn to_xywh(&self) -> [f32; 4] {
+        [self.x, self.y, self.width, self.height]
     }
 
     pub fn size(&self) -> Size<U> {

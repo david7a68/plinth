@@ -1,13 +1,13 @@
 use super::{Scale, Translate};
 
 pub struct Vec2<U> {
-    pub x: f64,
-    pub y: f64,
+    pub x: f32,
+    pub y: f32,
     _unit: std::marker::PhantomData<U>,
 }
 
 impl<U> Vec2<U> {
-    pub fn new(x: f64, y: f64) -> Self {
+    pub fn new(x: f32, y: f32) -> Self {
         Self {
             x,
             y,
@@ -119,46 +119,46 @@ impl<U, U2> std::ops::Div<Scale<U, U2>> for Vec2<U2> {
     }
 }
 
-impl<U> std::ops::Mul<f64> for Vec2<U> {
+impl<U> std::ops::Mul<f32> for Vec2<U> {
     type Output = Self;
 
-    fn mul(self, rhs: f64) -> Self::Output {
+    fn mul(self, rhs: f32) -> Self::Output {
         Self::new(self.x * rhs, self.y * rhs)
     }
 }
 
-impl<U> std::ops::MulAssign<f64> for Vec2<U> {
-    fn mul_assign(&mut self, rhs: f64) {
+impl<U> std::ops::MulAssign<f32> for Vec2<U> {
+    fn mul_assign(&mut self, rhs: f32) {
         self.x *= rhs;
         self.y *= rhs;
     }
 }
 
-impl<U> std::ops::Div<f64> for Vec2<U> {
+impl<U> std::ops::Div<f32> for Vec2<U> {
     type Output = Self;
 
-    fn div(self, rhs: f64) -> Self::Output {
+    fn div(self, rhs: f32) -> Self::Output {
         Self::new(self.x / rhs, self.y / rhs)
     }
 }
 
-impl<U> std::ops::DivAssign<f64> for Vec2<U> {
-    fn div_assign(&mut self, rhs: f64) {
+impl<U> std::ops::DivAssign<f32> for Vec2<U> {
+    fn div_assign(&mut self, rhs: f32) {
         self.x /= rhs;
         self.y /= rhs;
     }
 }
 
-impl<U> std::ops::Rem<f64> for Vec2<U> {
+impl<U> std::ops::Rem<f32> for Vec2<U> {
     type Output = Self;
 
-    fn rem(self, rhs: f64) -> Self::Output {
+    fn rem(self, rhs: f32) -> Self::Output {
         Self::new(self.x % rhs, self.y % rhs)
     }
 }
 
-impl<U> std::ops::RemAssign<f64> for Vec2<U> {
-    fn rem_assign(&mut self, rhs: f64) {
+impl<U> std::ops::RemAssign<f32> for Vec2<U> {
+    fn rem_assign(&mut self, rhs: f32) {
         self.x %= rhs;
         self.y %= rhs;
     }
@@ -194,8 +194,8 @@ impl<U> PartialEq for Vec2<U> {
     }
 }
 
-impl<U> From<(f64, f64)> for Vec2<U> {
-    fn from((x, y): (f64, f64)) -> Self {
+impl<U> From<(f32, f32)> for Vec2<U> {
+    fn from((x, y): (f32, f32)) -> Self {
         Self {
             x,
             y,

@@ -27,7 +27,7 @@ impl DemoWindow {
 
         let mut rects = Vec::new();
         for _ in 0..100 {
-            let angle: f64 = rand::random::<f64>() * std::f64::consts::TAU;
+            let angle: f32 = rand::random::<f32>() * std::f32::consts::TAU;
             let (x, y) = angle.sin_cos();
 
             rects.push(DemoRect {

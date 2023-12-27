@@ -1,13 +1,13 @@
 use super::{scale::Scale, translate::Translate, Vec2};
 
 pub struct Point<U> {
-    pub x: f64,
-    pub y: f64,
+    pub x: f32,
+    pub y: f32,
     _unit: std::marker::PhantomData<U>,
 }
 
 impl<U> Point<U> {
-    pub fn new(x: f64, y: f64) -> Self {
+    pub fn new(x: f32, y: f32) -> Self {
         Self {
             x,
             y,
@@ -123,14 +123,14 @@ macro_rules! from_tuple {
         $(
             impl<U> From<($kind, $kind)> for Point<U> {
                 fn from((x, y): ($kind, $kind)) -> Self {
-                    Self::new(x as f64, y as f64)
+                    Self::new(x as f32, y as f32)
                 }
             }
         )+
     };
 }
 
-from_tuple!(u8, u16, u32, i8, i16, i32, f32, f64);
+from_tuple!(u8, u16, u32, i8, i16, i32, f32);
 
 impl<U> From<Vec2<U>> for Point<U> {
     fn from(vec: Vec2<U>) -> Self {

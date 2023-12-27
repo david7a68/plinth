@@ -1,5 +1,6 @@
 mod descriptor;
 mod queue;
+mod shaders;
 
 use std::{
     mem::{ManuallyDrop, MaybeUninit},
@@ -41,7 +42,7 @@ use windows::{
 
 use crate::graphics::GraphicsConfig;
 
-use self::descriptor::SimpleDescriptorHeap;
+use self::{descriptor::SimpleDescriptorHeap, shaders::Shader};
 
 use super::gfx::{self, DrawCommand, DrawList};
 
@@ -291,6 +292,8 @@ pub struct Device {
     device: ID3D12Device,
     queue: queue::Queue,
     rtv_heap: Arc<Mutex<descriptor::SimpleDescriptorHeap<MAX_RENDER_TARGET_VIEWS>>>,
+
+    rect_shader: Shader,
 }
 
 impl Device {
@@ -319,18 +322,21 @@ impl Device {
             }
         }
 
+        let queue = queue::Queue::new(&device, D3D12_COMMAND_LIST_TYPE_DIRECT);
+
         let rtv_heap = Arc::new(Mutex::new(descriptor::SimpleDescriptorHeap::new(
             &device,
             D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
             false,
         )));
 
-        let queue = queue::Queue::new(&device, D3D12_COMMAND_LIST_TYPE_DIRECT);
+        let rect_shader = shaders::create_rect_shader(&device);
 
         Self {
             device,
             queue,
             rtv_heap,
+            rect_shader,
         }
     }
 

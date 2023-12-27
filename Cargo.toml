@@ -23,7 +23,6 @@ features = [
     "Win32_Graphics_DirectComposition",
     "Win32_Graphics_Direct3D12",
     "Win32_Graphics_Direct3D",
-    "Win32_Graphics_Direct3D_Fxc",
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
     "Win32_Graphics_Gdi",
@@ -41,3 +40,10 @@ features = [
 clap = { version = "4.4.4", features = ["derive"] }
 tracing-subscriber = "0.3"
 rand = "0.8.5"
+
+[target.'cfg(windows)'.build-dependencies.windows]
+version = "0.52"
+features = [
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D_Dxc",
+]

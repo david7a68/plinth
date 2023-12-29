@@ -247,14 +247,15 @@ impl gfx::Context for Context {
                     // todo: suspect an off-by-one error here
                     let num_rects = *idx - rect_idx;
 
+                    tracing::info!("height: {}", viewport.Height);
+
                     self.device.shaders.rect_shader.bind(
                         &frame.command_list,
                         &frame.buffer.as_ref().unwrap(),
                         viewport_scale,
-                        // viewport.Height,
+                        viewport.Height,
                     );
 
-                    tracing::trace!("draw instanced: {} vertices, {} instances", 4, num_rects);
                     unsafe { frame.command_list.DrawInstanced(4, num_rects, 0, rect_idx) };
 
                     rect_idx = *idx;

@@ -6,9 +6,9 @@ use windows::Win32::{
             ID3D12Device, ID3D12GraphicsCommandList, ID3D12PipelineState, ID3D12Resource,
             ID3D12RootSignature, D3D12_BLEND_DESC, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_ONE,
             D3D12_BLEND_OP_ADD, D3D12_COLOR_WRITE_ENABLE_ALL, D3D12_CULL_MODE_BACK,
-            D3D12_DEPTH_STENCIL_DESC, D3D12_FILL_MODE_SOLID, D3D12_GRAPHICS_PIPELINE_STATE_DESC,
-            D3D12_INPUT_ELEMENT_DESC, D3D12_INPUT_LAYOUT_DESC, D3D12_LOGIC_OP_NOOP,
-            D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE, D3D12_RASTERIZER_DESC,
+            D3D12_CULL_MODE_NONE, D3D12_DEPTH_STENCIL_DESC, D3D12_FILL_MODE_SOLID,
+            D3D12_GRAPHICS_PIPELINE_STATE_DESC, D3D12_INPUT_ELEMENT_DESC, D3D12_INPUT_LAYOUT_DESC,
+            D3D12_LOGIC_OP_NOOP, D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE, D3D12_RASTERIZER_DESC,
             D3D12_RENDER_TARGET_BLEND_DESC, D3D12_SHADER_BYTECODE,
         },
         Dxgi::Common::{DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC},
@@ -67,6 +67,7 @@ impl RectShader {
                 RasterizerState: D3D12_RASTERIZER_DESC {
                     FillMode: D3D12_FILL_MODE_SOLID,
                     CullMode: D3D12_CULL_MODE_BACK,
+                    FrontCounterClockwise: TRUE,
                     ..Default::default()
                 },
                 DepthStencilState: D3D12_DEPTH_STENCIL_DESC {
@@ -103,11 +104,19 @@ impl RectShader {
         command_list: &ID3D12GraphicsCommandList,
         rects: &ID3D12Resource,
         viewport_scale: [f32; 2],
+        viewport_height: f32,
     ) {
         unsafe {
             command_list.SetPipelineState(&self.pipeline_state);
             command_list.SetGraphicsRootSignature(&self.root_signature);
-            command_list.SetGraphicsRoot32BitConstants(0, 2, viewport_scale.as_ptr().cast(), 0);
+            command_list.SetGraphicsRoot32BitConstants(
+                0,
+                3,
+                [viewport_scale[0], viewport_scale[1], viewport_height]
+                    .as_ptr()
+                    .cast(),
+                0,
+            );
             command_list.SetGraphicsRootShaderResourceView(1, rects.GetGPUVirtualAddress());
             command_list.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
         }

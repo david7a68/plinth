@@ -2,12 +2,8 @@ mod descriptor;
 mod queue;
 mod shaders;
 
-use std::{
-    mem::{ManuallyDrop, MaybeUninit},
-    sync::Arc,
-};
+use std::{mem::ManuallyDrop, sync::Arc};
 
-use parking_lot::Mutex;
 use windows::{
     core::{ComInterface, PCSTR},
     Win32::{
@@ -16,9 +12,10 @@ use windows::{
             Direct3D::D3D_FEATURE_LEVEL_12_0,
             Direct3D12::{
                 D3D12CreateDevice, ID3D12CommandAllocator, ID3D12CommandQueue, ID3D12Device,
-                ID3D12GraphicsCommandList, ID3D12InfoQueue1, ID3D12Resource,
-                D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_CPU_DESCRIPTOR_HANDLE,
-                D3D12_CPU_PAGE_PROPERTY_UNKNOWN, D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
+                ID3D12GraphicsCommandList, ID3D12InfoQueue1, ID3D12Resource, D3D12_BUFFER_SRV,
+                D3D12_BUFFER_SRV_FLAG_NONE, D3D12_COMMAND_LIST_TYPE_DIRECT,
+                D3D12_CPU_PAGE_PROPERTY_UNKNOWN, D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+                D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
                 D3D12_HEAP_FLAG_NONE, D3D12_HEAP_PROPERTIES, D3D12_HEAP_TYPE_UPLOAD,
                 D3D12_MEMORY_POOL_UNKNOWN, D3D12_MESSAGE_CALLBACK_FLAG_NONE,
                 D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_ID, D3D12_MESSAGE_SEVERITY,
@@ -30,7 +27,8 @@ use windows::{
                 D3D12_RESOURCE_DIMENSION_BUFFER, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATES,
                 D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_PRESENT,
                 D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_TRANSITION_BARRIER,
-                D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+                D3D12_SHADER_RESOURCE_VIEW_DESC, D3D12_SHADER_RESOURCE_VIEW_DESC_0,
+                D3D12_SRV_DIMENSION_BUFFER, D3D12_TEXTURE_LAYOUT_ROW_MAJOR, D3D12_VIEWPORT,
             },
             Dxgi::{
                 Common::{DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC},
@@ -42,13 +40,14 @@ use windows::{
 
 use crate::graphics::GraphicsConfig;
 
-use self::{descriptor::SimpleDescriptorHeap, shaders::Shader};
+use self::{
+    descriptor::{DescriptorArena, SingleDescriptorHeap},
+    shaders::RectShader,
+};
 
-use super::gfx::{self, DrawCommand, DrawList};
+use super::gfx::{self, DrawCommand, DrawList, RRect};
 
 const DEFAULT_DRAW_BUFFER_SIZE: u64 = 64 * 1024;
-const MAX_RENDER_TARGET_VIEWS: usize = 128; // 128 / 2 = 64 windows
-
 pub struct Image {
     image: ID3D12Resource,
 }
@@ -62,12 +61,7 @@ impl From<ID3D12Resource> for Image {
 }
 
 pub struct Frame {
-    device: ID3D12Device,
-    rtv_heap: Arc<Mutex<SimpleDescriptorHeap<MAX_RENDER_TARGET_VIEWS>>>,
-
-    target_rtv: D3D12_CPU_DESCRIPTOR_HANDLE,
-
-    buffer: MaybeUninit<ID3D12Resource>,
+    buffer: Option<ID3D12Resource>,
     buffer_size: u64,
     buffer_ptr: *mut u8,
 
@@ -76,13 +70,8 @@ pub struct Frame {
 }
 
 impl Frame {
-    fn new(
-        device: &ID3D12Device,
-        rtv_heap: Arc<Mutex<SimpleDescriptorHeap<MAX_RENDER_TARGET_VIEWS>>>,
-    ) -> Self {
-        let target_rtv = rtv_heap.lock().allocate().unwrap();
-
-        let buffer = Self::alloc_buffer(device, DEFAULT_DRAW_BUFFER_SIZE);
+    fn new(device: &ID3D12Device) -> Self {
+        let buffer = alloc_buffer(device, DEFAULT_DRAW_BUFFER_SIZE);
 
         let buffer_ptr = {
             let mut mapped = std::ptr::null_mut();
@@ -101,169 +90,154 @@ impl Frame {
         unsafe { command_list.Close() }.unwrap();
 
         Self {
-            device: device.clone(),
-            rtv_heap,
-            target_rtv,
-            buffer: MaybeUninit::new(buffer),
+            buffer: Some(buffer),
             buffer_size: DEFAULT_DRAW_BUFFER_SIZE,
             buffer_ptr,
             command_list,
             command_list_mem: command_allocator,
         }
     }
+}
 
-    fn alloc_buffer(device: &ID3D12Device, size: u64) -> ID3D12Resource {
-        let heap_desc = D3D12_HEAP_PROPERTIES {
-            Type: D3D12_HEAP_TYPE_UPLOAD,
-            CPUPageProperty: D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-            MemoryPoolPreference: D3D12_MEMORY_POOL_UNKNOWN,
-            CreationNodeMask: 0,
-            VisibleNodeMask: 0,
-        };
+impl gfx::Frame for Frame {}
 
-        let buffer_desc = D3D12_RESOURCE_DESC {
-            Dimension: D3D12_RESOURCE_DIMENSION_BUFFER,
-            Alignment: 0,
-            Width: size,
-            Height: 1,
-            DepthOrArraySize: 1,
-            MipLevels: 1,
-            Format: DXGI_FORMAT_UNKNOWN,
-            SampleDesc: DXGI_SAMPLE_DESC {
-                Count: 1,
-                Quality: 0,
-            },
-            Layout: D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
-            Flags: D3D12_RESOURCE_FLAG_NONE,
-        };
+pub struct Context {
+    device: Arc<Device>,
+    rtv_heap: SingleDescriptorHeap,
+    srv_heap: DescriptorArena,
+}
 
-        let mut buffer = None;
+impl Context {
+    fn new(device: &Arc<Device>) -> Self {
+        let rtv_heap = SingleDescriptorHeap::new(&device.device, D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
-        unsafe {
-            device.CreateCommittedResource(
-                &heap_desc,
-                D3D12_HEAP_FLAG_NONE,
-                &buffer_desc,
-                D3D12_RESOURCE_STATE_GENERIC_READ,
-                None,
-                &mut buffer,
-            )
+        let srv_heap =
+            DescriptorArena::new(&device.device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1);
+
+        Self {
+            device: device.clone(),
+            rtv_heap,
+            srv_heap,
         }
-        .unwrap();
+    }
+}
 
-        buffer.unwrap()
+impl gfx::Context for Context {
+    type Frame = Frame;
+    type Image = Image;
+
+    fn create_frame(&self) -> Self::Frame {
+        Frame::new(&self.device.device)
     }
 
-    fn image_barrier(
+    fn draw(
         &mut self,
-        image: &ID3D12Resource,
-        from: D3D12_RESOURCE_STATES,
-        to: D3D12_RESOURCE_STATES,
-    ) {
-        let transition = D3D12_RESOURCE_TRANSITION_BARRIER {
-            pResource: unsafe { std::mem::transmute_copy(image) },
-            Subresource: D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-            StateBefore: from,
-            StateAfter: to,
-        };
+        content: &DrawList,
+        frame: &mut Self::Frame,
+        target: impl Into<Self::Image>,
+    ) -> gfx::SubmitId {
+        let target = target.into().image;
 
-        let barrier = D3D12_RESOURCE_BARRIER {
-            Type: D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-            Flags: D3D12_RESOURCE_BARRIER_FLAG_NONE,
-            Anonymous: D3D12_RESOURCE_BARRIER_0 {
-                Transition: ManuallyDrop::new(transition),
-            },
-        };
+        let rects_size = std::mem::size_of_val(content.rects.as_slice());
+        let buffer_size = rects_size as u64;
 
-        unsafe { self.command_list.ResourceBarrier(&[barrier]) };
-    }
+        if frame.buffer_size < buffer_size {
+            let _ = frame.buffer.take();
 
-    fn upload_draw_list(&mut self, draw_list: &gfx::DrawList, target: &ID3D12Resource) {
-        let rect_size = std::mem::size_of_val(draw_list.rects.as_slice());
-        let buffer_size = rect_size as u64;
+            let buffer = alloc_buffer(&self.device.device, buffer_size);
 
-        if self.buffer_size < buffer_size {
-            unsafe {
-                self.buffer.assume_init_ref().Unmap(0, None);
-                self.buffer.assume_init_drop();
-            }
-
-            let buffer = Self::alloc_buffer(&self.device, buffer_size);
-
-            self.buffer_ptr = {
+            frame.buffer_ptr = {
                 let mut mapped = std::ptr::null_mut();
                 unsafe { buffer.Map(0, None, Some(&mut mapped)) }.unwrap();
                 mapped.cast()
             };
 
-            self.buffer = MaybeUninit::new(buffer);
-            self.buffer_size = buffer_size;
+            frame.buffer = Some(buffer);
+            frame.buffer_size = buffer_size;
         }
 
         unsafe {
             std::ptr::copy_nonoverlapping(
-                draw_list.rects.as_ptr().cast(),
-                self.buffer_ptr,
-                rect_size,
+                content.rects.as_ptr().cast(),
+                frame.buffer_ptr,
+                rects_size,
             );
         }
 
-        // supposedly, you only need a single rtv which can be shared by
-        // everyone since RTVs get written directly into the command list. Could
-        // share one per thread if parallelism is a concern.
-        //
-        // This way is simpler, but needs a large descriptor heap.
-        //
-        // cleanup: single rtv per thread (need to set max window limit)
+        let target_rtv = self.rtv_heap.cpu_handle();
+
         unsafe {
             self.device
-                .CreateRenderTargetView(target, None, self.target_rtv);
+                .device
+                .CreateRenderTargetView(&target, None, target_rtv);
         }
+
+        let (viewport_scale, viewport) = {
+            let img_desc = unsafe { target.GetDesc() };
+            let scale = [1.0 / img_desc.Width as f32, 1.0 / img_desc.Height as f32];
+
+            let viewport = D3D12_VIEWPORT {
+                TopLeftX: 0.0,
+                TopLeftY: 0.0,
+                Width: img_desc.Width as f32,
+                Height: img_desc.Height as f32,
+                MinDepth: 0.0,
+                MaxDepth: 1.0,
+            };
+
+            (scale, viewport)
+        };
 
         let mut rect_idx = 0;
         let mut area_idx = 0;
         let mut color_idx = 0;
 
-        for (command, idx) in &draw_list.commands {
+        for (command, idx) in &content.commands {
             match command {
                 DrawCommand::Begin => unsafe {
-                    self.command_list_mem.Reset().unwrap();
-                    self.command_list
-                        .Reset(&self.command_list_mem, None)
+                    frame.command_list_mem.Reset().unwrap();
+                    frame
+                        .command_list
+                        .Reset(&frame.command_list_mem, None)
                         .unwrap();
 
-                    self.image_barrier(
-                        target,
+                    image_barrier(
+                        &frame.command_list,
+                        &target,
                         D3D12_RESOURCE_STATE_PRESENT,
                         D3D12_RESOURCE_STATE_RENDER_TARGET,
                     );
 
-                    self.command_list
-                        .OMSetRenderTargets(1, Some(&self.target_rtv), false, None);
+                    frame
+                        .command_list
+                        .OMSetRenderTargets(1, Some(&target_rtv), false, None);
+
+                    frame.command_list.RSSetViewports(&[viewport]);
                 },
                 DrawCommand::End => unsafe {
-                    self.image_barrier(
-                        target,
+                    image_barrier(
+                        &frame.command_list,
+                        &target,
                         D3D12_RESOURCE_STATE_RENDER_TARGET,
                         D3D12_RESOURCE_STATE_PRESENT,
                     );
-                    self.command_list.Close().unwrap();
+                    frame.command_list.Close().unwrap();
                 },
                 DrawCommand::Clip => {
                     let scissor = RECT {
-                        left: draw_list.areas[area_idx].left() as i32,
-                        top: draw_list.areas[area_idx].top() as i32,
-                        right: draw_list.areas[area_idx].right() as i32,
-                        bottom: draw_list.areas[area_idx].bottom() as i32,
+                        left: content.areas[area_idx].left() as i32,
+                        top: content.areas[area_idx].top() as i32,
+                        right: content.areas[area_idx].right() as i32,
+                        bottom: content.areas[area_idx].bottom() as i32,
                     };
-                    unsafe { self.command_list.RSSetScissorRects(&[scissor]) };
+                    unsafe { frame.command_list.RSSetScissorRects(&[scissor]) };
                     area_idx += 1;
                 }
                 DrawCommand::Clear => {
                     unsafe {
-                        self.command_list.ClearRenderTargetView(
-                            self.target_rtv,
-                            &draw_list.clears[color_idx].to_array_f32(),
+                        frame.command_list.ClearRenderTargetView(
+                            target_rtv,
+                            &content.clears[color_idx].to_array_f32(),
                             None,
                         );
                     }
@@ -271,33 +245,45 @@ impl Frame {
                 }
                 DrawCommand::DrawRects => {
                     // todo: suspect an off-by-one error here
-                    let _num_rects = *idx - rect_idx;
+                    let num_rects = *idx - rect_idx;
+
+                    self.device.shaders.rect_shader.bind(
+                        &frame.command_list,
+                        &frame.buffer.as_ref().unwrap(),
+                        viewport_scale,
+                        // viewport.Height,
+                    );
+
+                    tracing::trace!("draw instanced: {} vertices, {} instances", 4, num_rects);
+                    unsafe { frame.command_list.DrawInstanced(4, num_rects, 0, rect_idx) };
+
                     rect_idx = *idx;
                 }
             }
         }
+
+        self.device
+            .queue
+            .submit(&frame.command_list.cast().unwrap())
     }
-}
 
-impl gfx::Frame for Frame {}
+    fn wait(&self, submit_id: gfx::SubmitId) {
+        self.device.queue.wait(submit_id);
+    }
 
-impl Drop for Frame {
-    fn drop(&mut self) {
-        unsafe { self.buffer.assume_init_drop() };
-        self.rtv_heap.lock().deallocate(self.target_rtv);
+    fn wait_for_idle(&self) {
+        self.device.queue.wait_idle();
     }
 }
 
 pub struct Device {
     device: ID3D12Device,
     queue: queue::Queue,
-    rtv_heap: Arc<Mutex<descriptor::SimpleDescriptorHeap<MAX_RENDER_TARGET_VIEWS>>>,
-
-    rect_shader: Shader,
+    shaders: Shaders,
 }
 
 impl Device {
-    pub fn new(dxgi: &IDXGIFactory2, config: &GraphicsConfig) -> Self {
+    pub fn new(dxgi: &IDXGIFactory2, config: &GraphicsConfig) -> Arc<Self> {
         let device = {
             let adapter = unsafe { dxgi.EnumAdapters1(0) }.unwrap();
 
@@ -323,21 +309,13 @@ impl Device {
         }
 
         let queue = queue::Queue::new(&device, D3D12_COMMAND_LIST_TYPE_DIRECT);
+        let shaders = Shaders::new(&device);
 
-        let rtv_heap = Arc::new(Mutex::new(descriptor::SimpleDescriptorHeap::new(
-            &device,
-            D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
-            false,
-        )));
-
-        let rect_shader = shaders::create_rect_shader(&device);
-
-        Self {
+        Arc::new(Self {
             device,
             queue,
-            rtv_heap,
-            rect_shader,
-        }
+            shaders,
+        })
     }
 
     pub fn queue(&self) -> &ID3D12CommandQueue {
@@ -345,23 +323,11 @@ impl Device {
     }
 }
 
-impl gfx::Device for Device {
-    type Frame = Frame;
-    type Image = Image;
+impl gfx::Device for Arc<Device> {
+    type Context = Context;
 
-    fn create_frame(&self) -> Self::Frame {
-        Frame::new(&self.device, self.rtv_heap.clone())
-    }
-
-    fn draw(
-        &self,
-        content: &DrawList,
-        frame: &mut Self::Frame,
-        target: impl Into<Self::Image>,
-    ) -> gfx::SubmitId {
-        let target = target.into();
-        frame.upload_draw_list(content, &target.image);
-        self.queue.submit(&frame.command_list.cast().unwrap())
+    fn create_context(&self) -> Self::Context {
+        Context::new(self)
     }
 
     fn wait(&self, submit_id: gfx::SubmitId) {
@@ -370,6 +336,18 @@ impl gfx::Device for Device {
 
     fn wait_for_idle(&self) {
         self.queue.wait_idle();
+    }
+}
+
+struct Shaders {
+    rect_shader: RectShader,
+}
+
+impl Shaders {
+    pub fn new(device: &ID3D12Device) -> Self {
+        let rect_shader = RectShader::new(device);
+
+        Self { rect_shader }
     }
 }
 
@@ -388,4 +366,70 @@ unsafe extern "system" fn dx12_debug_callback(
         D3D12_MESSAGE_SEVERITY_MESSAGE => tracing::info!("D3D12 {}", description.display()),
         _ => {}
     }
+}
+
+pub fn alloc_buffer(device: &ID3D12Device, size: u64) -> ID3D12Resource {
+    let heap_desc = D3D12_HEAP_PROPERTIES {
+        Type: D3D12_HEAP_TYPE_UPLOAD,
+        CPUPageProperty: D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+        MemoryPoolPreference: D3D12_MEMORY_POOL_UNKNOWN,
+        CreationNodeMask: 0,
+        VisibleNodeMask: 0,
+    };
+
+    let buffer_desc = D3D12_RESOURCE_DESC {
+        Dimension: D3D12_RESOURCE_DIMENSION_BUFFER,
+        Alignment: 0,
+        Width: size,
+        Height: 1,
+        DepthOrArraySize: 1,
+        MipLevels: 1,
+        Format: DXGI_FORMAT_UNKNOWN,
+        SampleDesc: DXGI_SAMPLE_DESC {
+            Count: 1,
+            Quality: 0,
+        },
+        Layout: D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+        Flags: D3D12_RESOURCE_FLAG_NONE,
+    };
+
+    let mut buffer = None;
+
+    unsafe {
+        device.CreateCommittedResource(
+            &heap_desc,
+            D3D12_HEAP_FLAG_NONE,
+            &buffer_desc,
+            D3D12_RESOURCE_STATE_GENERIC_READ,
+            None,
+            &mut buffer,
+        )
+    }
+    .unwrap();
+
+    buffer.unwrap()
+}
+
+fn image_barrier(
+    command_list: &ID3D12GraphicsCommandList,
+    image: &ID3D12Resource,
+    from: D3D12_RESOURCE_STATES,
+    to: D3D12_RESOURCE_STATES,
+) {
+    let transition = D3D12_RESOURCE_TRANSITION_BARRIER {
+        pResource: unsafe { std::mem::transmute_copy(image) },
+        Subresource: D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+        StateBefore: from,
+        StateAfter: to,
+    };
+
+    let barrier = D3D12_RESOURCE_BARRIER {
+        Type: D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+        Flags: D3D12_RESOURCE_BARRIER_FLAG_NONE,
+        Anonymous: D3D12_RESOURCE_BARRIER_0 {
+            Transition: ManuallyDrop::new(transition),
+        },
+    };
+
+    unsafe { command_list.ResourceBarrier(&[barrier]) };
 }

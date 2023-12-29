@@ -17,8 +17,8 @@ use crate::{
     graphics::{Canvas, FrameInfo, RefreshRate},
     math::Scale,
     platform::{
-        dx12::Frame,
-        gfx::{Device, DrawList, SubmitId},
+        dx12::{Context, Frame},
+        gfx::{Context as _, Device, DrawList, SubmitId},
     },
     time::{FramesPerSecond, Instant},
     window::{Window, WindowEventHandler},
@@ -83,10 +83,10 @@ where
 
     context: &'a AppContextImpl,
 
+    graphics: Context,
     swapchain: Swapchain,
-
     draw_list: DrawList,
-    draw_buffers: [Frame; 2],
+    frames_in_flight: [Frame; 2],
 
     submit_id: Option<SubmitId>,
 
@@ -115,9 +115,6 @@ where
         shared_state: Arc<RwLock<SharedState>>,
         context: &'a AppContextImpl,
     ) -> Self {
-        let draw_list = DrawList::new();
-        let draw_buffers = [context.dx12.create_frame(), context.dx12.create_frame()];
-
         shared_state.write().refresh_rate = {
             let rate = context.composition_rate();
 
@@ -128,14 +125,19 @@ where
             }
         };
 
+        let draw_list = DrawList::new();
+        let graphics = context.dx12.create_context();
+        let frames_in_flight = [graphics.create_frame(), graphics.create_frame()];
+
         Self {
             mode: Mode::Idle,
             handler,
             shared_state,
             context,
+            graphics,
             swapchain,
             draw_list,
-            draw_buffers,
+            frames_in_flight,
             submit_id: None,
             requested_refresh_rate: FramesPerSecond(0.0),
             actual_refresh_rate: FramesPerSecond(0.0),
@@ -254,7 +256,7 @@ where
                 height,
                 scale,
             } => {
-                self.context.dx12.wait_for_idle();
+                self.graphics.wait_for_idle();
                 self.swapchain
                     .resize(width, height, self.is_drag_resizing.then_some(2.0));
 
@@ -273,7 +275,7 @@ where
 
                 let size = self.shared_state.read().size;
 
-                self.context.dx12.wait_for_idle();
+                self.graphics.wait_for_idle();
                 self.swapchain
                     .resize(size.width as u32, size.height as u32, None);
 
@@ -344,7 +346,7 @@ where
         };
 
         if let Some(submission_id) = self.submit_id {
-            self.context.dx12.wait(submission_id);
+            self.graphics.wait(submission_id);
         }
 
         let draw_list = {
@@ -354,11 +356,10 @@ where
             canvas.finish()
         };
 
-        let (image, _) = self.swapchain.get_back_buffer();
-
-        let submit_id = self.context.dx12.draw(
+        let (image, image_idx) = self.swapchain.get_back_buffer();
+        let submit_id = self.graphics.draw(
             draw_list,
-            &mut self.draw_buffers[(self.frame_count % 2) as usize],
+            &mut self.frames_in_flight[(self.frame_count % 2) as usize],
             image,
         );
 
@@ -380,6 +381,6 @@ where
     W: WindowEventHandler + 'static,
 {
     fn drop(&mut self) {
-        self.context.dx12.wait_for_idle();
+        self.graphics.wait_for_idle();
     }
 }

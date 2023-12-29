@@ -9,6 +9,7 @@ use plinth::{
 #[cfg(feature = "profile")]
 use tracing_subscriber::layer::SubscriberExt;
 
+#[derive(Debug)]
 struct DemoRect {
     rect: Rect<Window>,
     color: Color,
@@ -26,14 +27,14 @@ impl DemoWindow {
         let center = Rect::from(window.size()).center();
 
         let mut rects = Vec::new();
-        for _ in 0..100 {
+        for _ in 0..1 {
             let angle: f32 = rand::random::<f32>() * std::f32::consts::TAU;
             let (x, y) = angle.sin_cos();
 
             rects.push(DemoRect {
                 rect: Rect::from_center(center, Size::new(100.0, 100.0)),
-                color: Color::BLACK,
-                velocity: Translate::new(x, y) * 2.0,
+                color: Color::BLUE,
+                velocity: Translate::new(x, y),
             });
         }
 
@@ -78,28 +79,35 @@ impl WindowEventHandler for DemoWindow {
 
         let delta = timings.next_present_time - timings.prev_present_time;
 
-        let canvas_rect = canvas.rect();
+        // let canvas_rect = canvas.rect();
 
-        for rect in &mut self.rects {
-            rect.rect += rect.velocity * delta;
+        // for rect in &mut self.rects {
+        //     rect.rect += rect.velocity * delta;
 
-            if let Some(intersection) = canvas_rect.intersection(&rect.rect) {
-                // reverse rect direction
-                rect.velocity = -rect.velocity;
+        //     if let Some(intersection) = canvas_rect.intersection(&rect.rect) {
+        //         // reverse rect direction
+        //         rect.velocity = -rect.velocity;
 
-                // snap it into the self.window
-                rect.rect.x -= intersection.width;
-                rect.rect.y -= intersection.height;
-            }
-        }
+        //         // snap it into the self.window
+        //         rect.rect.x -= intersection.width;
+        //         rect.rect.y -= intersection.height;
+        //     }
+        // }
+
+        // println!("rects: {:?}", self.rects);
 
         // Request a drawing context for the self.window, constrained to the
         // dirty rectangle provided.
         canvas.clear(Color::BLACK);
 
-        for rect in &self.rects {
-            canvas.draw_rect(RoundRect::builder(rect.rect).color(rect.color));
-        }
+        let w = canvas.rect().height;
+
+        canvas.draw_rect(RoundRect::builder(Rect::new(50.0, 100.0, 40.0, 70.0)).color(Color::BLUE));
+        tracing::info!("{}", w - 100.0);
+
+        // for rect in &self.rects {
+        //     canvas.draw_rect(RoundRect::builder(rect.rect).color(rect.color));
+        // }
     }
 }
 

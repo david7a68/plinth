@@ -7,6 +7,7 @@ use crate::{
 pub struct SubmitId(pub u64);
 
 #[repr(C)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct RRect {
     xywh: [f32; 4],
     color: [f32; 4],
@@ -31,6 +32,7 @@ pub enum DrawCommand {
     DrawRects,
 }
 
+#[repr(align(16))]
 pub struct DrawList {
     pub(super) rects: Vec<RRect>,
     pub(super) areas: Vec<Rect<()>>,
@@ -114,18 +116,28 @@ pub trait Image {}
 
 pub trait RenderTarget: Image {}
 
-pub trait Device {
+pub trait Context {
     type Frame: Frame;
     type Image: Image;
 
     fn create_frame(&self) -> Self::Frame;
 
     fn draw(
-        &self,
+        &mut self,
         content: &DrawList,
         frame: &mut Self::Frame,
         image: impl Into<Self::Image>,
     ) -> SubmitId;
+
+    fn wait(&self, submit_id: SubmitId);
+
+    fn wait_for_idle(&self);
+}
+
+pub trait Device {
+    type Context: Context;
+
+    fn create_context(&self) -> Self::Context;
 
     fn wait(&self, submit_id: SubmitId);
 

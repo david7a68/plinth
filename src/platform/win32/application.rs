@@ -133,7 +133,7 @@ impl AppContextImpl {
             unsafe { adapter0.EnumOutputs(0) }.unwrap()
         };
 
-        let dx12 = Arc::new(dx12::Device::new(&dxgi, config));
+        let dx12 = dx12::Device::new(&dxgi, config);
 
         Self {
             dxgi,

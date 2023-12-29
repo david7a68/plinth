@@ -2,32 +2,30 @@ use arrayvec::ArrayVec;
 
 use windows::Win32::Graphics::Direct3D12::{
     ID3D12DescriptorHeap, ID3D12Device, D3D12_CPU_DESCRIPTOR_HANDLE, D3D12_DESCRIPTOR_HEAP_DESC,
-    D3D12_DESCRIPTOR_HEAP_FLAG_NONE, D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
-    D3D12_DESCRIPTOR_HEAP_TYPE, D3D12_GPU_DESCRIPTOR_HANDLE,
+    D3D12_DESCRIPTOR_HEAP_FLAGS, D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
+    D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, D3D12_DESCRIPTOR_HEAP_TYPE,
+    D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_DESCRIPTOR_HEAP_TYPE_DSV,
+    D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER,
+    D3D12_GPU_DESCRIPTOR_HANDLE,
 };
 
-pub struct SimpleDescriptorHeap<const COUNT: usize> {
+pub struct DescriptorArena {
     cpu_heap_start: D3D12_CPU_DESCRIPTOR_HANDLE,
     gpu_heap_start: D3D12_GPU_DESCRIPTOR_HANDLE,
     handle_size: u32,
-    indices: ArrayVec<u16, COUNT>,
+    allocated: u32,
+    capacity: u32,
+
+    #[allow(dead_code)]
     heap: ID3D12DescriptorHeap,
 }
 
-impl<const COUNT: usize> SimpleDescriptorHeap<COUNT> {
-    pub fn new(
-        device: &ID3D12Device,
-        kind: D3D12_DESCRIPTOR_HEAP_TYPE,
-        shader_visible: bool,
-    ) -> Self {
+impl DescriptorArena {
+    pub fn new(device: &ID3D12Device, kind: D3D12_DESCRIPTOR_HEAP_TYPE, capacity: u32) -> Self {
         let heap_desc = D3D12_DESCRIPTOR_HEAP_DESC {
             Type: kind,
-            NumDescriptors: COUNT as u32,
-            Flags: if shader_visible {
-                D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE
-            } else {
-                D3D12_DESCRIPTOR_HEAP_FLAG_NONE
-            },
+            NumDescriptors: capacity,
+            Flags: kind_to_flag(kind),
             NodeMask: 0,
         };
 
@@ -37,44 +35,102 @@ impl<const COUNT: usize> SimpleDescriptorHeap<COUNT> {
                 panic!()
             });
 
-        debug_assert!(u16::try_from(COUNT).is_ok());
-
         Self {
             cpu_heap_start: unsafe { heap.GetCPUDescriptorHandleForHeapStart() },
-            gpu_heap_start: shader_visible
-                .then(|| unsafe { heap.GetGPUDescriptorHandleForHeapStart() })
-                .unwrap_or_default(),
+            gpu_heap_start: unsafe { heap.GetGPUDescriptorHandleForHeapStart() },
             handle_size: unsafe { device.GetDescriptorHandleIncrementSize(kind) },
-            indices: (0..COUNT).map(|i| i as u16).collect(),
+            allocated: 0,
+            capacity,
             heap,
         }
     }
 
-    pub fn gpu_handle(
-        &self,
-        cpu_handle: D3D12_CPU_DESCRIPTOR_HANDLE,
-    ) -> D3D12_GPU_DESCRIPTOR_HANDLE {
-        D3D12_GPU_DESCRIPTOR_HANDLE {
-            ptr: self.gpu_heap_start.ptr + self.check_cpu_offset(cpu_handle) as u64,
+    pub fn reset(&mut self) {
+        self.allocated = 0;
+    }
+
+    pub fn allocate(
+        &mut self,
+    ) -> Option<(D3D12_CPU_DESCRIPTOR_HANDLE, D3D12_GPU_DESCRIPTOR_HANDLE)> {
+        if self.allocated == self.capacity {
+            return None;
+        }
+
+        let offset = self.allocated as usize * self.handle_size as usize;
+
+        let cpu_handle = D3D12_CPU_DESCRIPTOR_HANDLE {
+            ptr: self.cpu_heap_start.ptr + offset,
+        };
+
+        let gpu_handle = D3D12_GPU_DESCRIPTOR_HANDLE {
+            ptr: self.gpu_heap_start.ptr + offset as u64,
+        };
+
+        self.allocated += 1;
+
+        Some((cpu_handle, gpu_handle))
+    }
+}
+
+pub struct SingleDescriptorHeap {
+    cpu_heap_start: D3D12_CPU_DESCRIPTOR_HANDLE,
+    gpu_heap_start: D3D12_GPU_DESCRIPTOR_HANDLE,
+    #[allow(dead_code)]
+    heap: ID3D12DescriptorHeap,
+}
+
+impl SingleDescriptorHeap {
+    pub fn new(device: &ID3D12Device, kind: D3D12_DESCRIPTOR_HEAP_TYPE) -> Self {
+        let heap_desc = D3D12_DESCRIPTOR_HEAP_DESC {
+            Type: kind,
+            NumDescriptors: 1,
+            Flags: kind_to_flag(kind),
+            NodeMask: 0,
+        };
+
+        let heap: ID3D12DescriptorHeap = unsafe { device.CreateDescriptorHeap(&heap_desc) }
+            .unwrap_or_else(|e| {
+                tracing::error!("Failed to create descriptor heap: {:?}", e);
+                panic!()
+            });
+
+        let cpu_heap_start = unsafe { heap.GetCPUDescriptorHandleForHeapStart() };
+        let gpu_heap_start = if is_shader_visible(kind) {
+            unsafe { heap.GetGPUDescriptorHandleForHeapStart() }
+        } else {
+            D3D12_GPU_DESCRIPTOR_HANDLE { ptr: 0 }
+        };
+
+        Self {
+            cpu_heap_start,
+            gpu_heap_start,
+            heap,
         }
     }
 
-    pub fn allocate(&mut self) -> Option<D3D12_CPU_DESCRIPTOR_HANDLE> {
-        self.indices.pop().map(|i| D3D12_CPU_DESCRIPTOR_HANDLE {
-            ptr: self.cpu_heap_start.ptr + usize::try_from(i as u32 * self.handle_size).unwrap(),
-        })
+    pub fn cpu_handle(&self) -> D3D12_CPU_DESCRIPTOR_HANDLE {
+        self.cpu_heap_start
     }
 
-    pub fn deallocate(&mut self, handle: D3D12_CPU_DESCRIPTOR_HANDLE) {
-        let index = self.check_cpu_offset(handle) / self.handle_size as usize;
-        debug_assert!(!self.indices.contains(&(index as u16)));
-        self.indices.push(index as u16);
+    pub fn gpu_handle(&self) -> D3D12_GPU_DESCRIPTOR_HANDLE {
+        self.gpu_heap_start
     }
+}
 
-    fn check_cpu_offset(&self, handle: D3D12_CPU_DESCRIPTOR_HANDLE) -> usize {
-        let offset = handle.ptr - self.cpu_heap_start.ptr;
-        debug_assert!((0..self.handle_size as usize * COUNT).contains(&offset));
-        debug_assert!(offset % self.handle_size as usize == 0);
-        offset
+fn is_shader_visible(kind: D3D12_DESCRIPTOR_HEAP_TYPE) -> bool {
+    match kind {
+        D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV => true,
+        D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER => true,
+        D3D12_DESCRIPTOR_HEAP_TYPE_RTV => false,
+        D3D12_DESCRIPTOR_HEAP_TYPE_DSV => false,
+        _ => false,
+    }
+}
+
+fn kind_to_flag(kind: D3D12_DESCRIPTOR_HEAP_TYPE) -> D3D12_DESCRIPTOR_HEAP_FLAGS {
+    if is_shader_visible(kind) {
+        D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE
+    } else {
+        D3D12_DESCRIPTOR_HEAP_FLAG_NONE
     }
 }

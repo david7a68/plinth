@@ -1,14 +1,73 @@
 use crate::{
     application::AppContext,
     graphics::{Canvas, FrameInfo, FramesPerSecond, RefreshRate},
-    input::{Axis, ButtonState, MouseButton},
-    math::{Point, Scale, Size, Vec2},
+    math::{Point, Scale, Size},
 };
 
 #[cfg(target_os = "windows")]
 use crate::platform;
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Axis {
+    X,
+    Y,
+    XY,
+}
 
-pub const MAX_TITLE_LENGTH: usize = 255;
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum MouseButton {
+    Left,
+    Right,
+    Middle,
+    Aux1,
+    Aux2,
+    Other(u8),
+}
+
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ButtonState {
+    Pressed,
+    Released,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowError {
+    // todo: implement error trait
+    TooManyWindows,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum Input {
+    MouseButton(MouseButton, ButtonState, WindowPoint),
+    PointerMove(WindowPoint),
+    PointerLeave,
+    Scroll(Axis, f32),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum WindowEvent {
+    CloseRequest,
+    Destroy,
+    Visible(bool),
+    BeginResize,
+    Resize(WindowSize),
+    EndResize,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct WindowSize {
+    pub width: u16,
+    pub height: u16,
+    pub dpi: u16,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct WindowPoint {
+    pub x: i16,
+    pub y: i16,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct WindowSpec {
@@ -78,38 +137,24 @@ impl Window {
     }
 }
 
-pub trait WindowEventHandler {
-    fn on_close_request(&mut self);
+pub trait WindowEventHandler: Send {
+    fn on_event(&mut self, event: WindowEvent);
 
-    fn on_destroy(&mut self) {}
-
-    #[allow(unused_variables)]
-    fn on_visible(&mut self, is_visible: bool) {}
-
-    fn on_begin_resize(&mut self) {}
-
-    #[allow(unused_variables)]
-    fn on_resize(&mut self, size: Size<Window>, scale: Scale<Window, Window>) {}
-
-    fn on_end_resize(&mut self) {}
+    fn on_input(&mut self, input: Input);
 
     fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameInfo);
+}
 
-    #[allow(unused_variables)]
-    fn on_mouse_button(
-        &mut self,
-        button: MouseButton,
-        state: ButtonState,
-        location: Point<Window>,
-    ) {
+impl<W: WindowEventHandler> WindowEventHandler for Box<W> {
+    fn on_event(&mut self, event: WindowEvent) {
+        self.as_mut().on_event(event);
     }
 
-    #[allow(unused_variables)]
-    fn on_pointer_move(&mut self, location: Point<Window>, delta: Vec2<Window>) {}
+    fn on_input(&mut self, input: Input) {
+        self.as_mut().on_input(input);
+    }
 
-    #[allow(unused_variables)]
-    fn on_pointer_leave(&mut self) {}
-
-    #[allow(unused_variables)]
-    fn on_scroll(&mut self, axis: Axis, delta: f32) {}
+    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameInfo) {
+        self.as_mut().on_repaint(canvas, timing);
+    }
 }

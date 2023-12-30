@@ -109,7 +109,10 @@ impl Swapchain {
     }
 
     #[tracing::instrument(skip(self))]
-    pub fn resize(&mut self, width: u32, height: u32, flex: Option<f32>) {
+    pub fn resize(&mut self, width: u16, height: u16, flex: Option<f32>) {
+        let width = width as u32;
+        let height = height as u32;
+
         if let Some(flex) = flex {
             let mut desc = Default::default();
             unsafe { self.handle.GetDesc1(&mut desc) }.unwrap();

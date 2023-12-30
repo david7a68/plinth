@@ -1,5 +1,5 @@
 pub mod graphics;
-pub mod input;
+pub mod limits;
 pub mod math;
 pub mod time;
 
@@ -8,4 +8,4 @@ mod platform;
 mod window;
 
 pub use application::Application;
-pub use window::{Window, WindowEventHandler, WindowSpec};
+pub use window::*;

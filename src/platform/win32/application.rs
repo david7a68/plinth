@@ -26,67 +26,70 @@ use windows::{
 };
 
 use crate::{
+    application::AppContext,
     graphics::{GraphicsConfig, RefreshRate},
-    platform::dx12,
+    limits::MAX_WINDOWS,
+    platform::{dx12, win32::window::NUM_SPAWNED},
     time::FramesPerSecond,
-    window::{WindowEventHandler, WindowSpec},
+    window::{WindowError, WindowEventHandler, WindowSpec},
+    Window,
 };
 
-use super::{swapchain::Swapchain, window::spawn_window};
+use super::{event_loop::run_event_loop, swapchain::Swapchain, ui_thread, window::UiEvent};
 
-#[derive(Debug)]
 pub(super) enum AppMessage {
-    WindowCreated,
-    WindowClosed,
+    CreateWindow(
+        WindowSpec,
+        &'static (dyn Fn(Window) -> Box<dyn WindowEventHandler> + Send),
+    ),
 }
 
 pub struct ApplicationImpl {
     context: AppContextImpl,
-    receiver: Receiver<AppMessage>,
+    app_receiver: Receiver<AppMessage>,
+    ui_sender: Sender<UiEvent>,
+    ui_thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl ApplicationImpl {
     pub fn new(graphics: &GraphicsConfig) -> Self {
         // TODO: this bound is nonsense. actually figure out what it should be.
-        let (sender, receiver) = std::sync::mpsc::channel();
+        let (app_sender, app_receiver) = std::sync::mpsc::channel();
 
-        let context = AppContextImpl::new(graphics, sender);
+        let (ui_sender, ui_receiver) = std::sync::mpsc::channel();
 
-        Self { context, receiver }
+        let context = AppContextImpl::new(graphics, app_sender);
+
+        let ui_thread = ui_thread::spawn_ui_thread(context.clone(), ui_receiver);
+
+        Self {
+            context,
+            app_receiver,
+            ui_sender,
+            ui_thread: Some(ui_thread),
+        }
     }
 
-    pub fn context(&self) -> AppContextImpl {
-        self.context.clone()
-    }
-
-    pub fn spawn_window<W, F>(&self, spec: WindowSpec, constructor: F)
-    where
-        W: WindowEventHandler + 'static,
-        F: FnMut(crate::window::Window) -> W + Send + 'static,
-    {
-        spawn_window(self.context(), spec, constructor);
+    pub fn spawn_window(
+        &self,
+        spec: WindowSpec,
+        constructor: &'static (dyn Fn(Window) -> Box<dyn WindowEventHandler> + Send),
+    ) -> Result<(), WindowError> {
+        self.context.spawn_window(spec, constructor)
     }
 
     pub fn run(&mut self) {
-        let mut num_windows = 0;
+        let context = AppContext {
+            inner: self.context.clone(),
+        };
 
-        while let Ok(msg) = self.receiver.recv() {
-            match msg {
-                AppMessage::WindowCreated => num_windows += 1,
-                AppMessage::WindowClosed => num_windows -= 1,
-            }
-
-            // This is redundant so long as only windows hold AppContexts.
-            if num_windows == 0 {
-                break;
-            }
-        }
+        run_event_loop(&context, &self.app_receiver, &self.ui_sender);
     }
 }
 
 impl Drop for ApplicationImpl {
     fn drop(&mut self) {
-        // wait for graphics thread to exit
+        self.ui_thread.take().unwrap().join().unwrap();
     }
 }
 
@@ -146,15 +149,32 @@ impl AppContextImpl {
 
     pub fn composition_rate(&self) -> FramesPerSecond {
         // todo: make use of max refresh rate
+        // todo: this is probably slower than it needs to be
         get_output_refresh_rate(&self.main_output).now
     }
 
-    pub fn spawn_window<W, F>(&mut self, spec: WindowSpec, constructor: F)
-    where
-        W: WindowEventHandler + 'static,
-        F: FnMut(crate::window::Window) -> W + Send + 'static,
-    {
-        spawn_window(self.clone(), spec, constructor);
+    pub fn spawn_window(
+        &self,
+        spec: WindowSpec,
+        constructor: &'static (dyn Fn(Window) -> Box<dyn WindowEventHandler> + Send),
+    ) -> Result<(), WindowError> {
+        let ok = {
+            let mut num_spawned = NUM_SPAWNED.lock();
+            if (*num_spawned as usize) < MAX_WINDOWS {
+                *num_spawned += 1;
+                Ok(())
+            } else {
+                Err(WindowError::TooManyWindows)
+            }
+        };
+
+        if ok.is_ok() {
+            self.sender
+                .send(AppMessage::CreateWindow(spec, constructor))
+                .unwrap();
+        }
+
+        ok
     }
 
     pub fn create_swapchain(&self, hwnd: HWND) -> Swapchain {

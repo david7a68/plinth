@@ -1,8 +1,7 @@
 use plinth::{
     graphics::{Canvas, Color, FrameInfo, GraphicsConfig},
-    input::Axis,
-    time::FramesPerSecond,
-    Application, Window, WindowEventHandler, WindowSpec,
+    time::{FramesPerSecond, Instant, SecondsPerFrame},
+    Application, Axis, Input, Window, WindowEvent, WindowEventHandler, WindowSpec,
 };
 
 #[cfg(feature = "profile")]
@@ -16,43 +15,57 @@ const STARTING_REFRESH_RATE: FramesPerSecond = FramesPerSecond(60.0);
 pub struct AppWindow {
     window: Window,
     refresh_rate: FramesPerSecond,
+    prev_draw_start_time: Instant,
 }
 
 impl AppWindow {
-    fn new(window: Window) -> Self {
-        Self {
+    fn constructor(window: Window) -> Box<dyn WindowEventHandler> {
+        Box::new(Self {
             window,
             refresh_rate: STARTING_REFRESH_RATE,
-        }
+            prev_draw_start_time: Instant::now(),
+        })
     }
 }
 
 impl WindowEventHandler for AppWindow {
-    fn on_close_request(&mut self) {
-        self.window.close();
+    fn on_event(&mut self, event: WindowEvent) {
+        match event {
+            WindowEvent::CloseRequest => {
+                self.window.close();
+            }
+            _ => {}
+        }
     }
 
-    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameInfo) {
-        // print frame stats: last frame's present time, frame budget, and current refresh rate
-        // println!(
-        //     "repaint:\n    prev present time: {:?}\n    present time: {:?}\n    frame budget: {:?}\n    target refresh rate: {:?}\n    estimated refresh rate: {:?}",
-        //     timing.prev_present_time,
-        //     timing.next_present_time,
-        //     timing.next_present_time - timing.prev_present_time,
-        //     self.refresh_rate,
-        //     timing.frame_rate,
-        // );
-        canvas.clear(Color::RED);
+    fn on_input(&mut self, input: Input) {
+        let Input::Scroll(axis, delta) = input else {
+            return;
+        };
 
-        // std::thread::sleep(SLEEP_PER_FRAME);
-    }
-
-    fn on_scroll(&mut self, axis: Axis, delta: f32) {
         if axis == Axis::Y {
             self.refresh_rate = (self.refresh_rate + delta as _).max(FramesPerSecond::ZERO);
 
             self.window.set_animation_frequency(self.refresh_rate);
         }
+    }
+
+    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameInfo) {
+        let now = Instant::now();
+        let elapsed = now - self.prev_draw_start_time;
+        self.prev_draw_start_time = now;
+
+        canvas.clear(Color::BLUE);
+
+        tracing::info!(
+                "repaint:\n    prev present time: {:?}\n    present time: {:?}\n    frame budget: {:?}\n    target refresh rate: {:?}\n    provided refresh rate: {:?}\n    estimated refresh rate: {:?}",
+                timing.prev_present_time,
+                timing.next_present_time,
+                timing.next_present_time - timing.prev_present_time,
+                self.refresh_rate,
+                timing.instantaneous_frame_rate,
+                SecondsPerFrame(elapsed).as_frames_per_second()
+            );
     }
 }
 
@@ -67,7 +80,7 @@ pub fn main() {
     tracing_subscriber::fmt::fmt().pretty().init();
 
     let mut app = Application::new(&GraphicsConfig {
-        debug_mode: true,
+        debug_mode: false,
         ..Default::default()
     });
 
@@ -78,8 +91,9 @@ pub fn main() {
             refresh_rate: Some(STARTING_REFRESH_RATE),
             ..Default::default()
         },
-        AppWindow::new,
-    );
+        &AppWindow::constructor,
+    )
+    .unwrap();
 
     app.run();
 }

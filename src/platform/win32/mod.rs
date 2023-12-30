@@ -1,8 +1,10 @@
 mod application;
-mod event_thread;
+mod event_loop;
+// mod event_thread;
 mod swapchain;
+mod ui_thread;
 mod window;
-mod window_thread;
+// mod window_thread;
 
 pub use application::{AppContextImpl, ApplicationImpl};
 use lazy_static::lazy_static;

@@ -1,6 +1,6 @@
 use std::{
     iter::Sum,
-    ops::{Add, Div, Mul, Sub},
+    ops::{Add, AddAssign, Div, Mul, Sub},
 };
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -202,6 +202,12 @@ impl Add<Duration> for Instant {
 
     fn add(self, rhs: Duration) -> Self::Output {
         Self(self.0 + rhs.0)
+    }
+}
+
+impl AddAssign<Duration> for Instant {
+    fn add_assign(&mut self, rhs: Duration) {
+        self.0 += rhs.0;
     }
 }
 

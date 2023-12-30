@@ -3,7 +3,12 @@ use crate::time::Instant;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FrameInfo {
-    pub frame_rate: FramesPerSecond,
+    /// The target refresh rate.
+    pub target_frame_rate: FramesPerSecond,
+
+    /// The refresh rate represented by the time between the previous and
+    /// current frames.
+    pub instantaneous_frame_rate: FramesPerSecond,
 
     /// The time that the last present occurred.
     pub prev_present_time: Instant,

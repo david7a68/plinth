@@ -36,10 +36,11 @@ use windows::{
 use crate::{
     graphics::FramesPerSecond,
     input::{Axis, ButtonState, MouseButton},
-    window::{WindowSpec, MAX_TITLE_LENGTH},
+    limits::MAX_TITLE_LENGTH,
+    window::WindowSpec,
 };
 
-use super::window::{Event, UM_ANIM_REQUEST, UM_DESTROY_WINDOW};
+use super::window::{UM_ANIM_REQUEST, UM_DESTROY_WINDOW};
 
 const CLASS_NAME: PCWSTR = w!("plinth_window_class");
 

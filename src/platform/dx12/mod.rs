@@ -12,23 +12,21 @@ use windows::{
             Direct3D::D3D_FEATURE_LEVEL_12_0,
             Direct3D12::{
                 D3D12CreateDevice, ID3D12CommandAllocator, ID3D12CommandQueue, ID3D12Device,
-                ID3D12GraphicsCommandList, ID3D12InfoQueue1, ID3D12Resource, D3D12_BUFFER_SRV,
-                D3D12_BUFFER_SRV_FLAG_NONE, D3D12_COMMAND_LIST_TYPE_DIRECT,
-                D3D12_CPU_PAGE_PROPERTY_UNKNOWN, D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
-                D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
-                D3D12_HEAP_FLAG_NONE, D3D12_HEAP_PROPERTIES, D3D12_HEAP_TYPE_UPLOAD,
-                D3D12_MEMORY_POOL_UNKNOWN, D3D12_MESSAGE_CALLBACK_FLAG_NONE,
-                D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_ID, D3D12_MESSAGE_SEVERITY,
-                D3D12_MESSAGE_SEVERITY_CORRUPTION, D3D12_MESSAGE_SEVERITY_ERROR,
-                D3D12_MESSAGE_SEVERITY_INFO, D3D12_MESSAGE_SEVERITY_MESSAGE,
-                D3D12_MESSAGE_SEVERITY_WARNING, D3D12_RESOURCE_BARRIER, D3D12_RESOURCE_BARRIER_0,
+                ID3D12GraphicsCommandList, ID3D12InfoQueue1, ID3D12Resource,
+                D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+                D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_HEAP_FLAG_NONE, D3D12_HEAP_PROPERTIES,
+                D3D12_HEAP_TYPE_UPLOAD, D3D12_MEMORY_POOL_UNKNOWN,
+                D3D12_MESSAGE_CALLBACK_FLAG_NONE, D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_ID,
+                D3D12_MESSAGE_SEVERITY, D3D12_MESSAGE_SEVERITY_CORRUPTION,
+                D3D12_MESSAGE_SEVERITY_ERROR, D3D12_MESSAGE_SEVERITY_INFO,
+                D3D12_MESSAGE_SEVERITY_MESSAGE, D3D12_MESSAGE_SEVERITY_WARNING,
+                D3D12_RESOURCE_BARRIER, D3D12_RESOURCE_BARRIER_0,
                 D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_BARRIER_FLAG_NONE,
                 D3D12_RESOURCE_BARRIER_TYPE_TRANSITION, D3D12_RESOURCE_DESC,
                 D3D12_RESOURCE_DIMENSION_BUFFER, D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATES,
                 D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_PRESENT,
                 D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_TRANSITION_BARRIER,
-                D3D12_SHADER_RESOURCE_VIEW_DESC, D3D12_SHADER_RESOURCE_VIEW_DESC_0,
-                D3D12_SRV_DIMENSION_BUFFER, D3D12_TEXTURE_LAYOUT_ROW_MAJOR, D3D12_VIEWPORT,
+                D3D12_TEXTURE_LAYOUT_ROW_MAJOR, D3D12_VIEWPORT,
             },
             Dxgi::{
                 Common::{DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC},
@@ -40,12 +38,9 @@ use windows::{
 
 use crate::graphics::GraphicsConfig;
 
-use self::{
-    descriptor::{DescriptorArena, SingleDescriptorHeap},
-    shaders::RectShader,
-};
+use self::{descriptor::SingleDescriptorHeap, shaders::RectShader};
 
-use super::gfx::{self, DrawCommand, DrawList, RRect};
+use super::gfx::{self, DrawCommand, DrawList};
 
 const DEFAULT_DRAW_BUFFER_SIZE: u64 = 64 * 1024;
 pub struct Image {
@@ -103,21 +98,20 @@ impl gfx::Frame for Frame {}
 
 pub struct Context {
     device: Arc<Device>,
+    shaders: Shaders,
     rtv_heap: SingleDescriptorHeap,
-    srv_heap: DescriptorArena,
 }
 
 impl Context {
     fn new(device: &Arc<Device>) -> Self {
         let rtv_heap = SingleDescriptorHeap::new(&device.device, D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
-        let srv_heap =
-            DescriptorArena::new(&device.device, D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, 1);
+        let shaders = Shaders::new(&device.device);
 
         Self {
             device: device.clone(),
+            shaders,
             rtv_heap,
-            srv_heap,
         }
     }
 }
@@ -249,7 +243,7 @@ impl gfx::Context for Context {
 
                     tracing::info!("height: {}", viewport.Height);
 
-                    self.device.shaders.rect_shader.bind(
+                    self.shaders.rect_shader.bind(
                         &frame.command_list,
                         &frame.buffer.as_ref().unwrap(),
                         viewport_scale,
@@ -280,7 +274,6 @@ impl gfx::Context for Context {
 pub struct Device {
     device: ID3D12Device,
     queue: queue::Queue,
-    shaders: Shaders,
 }
 
 impl Device {
@@ -310,13 +303,8 @@ impl Device {
         }
 
         let queue = queue::Queue::new(&device, D3D12_COMMAND_LIST_TYPE_DIRECT);
-        let shaders = Shaders::new(&device);
 
-        Arc::new(Self {
-            device,
-            queue,
-            shaders,
-        })
+        Arc::new(Self { device, queue })
     }
 
     pub fn queue(&self) -> &ID3D12CommandQueue {

@@ -20,9 +20,6 @@ impl WindowEventHandler for AppWindow {
                 println!("Close request");
                 self.window.close();
             }
-            WindowEvent::Destroy => {
-                println!("Destroy");
-            }
             WindowEvent::Visible(is_visible) => {
                 println!("Visible: {}", is_visible);
             }
@@ -58,6 +55,12 @@ impl WindowEventHandler for AppWindow {
     fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameInfo) {
         println!("Repaint at {:?}", timing);
         canvas.clear(Color::WHITE);
+    }
+}
+
+impl Drop for AppWindow {
+    fn drop(&mut self) {
+        println!("Destroy");
     }
 }
 

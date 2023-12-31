@@ -49,21 +49,20 @@ pub enum Input {
 #[derive(Clone, Copy, Debug)]
 pub enum WindowEvent {
     CloseRequest,
-    Destroy,
     Visible(bool),
     BeginResize,
     Resize(WindowSize),
     EndResize,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct WindowSize {
     pub width: u16,
     pub height: u16,
     pub dpi: u16,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct WindowPoint {
     pub x: i16,
     pub y: i16,
@@ -136,6 +135,9 @@ impl Window {
         self.inner.set_visible(visible);
     }
 }
+
+pub type WindowEventHandlerConstructor =
+    dyn (Fn(Window) -> Box<dyn WindowEventHandler>) + Send + Sync;
 
 pub trait WindowEventHandler: Send {
     fn on_event(&mut self, event: WindowEvent);

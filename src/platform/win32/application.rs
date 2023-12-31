@@ -26,22 +26,18 @@ use windows::{
 };
 
 use crate::{
-    application::AppContext,
     graphics::{GraphicsConfig, RefreshRate},
     limits::MAX_WINDOWS,
     platform::{dx12, win32::window::NUM_SPAWNED},
     time::FramesPerSecond,
-    window::{WindowError, WindowEventHandler, WindowSpec},
-    Window,
+    window::{WindowError, WindowSpec},
+    WindowEventHandlerConstructor,
 };
 
 use super::{event_loop::run_event_loop, swapchain::Swapchain, ui_thread, window::UiEvent};
 
 pub(super) enum AppMessage {
-    CreateWindow(
-        WindowSpec,
-        &'static (dyn Fn(Window) -> Box<dyn WindowEventHandler> + Send),
-    ),
+    CreateWindow(WindowSpec, &'static WindowEventHandlerConstructor),
 }
 
 pub struct ApplicationImpl {
@@ -73,17 +69,13 @@ impl ApplicationImpl {
     pub fn spawn_window(
         &self,
         spec: WindowSpec,
-        constructor: &'static (dyn Fn(Window) -> Box<dyn WindowEventHandler> + Send),
+        constructor: &'static WindowEventHandlerConstructor,
     ) -> Result<(), WindowError> {
         self.context.spawn_window(spec, constructor)
     }
 
     pub fn run(&mut self) {
-        let context = AppContext {
-            inner: self.context.clone(),
-        };
-
-        run_event_loop(&context, &self.app_receiver, &self.ui_sender);
+        run_event_loop(&self.app_receiver, &self.ui_sender);
     }
 }
 
@@ -156,7 +148,7 @@ impl AppContextImpl {
     pub fn spawn_window(
         &self,
         spec: WindowSpec,
-        constructor: &'static (dyn Fn(Window) -> Box<dyn WindowEventHandler> + Send),
+        constructor: &'static WindowEventHandlerConstructor,
     ) -> Result<(), WindowError> {
         let ok = {
             let mut num_spawned = NUM_SPAWNED.lock();

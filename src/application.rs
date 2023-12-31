@@ -1,4 +1,7 @@
-use crate::window::{Window, WindowError, WindowEventHandler, WindowSpec};
+use crate::{
+    window::{Window, WindowError, WindowEventHandler, WindowSpec},
+    WindowEventHandlerConstructor,
+};
 
 use crate::graphics::GraphicsConfig;
 #[cfg(target_os = "windows")]
@@ -18,7 +21,7 @@ impl Application {
     pub fn spawn_window(
         &mut self,
         spec: WindowSpec,
-        constructor: &'static (dyn Fn(Window) -> Box<dyn WindowEventHandler> + Send),
+        constructor: &'static WindowEventHandlerConstructor,
     ) -> Result<(), WindowError> {
         self.inner.spawn_window(spec, constructor)
     }
@@ -46,7 +49,7 @@ impl AppContext {
     pub fn spawn_window(
         &mut self,
         spec: WindowSpec,
-        constructor: &'static (dyn Fn(Window) -> Box<dyn WindowEventHandler> + Send),
+        constructor: &'static WindowEventHandlerConstructor,
     ) -> Result<(), WindowError> {
         self.inner.spawn_window(spec, constructor)
     }

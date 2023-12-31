@@ -7,59 +7,60 @@ use std::{
     },
 };
 
-use parking_lot::RwLockWriteGuard;
-use windows::Win32::{
-    Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM},
-    Graphics::Gdi::{BeginPaint, EndPaint, PAINTSTRUCT},
-    UI::{
-        Controls::WM_MOUSELEAVE,
-        Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT},
-        WindowsAndMessaging::{
-            DefWindowProcW, DestroyWindow, DispatchMessageW, GetClientRect, GetMessageW,
-            GetWindowLongPtrW, PeekMessageW, PostQuitMessage, SetWindowLongPtrW, ShowWindow,
-            TranslateMessage, GWLP_USERDATA, MSG, PM_NOREMOVE, SW_SHOW, WM_CLOSE, WM_DESTROY,
-            WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN,
-            WM_MBUTTONUP, WM_MOUSEHWHEEL, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_PAINT, WM_RBUTTONDOWN,
-            WM_RBUTTONUP, WM_SHOWWINDOW, WM_TIMER, WM_WINDOWPOSCHANGED,
+use arrayvec::ArrayVec;
+use windows::{
+    core::{w, PCWSTR},
+    Win32::{
+        Foundation::{GetLastError, HMODULE, HWND, LPARAM, LRESULT, RECT, WPARAM},
+        Graphics::Gdi::{BeginPaint, EndPaint, HBRUSH, PAINTSTRUCT},
+        System::LibraryLoader::GetModuleHandleW,
+        UI::{
+            Controls::WM_MOUSELEAVE,
+            Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT},
+            WindowsAndMessaging::{
+                AdjustWindowRect, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
+                GetClientRect, GetMessageW, GetWindowLongPtrW, LoadCursorW, PeekMessageW,
+                PostQuitMessage, RegisterClassExW, SetWindowLongPtrW, ShowWindow, TranslateMessage,
+                CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, GWLP_USERDATA, HICON, HMENU, IDC_ARROW, MSG,
+                PM_NOREMOVE, SW_SHOW, WM_CLOSE, WM_DESTROY, WM_ENTERSIZEMOVE, WM_EXITSIZEMOVE,
+                WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MBUTTONDOWN, WM_MBUTTONUP, WM_MOUSEHWHEEL,
+                WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_PAINT, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SHOWWINDOW,
+                WM_TIMER, WM_WINDOWPOSCHANGED, WNDCLASSEXW, WS_EX_NOREDIRECTIONBITMAP,
+                WS_OVERLAPPEDWINDOW,
+            },
         },
     },
 };
 
 use crate::{
-    application::AppContext,
-    limits::MAX_WINDOWS,
-    platform::{
-        win32::window::{create_window, register_wndclass, WindowOccupancy, WINDOWS},
-        WindowImpl,
-    },
+    limits::{MAX_TITLE_LENGTH, MAX_WINDOWS},
     time::FramesPerSecond,
+    util::BitMap32,
     window::{Axis, ButtonState, Input, MouseButton, WindowEvent, WindowPoint, WindowSize},
-    Window,
+    WindowSpec,
 };
 
 use super::{
     application::AppMessage,
     window::{
-        reset_window_state, Control, UiEvent, WindowState, NUM_SPAWNED, UM_ANIM_REQUEST,
-        UM_DESTROY_WINDOW,
+        Control, UiEvent, NUM_SPAWNED, UM_ANIM_REQUEST, UM_DESTROY_WINDOW, WINDOWS_DEFAULT_DPI,
     },
 };
 
-const WINDOWS_DEFAULT_DPI: u16 = 96;
+const CLASS_NAME: PCWSTR = w!("plinth_window_class");
 
 static RUNNING: AtomicBool = AtomicBool::new(false);
 
 struct EventState {
     index: Cell<u32>,
-    is_in_size_move: Cell<bool>,
     sender: Sender<UiEvent>,
+    width: Cell<u16>,
+    height: Cell<u16>,
+    pointer_in_window: Cell<bool>,
+    is_in_size_move: Cell<bool>,
 }
 
-pub fn run_event_loop(
-    context: &AppContext,
-    receiver: &Receiver<AppMessage>,
-    sender: &Sender<UiEvent>,
-) {
+pub fn run_event_loop(receiver: &Receiver<AppMessage>, sender: &Sender<UiEvent>) {
     assert!(
         RUNNING
             .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
@@ -69,8 +70,7 @@ pub fn run_event_loop(
 
     let wndclass = register_wndclass(wndproc_trampoline);
 
-    // somehow need to allow WM_DESTROY to clear a bit
-    let mut occupancy = WindowOccupancy::new();
+    let mut occupancy = BitMap32::new();
 
     let mut event_state: [MaybeUninit<EventState>; MAX_WINDOWS] =
         [(); MAX_WINDOWS].map(|_| MaybeUninit::uninit());
@@ -83,33 +83,21 @@ pub fn run_event_loop(
             Ok(AppMessage::CreateWindow(spec, constructor)) => {
                 assert!(i32::BITS as usize <= MAX_WINDOWS);
 
-                let index = occupancy.next_occupied().unwrap();
+                let index = occupancy.next_unset().unwrap();
 
                 let hwnd = create_window(wndclass, &spec);
-                let window = Window::new(WindowImpl {
-                    hwnd,
-                    index,
-                    context: context.clone(),
-                });
-
-                let handler = constructor(window);
 
                 if spec.visible {
                     unsafe { ShowWindow(hwnd, SW_SHOW) };
                 }
 
-                // assumption: windows are reset to default state when they are destroyed
-
-                *WINDOWS[index as usize].size.write() = WindowSize {
-                    width: spec.size.width as u16,
-                    height: spec.size.height as u16,
-                    dpi: WINDOWS_DEFAULT_DPI,
-                };
-
                 event_state[index as usize] = MaybeUninit::new(EventState {
                     index: Cell::new(index),
-                    is_in_size_move: Cell::new(false),
                     sender: sender.clone(),
+                    width: Cell::new(spec.size.width as u16),
+                    height: Cell::new(spec.size.height as u16),
+                    pointer_in_window: Cell::new(false),
+                    is_in_size_move: Cell::new(false),
                 });
 
                 unsafe {
@@ -121,7 +109,7 @@ pub fn run_event_loop(
                 }
 
                 sender
-                    .send(UiEvent::NewWindow(index, hwnd, handler))
+                    .send(UiEvent::NewWindow(index, hwnd, constructor))
                     .unwrap();
 
                 if let Some(refresh_rate) = spec.refresh_rate {
@@ -164,7 +152,7 @@ pub fn run_event_loop(
                         "WM_DESTROY should only be sent to windows created by us"
                     );
 
-                    occupancy.set_occupied(unsafe { (*state).index.get() }, false);
+                    occupancy.set(unsafe { (*state).index.get() }, false);
                 }
             }
         }
@@ -184,8 +172,7 @@ unsafe extern "system" fn wndproc_trampoline(
         unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
     } else {
         let state = &*state;
-        let window = &WINDOWS[state.index.get() as usize];
-        wndproc(window, state, hwnd, msg, wparam, lparam)
+        wndproc(state, hwnd, msg, wparam, lparam)
     }
 }
 
@@ -195,14 +182,7 @@ fn mouse_coords(lparam: LPARAM) -> WindowPoint {
     WindowPoint { x, y }
 }
 
-fn wndproc(
-    window: &WindowState,
-    state: &EventState,
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
+fn wndproc(state: &EventState, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let index = state.index.get();
     let sender = &state.sender;
 
@@ -218,13 +198,11 @@ fn wndproc(
             LRESULT(0)
         }
         WM_DESTROY => {
-            send(UiEvent::Window(index, WindowEvent::Destroy));
-            reset_window_state(window);
+            send(UiEvent::DestroyWindow(index));
 
             let quit = {
                 let mut num_spawned = NUM_SPAWNED.lock();
                 *num_spawned -= 1;
-                tracing::info!("num_spawned: {}", *num_spawned);
                 *num_spawned == 0
             };
 
@@ -245,22 +223,7 @@ fn wndproc(
         }
         WM_EXITSIZEMOVE => {
             state.is_in_size_move.set(false);
-
-            let r = window.is_resizing.compare_exchange(
-                true,
-                false,
-                Ordering::AcqRel,
-                Ordering::Relaxed,
-            );
-
-            assert_eq!(
-                r,
-                Ok(true),
-                "only the event loop thread should be able to modify state.is_resizing"
-            );
-
             send(UiEvent::Window(index, WindowEvent::EndResize));
-
             LRESULT(0)
         }
         WM_WINDOWPOSCHANGED => {
@@ -273,38 +236,29 @@ fn wndproc(
 
             // we don't care about window position, so ignore it
 
-            let mut size = window.size.write();
-            if width != size.width || height != size.height {
+            let is_resizing = width != state.width.get() || height != state.height.get();
+
+            if is_resizing {
                 if state.is_in_size_move.get() {
-                    if window.is_resizing.compare_exchange(
-                        false,
-                        true,
-                        Ordering::AcqRel,
-                        Ordering::Relaxed,
-                    ) == Ok(false)
-                    {
-                        sender
-                            .send(UiEvent::Window(index, WindowEvent::BeginResize))
-                            .unwrap();
-                    }
+                    sender
+                        .send(UiEvent::Window(index, WindowEvent::BeginResize))
+                        .unwrap();
                 }
+
+                send(UiEvent::Window(
+                    index,
+                    WindowEvent::Resize(WindowSize {
+                        width,
+                        height,
+                        dpi: WINDOWS_DEFAULT_DPI,
+                    }),
+                ));
             }
-
-            size.width = width;
-            size.height = height;
-
-            let size = *RwLockWriteGuard::downgrade(size);
-
-            send(UiEvent::Window(index, WindowEvent::Resize(size)));
 
             LRESULT(0)
         }
         UM_ANIM_REQUEST => {
             let freq = f64::from_bits(wparam.0 as u64);
-
-            window
-                .requested_refresh_rate
-                .store(freq as _, Ordering::Release);
 
             send(UiEvent::ControlEvent(
                 index,
@@ -323,34 +277,26 @@ fn wndproc(
             LRESULT(0)
         }
         WM_MOUSEMOVE => {
-            let mouse_coords = mouse_coords(lparam);
-
-            {
-                let mut pointer_location = window.pointer_location.lock();
-
-                if pointer_location.is_none() {
-                    *pointer_location = Some(mouse_coords);
-
-                    unsafe {
-                        TrackMouseEvent(&mut TRACKMOUSEEVENT {
-                            cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
-                            dwFlags: TME_LEAVE,
-                            hwndTrack: hwnd,
-                            dwHoverTime: 0,
-                        })
-                    }
-                    .unwrap();
+            if !state.pointer_in_window.get() {
+                unsafe {
+                    TrackMouseEvent(&mut TRACKMOUSEEVENT {
+                        cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                        dwFlags: TME_LEAVE,
+                        hwndTrack: hwnd,
+                        dwHoverTime: 0,
+                    })
                 }
+                .unwrap();
+
+                state.pointer_in_window.set(true);
             }
 
+            let mouse_coords = mouse_coords(lparam);
             send(UiEvent::Input(index, Input::PointerMove(mouse_coords)));
-
             LRESULT(0)
         }
         WM_MOUSELEAVE => {
-            let _ = window.pointer_location.lock().take();
             send(UiEvent::Input(index, Input::PointerLeave));
-
             LRESULT(0)
         }
         WM_MOUSEWHEEL => {
@@ -430,5 +376,78 @@ fn wndproc(
             LRESULT(0)
         }
         _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+    }
+}
+
+fn register_wndclass(
+    wndproc: unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT,
+) -> PCWSTR {
+    let class = WNDCLASSEXW {
+        cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+        style: CS_HREDRAW | CS_VREDRAW,
+        lpfnWndProc: Some(wndproc),
+        cbClsExtra: 0,
+        cbWndExtra: 0,
+        hInstance: unsafe { GetModuleHandleW(None) }.unwrap().into(),
+        hIcon: HICON::default(),
+        hCursor: unsafe { LoadCursorW(None, IDC_ARROW).unwrap() },
+        hbrBackground: HBRUSH::default(),
+        lpszMenuName: PCWSTR::null(),
+        lpszClassName: CLASS_NAME,
+        hIconSm: HICON::default(),
+    };
+
+    let atom = unsafe { RegisterClassExW(&class) };
+
+    if atom == 0 {
+        unsafe { GetLastError() }.expect("Failed to register window class");
+    } else {
+        tracing::info!("Registered window class");
+    }
+
+    PCWSTR(atom as usize as *const u16)
+}
+
+fn create_window(wndclass: PCWSTR, spec: &WindowSpec) -> HWND {
+    let title = {
+        let mut title = spec
+            .title
+            .encode_utf16()
+            .collect::<ArrayVec<_, { MAX_TITLE_LENGTH + 1 }>>();
+
+        assert!(title.len() <= MAX_TITLE_LENGTH);
+        title.push(0);
+        title
+    };
+
+    let mut rect = RECT {
+        left: 0,
+        top: 0,
+        right: i32::try_from(spec.size.width as i64).unwrap(), // cast to i64 to preserve f64's 48 bits of precision
+        bottom: i32::try_from(spec.size.height as i64).unwrap(), // ditto
+    };
+
+    unsafe { AdjustWindowRect(&mut rect, WS_OVERLAPPEDWINDOW, false) }.unwrap();
+
+    // SAFETY: This gets passed into CreateWindowExW, which must not
+    // persist the pointer beyond WM_CREATE, or it will produce a
+    // dangling pointer.
+    unsafe {
+        CreateWindowExW(
+            WS_EX_NOREDIRECTIONBITMAP,
+            // Use the atom for later comparison. This way we don't have to
+            // compare c-style strings.
+            wndclass,
+            PCWSTR(title.as_ptr()),
+            WS_OVERLAPPEDWINDOW,
+            CW_USEDEFAULT,
+            CW_USEDEFAULT,
+            rect.right,
+            rect.bottom,
+            HWND::default(),
+            HMENU::default(),
+            HMODULE::default(),
+            None,
+        )
     }
 }

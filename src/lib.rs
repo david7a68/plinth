@@ -5,6 +5,7 @@ pub mod time;
 
 mod application;
 mod platform;
+mod util;
 mod window;
 
 pub use application::Application;

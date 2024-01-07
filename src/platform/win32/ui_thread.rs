@@ -1,416 +1,319 @@
-use std::{mem::MaybeUninit, sync::mpsc::Receiver};
+// todo: account for CPU time when scheduling the next repaint
+
+use std::sync::{
+    mpsc::{Receiver, Sender},
+    Arc,
+};
 
 use parking_lot::RwLock;
 use windows::Win32::Foundation::HWND;
 
 use crate::{
     application::AppContext,
+    frame::{FramesPerSecond, RedrawRequest},
     graphics::{Canvas, FrameInfo},
-    limits::MAX_WINDOWS,
     math::Rect,
     platform::{
         dx12::{Context, Frame},
-        gfx::{Context as _, Device, DrawList, SubmitId},
+        gfx::{Context as _, Device as _, DrawList, SubmitId},
+        win32::vsync::VSyncReply,
         WindowImpl,
     },
-    time::{FramesPerSecond, Instant, SecondsPerFrame},
-    util::{AcRead, BitMap32, Pad64},
+    time::Instant,
     window::WindowEvent,
-    Input, Window, WindowEventHandler, WindowEventHandlerConstructor, WindowSize,
+    Input, Window, WindowEventHandler, WindowSize,
 };
 
 use super::{
     swapchain::Swapchain,
-    window::{Control, UiEvent, WindowState},
+    vsync::{VsyncCookie, VsyncRequest},
+    window::{Control, WindowState},
     AppContextImpl,
 };
 
-enum Mode {
-    Idle,
-    Animating,
+#[derive(Debug, PartialEq, Eq)]
+enum Tick {
+    Continue,
+    Quit,
 }
 
-struct RenderState {
-    mode: Mode,
-    handler: Box<dyn WindowEventHandler>,
-
-    size: WindowSize,
-    swapchain: Swapchain,
-    draw_list: DrawList,
-    frames_in_flight: [Frame; 2],
-
-    submit_id: Option<SubmitId>,
-
-    requested_refresh_rate: FramesPerSecond,
-    actual_refresh_rate: FramesPerSecond,
-
-    vblanks_per_frame: u16,
-
-    next_scheduled_present: u64,
-
-    is_drag_resizing: bool,
-    need_repaint: bool,
+#[derive(Debug)]
+pub enum UiEvent {
+    New(HWND),
+    Quit,
+    Input(Input),
+    Window(WindowEvent),
+    ControlEvent(Control),
+    VSync(VSyncReply),
 }
 
-impl RenderState {
-    fn set_refresh_rate(&mut self, request: FramesPerSecond, composition_rate: FramesPerSecond) {
-        if request == FramesPerSecond::ZERO {
-            self.vblanks_per_frame = 0;
-            self.actual_refresh_rate = FramesPerSecond::ZERO;
-            self.mode = Mode::Idle;
-        } else if request != self.requested_refresh_rate {
-            let vblanks_per_frame = (composition_rate / request).floor().max(1.0);
-            let refresh_rate = composition_rate / vblanks_per_frame;
-
-            self.vblanks_per_frame = vblanks_per_frame as u16;
-            self.actual_refresh_rate = refresh_rate;
-            self.mode = Mode::Animating;
-        }
-
-        self.requested_refresh_rate = request;
-
-        tracing::info!(
-            "window: target fps = {:?}, target interval = {:?}",
-            self.actual_refresh_rate,
-            self.vblanks_per_frame
-        );
+impl From<VSyncReply> for UiEvent {
+    fn from(notification: VSyncReply) -> Self {
+        UiEvent::VSync(notification)
     }
 }
 
-pub static WINDOWS: [Pad64<RwLock<Option<WindowState>>>; MAX_WINDOWS] = [
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-    Pad64(RwLock::new(None)),
-];
-
-pub fn spawn_ui_thread(
+pub fn spawn_ui_thread<W, F>(
     context: AppContextImpl,
+    constructor: F,
+    ui_sender: Sender<UiEvent>,
     ui_receiver: Receiver<UiEvent>,
-) -> std::thread::JoinHandle<()> {
-    std::thread::spawn(move || ui_thread(context, ui_receiver))
+) where
+    W: WindowEventHandler,
+    F: FnMut(Window) -> W + Send + 'static,
+{
+    std::thread::spawn(move || run_ui_loop(context, constructor, ui_sender, ui_receiver));
 }
 
-fn ui_thread(context: AppContextImpl, ui_receiver: Receiver<UiEvent>) {
-    let mut graphics = context.dx12.create_context();
-    let mut render_states = [(); MAX_WINDOWS].map(|_| MaybeUninit::uninit());
-
-    // Strictly speaking, this is not necessary, but it's nice to have a bit of
-    // insurance. Also used when iterating over windows when drawing.
-    let mut occupancy = BitMap32::new();
-
-    let mut vblank_counter = 0;
-
-    fn get_state_mut<'a>(
-        occupancy: &BitMap32,
-        state: &'a mut [MaybeUninit<RenderState>],
-        index: u32,
-    ) -> &'a mut RenderState {
-        debug_assert!(occupancy.is_set(index));
-        unsafe { state[index as usize].assume_init_mut() }
-    }
-
-    'event_loop: loop {
-        loop {
-            match ui_receiver.try_recv() {
-                Ok(event) => match event {
-                    UiEvent::NewWindow(index, hwnd, constructor) => {
-                        debug_assert!(!occupancy.is_set(index));
-
-                        let render_state = &mut render_states[index as usize];
-                        let window = &WINDOWS[index as usize];
-                        on_new_window(&context, &graphics, render_state, window, hwnd, constructor);
-                        occupancy.set(index, true);
-                    }
-                    UiEvent::DestroyWindow(index) => {
-                        debug_assert!(occupancy.is_set(index));
-                        on_destroy_window(
-                            &mut render_states[index as usize],
-                            &WINDOWS[index as usize],
-                        );
-                        occupancy.set(index, false);
-                    }
-                    UiEvent::Window(index, event) => on_window(
-                        &graphics,
-                        get_state_mut(&occupancy, &mut render_states, index),
-                        &WINDOWS[index as usize],
-                        event,
-                    ),
-                    UiEvent::Input(index, event) => {
-                        on_input(get_state_mut(&occupancy, &mut render_states, index), event)
-                    }
-                    UiEvent::ControlEvent(index, event) => on_control(
-                        get_state_mut(&occupancy, &mut render_states, index),
-                        unsafe { WINDOWS[index as usize].write().as_mut().unwrap_unchecked() },
-                        context.composition_rate(),
-                        vblank_counter,
-                        event,
-                    ),
-                    UiEvent::Shutdown => break 'event_loop,
-                },
-                Err(std::sync::mpsc::TryRecvError::Empty) => break,
-                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                    return;
-                }
-            }
+pub fn run_ui_loop<W, F>(
+    context: AppContextImpl,
+    mut constructor: F,
+    ui_sender: Sender<UiEvent>,
+    ui_receiver: Receiver<UiEvent>,
+) where
+    W: WindowEventHandler,
+    F: FnMut(Window) -> W + Send + 'static,
+{
+    let hwnd = match ui_receiver.recv() {
+        Ok(UiEvent::New(hwnd)) => hwnd,
+        Ok(e) => {
+            panic!("First message to UI loop must be UiEvent::New(HWND)! Got {e:?} instead.");
         }
+        Err(_) => {
+            tracing::warn!("Started a UI loop with a closed event channel.");
+            return;
+        }
+    };
 
-        draw_windows(
-            &mut graphics,
-            &mut render_states,
-            &occupancy,
-            vblank_counter,
-            context.composition_rate(),
-        );
-
-        context.wait_for_main_monitor_vblank();
-        vblank_counter += 1;
-    }
-}
-
-fn on_new_window(
-    context: &AppContextImpl,
-    graphics: &Context,
-    render_state: &mut MaybeUninit<RenderState>,
-    window_state: &'static Pad64<RwLock<Option<WindowState>>>,
-    hwnd: HWND,
-    constructor: &WindowEventHandlerConstructor,
-) {
-    let swapchain = context.create_swapchain(hwnd);
-    let frames_in_flight = [graphics.create_frame(), graphics.create_frame()];
-
+    let shared_state = Arc::new(RwLock::new(WindowState::default()));
     let handler = constructor(Window::new(WindowImpl::new(
         hwnd,
-        AcRead::new(window_state),
+        shared_state.clone(),
         AppContext {
             inner: context.clone(),
         },
     )));
 
-    *render_state = MaybeUninit::new(RenderState {
-        mode: Mode::Idle,
+    let graphics = context.inner.read().dx12.create_context();
+    let swapchain = context.create_swapchain(hwnd);
+    let frames_in_flight = [graphics.create_frame(), graphics.create_frame()];
+    let draw_list = DrawList::new();
+
+    let mut render_state = RenderState {
         handler,
+        graphics,
+        shared_state,
+        size: WindowSize::default(),
         swapchain,
-        size: WindowSize {
-            width: 0,
-            height: 0,
-            dpi: 0,
-        },
-        draw_list: DrawList::new(),
+        draw_list,
         frames_in_flight,
-        submit_id: None,
-        requested_refresh_rate: FramesPerSecond::default(),
-        actual_refresh_rate: FramesPerSecond::default(),
-        vblanks_per_frame: 1,
-        next_scheduled_present: 0,
-        is_drag_resizing: false,
-        need_repaint: true,
-    });
-
-    window_state.write().replace(WindowState {
-        size: WindowSize {
-            width: 0,
-            height: 0,
-            dpi: 0,
-        },
+        prev_submit: None,
+        frame_counter: 0,
+        vsync_cookie: None,
+        target_frame_rate: None,
         is_visible: false,
-        is_resizing: false,
-        actual_refresh_rate: FramesPerSecond::ZERO,
-        requested_refresh_rate: FramesPerSecond::ZERO,
-        pointer_location: None,
-    });
+        composition_rate: FramesPerSecond::ZERO,
+        is_drag_resizing: false,
+        need_repaint: false,
+        deferred_redraw: None,
+        deferred_resize: None,
+    };
+
+    context
+        .vsync_sender
+        .send(VsyncRequest::Register(ui_sender.clone()))
+        .unwrap();
+
+    let request_vsync = |request| context.vsync_sender.send(request).unwrap();
+
+    // blocking wait for events
+    while let Ok(event) = ui_receiver.recv() {
+        let mut tick_result = render_state.tick(event, &request_vsync);
+
+        // processed any queued events
+        while let Ok(event) = ui_receiver.try_recv() {
+            tick_result = render_state.tick(event, &request_vsync);
+        }
+
+        if tick_result == Tick::Quit {
+            tracing::info!("window: quit");
+            break;
+        }
+
+        render_state.repaint_if_needed();
+    }
 }
 
-fn on_destroy_window(
-    render_state: &mut MaybeUninit<RenderState>,
-    window_state: &RwLock<Option<WindowState>>,
-) {
-    let _ = window_state.write().take();
-    unsafe { render_state.assume_init_drop() };
+struct RenderState<W: WindowEventHandler> {
+    handler: W,
+    graphics: Context,
+    shared_state: Arc<RwLock<WindowState>>,
+
+    size: WindowSize,
+    swapchain: Swapchain,
+    draw_list: DrawList,
+    frames_in_flight: [Frame; 2],
+    prev_submit: Option<SubmitId>,
+
+    /// Token used to identify the UI thread when sending vsync requests.
+    /// Initialized upon `UiEvent::VSync(VSyncReply::Registered)`.
+    vsync_cookie: Option<VsyncCookie>,
+    composition_rate: FramesPerSecond,
+    target_frame_rate: Option<FramesPerSecond>,
+
+    frame_counter: u64,
+    is_visible: bool,
+    is_drag_resizing: bool,
+
+    /// Flag that the window needs to be repainted this frame. Repaint
+    /// notifications (vsync or from the OS) get marshalled together so that we
+    /// don't repaint several times in a single vblank.
+    need_repaint: bool,
+
+    // Deferred events
+    /// A redraw request that was received before the thread was registered with
+    /// the vsync thread. Only happens on init.
+    deferred_redraw: Option<RedrawRequest>,
+    /// A resize event. Deferred until repaint to consolidate graphics work and
+    /// in case multiple resize events are received in a single frame.
+    deferred_resize: Option<(WindowSize, Option<f32>)>,
 }
 
-fn on_input(render_state: &mut RenderState, event: Input) {
-    render_state.handler.on_input(event);
-}
-
-fn on_window(
-    graphics: &Context,
-    render_state: &mut RenderState,
-    window_state: &RwLock<Option<WindowState>>,
-    event: WindowEvent,
-) {
-    {
-        let mut window_write = window_state.write();
-        let window = unsafe { window_write.as_mut().unwrap_unchecked() };
+impl<W: WindowEventHandler> RenderState<W> {
+    fn tick<F: Fn(VsyncRequest<UiEvent>)>(&mut self, event: UiEvent, request_vsync: &F) -> Tick {
+        let mut req_vsync = |cookie: VsyncCookie, request: RedrawRequest| match request {
+            RedrawRequest::Idle => request_vsync(VsyncRequest::Idle(cookie)),
+            RedrawRequest::Once => self.need_repaint = true,
+            RedrawRequest::AtFrame(frame) => request_vsync(VsyncRequest::AtFrame(cookie, frame)),
+            RedrawRequest::AtFrameRate(rate) => {
+                request_vsync(VsyncRequest::AtFrameRate(cookie, rate))
+            }
+        };
 
         match event {
-            WindowEvent::CloseRequest => {}
-            WindowEvent::Visible(is_visible) => {
-                window.is_visible = is_visible;
-            }
-            WindowEvent::BeginResize => {
-                render_state.is_drag_resizing = true;
+            UiEvent::New{..} => unreachable!("Received an UiEvent::New after the UI thread has been initialized! This should only be send once."),
+            UiEvent::Quit => return Tick::Quit,
+            UiEvent::Input(input) => self.handler.on_input(input),
+            UiEvent::Window(event) => {
+                match event {
+                    WindowEvent::CloseRequest => {},
+                    WindowEvent::Visible(is_visible) => self.is_visible = is_visible,
+                    WindowEvent::BeginResize => self.is_drag_resizing = true,
+                    WindowEvent::EndResize => self.is_drag_resizing = false,
+                    WindowEvent::Resize(new_size) => {
+                        self.deferred_resize = Some((new_size, None));
+                    },
+                }
 
-                window.is_resizing = true;
-            }
-            WindowEvent::Resize(size) => {
-                graphics.wait_for_idle();
+                self.handler.on_event(event);
+            },
+            UiEvent::ControlEvent(event) => match event {
+                Control::Redraw(req) => {
+                    if let Some(vsync_cookie) = self.vsync_cookie {
+                        req_vsync(vsync_cookie, req);
+                    } else {
+                        self.deferred_redraw = Some(req);
+                    }
 
-                render_state.swapchain.resize(
-                    size.width,
-                    size.height,
-                    render_state.is_drag_resizing.then_some(2.0),
-                );
+                },
+                Control::OsRepaint => {
+                    self.need_repaint = true;
+                },
+            },
+            UiEvent::VSync(vsync) => match vsync {
+                VSyncReply::Registered { cookie, composition_rate } => {
+                    self.vsync_cookie = Some(cookie);
+                    self.composition_rate = composition_rate;
 
-                render_state.size = size;
-                window.size = size;
-            }
-            WindowEvent::EndResize => {
-                render_state.is_drag_resizing = false;
-                graphics.wait_for_idle();
-                render_state.swapchain.resize(
-                    render_state.size.width,
-                    render_state.size.height,
-                    None,
-                );
-            }
+                    if let Some(deferred_redraw) = self.deferred_redraw.take() {
+                        req_vsync(cookie, deferred_redraw);
+                    }
+                },
+                VSyncReply::VSync { frame: _, rate } => {
+                    self.need_repaint = true;
+                    self.target_frame_rate = rate;
+                },
+                VSyncReply::DeviceUpdate { frame: _, composition_rate } => {
+                    // todo: is frame useful?
+                    self.composition_rate = composition_rate;
+                },
+            },
         }
+
+        Tick::Continue
     }
 
-    render_state.handler.on_event(event);
-}
-
-fn on_control(
-    render_state: &mut RenderState,
-    window_state: &mut WindowState,
-    composition_rate: FramesPerSecond,
-    vblank_counter: u64,
-    event: Control,
-) {
-    match event {
-        Control::AnimationFreq(freq) => {
-            render_state.set_refresh_rate(freq, composition_rate);
-
-            window_state.actual_refresh_rate = render_state.actual_refresh_rate;
-            window_state.requested_refresh_rate = render_state.requested_refresh_rate;
-
-            match render_state.mode {
-                Mode::Idle => render_state.next_scheduled_present = u64::MAX,
-                Mode::Animating => render_state.next_scheduled_present = vblank_counter,
-            }
-        }
-        Control::Repaint => {
-            render_state.need_repaint = true;
-        }
-    }
-}
-
-fn draw_windows(
-    graphics: &mut Context,
-    render_state: &mut [MaybeUninit<RenderState>],
-    occupancy: &BitMap32,
-    vblank_counter: u64,
-    composition_rate: FramesPerSecond,
-) {
-    for i in 0..MAX_WINDOWS as u32 {
-        if !occupancy.is_set(i) {
-            continue;
+    //// Repaint if the `needs_repaint` flag has been set.
+    fn repaint_if_needed(&mut self) {
+        if !self.need_repaint {
+            return;
         }
 
-        let window = unsafe { render_state[i as usize].assume_init_mut() };
+        self.need_repaint = false;
+        self.swapchain.wait_for_present();
 
-        window.need_repaint |= window.next_scheduled_present <= vblank_counter;
+        if let Some((size, flex)) = self.deferred_resize.take() {
+            self.swapchain.resize(size.width, size.height, flex, || {
+                self.graphics.wait_for_idle()
+            });
 
-        // this does two things:
-        // 1. if the window is animating, it schedules the next present
-        // 2. it allows for pre-emptive repainting if the window was resized
-        //    without affecting the animation frequency
-        while window.next_scheduled_present <= vblank_counter {
-            window.next_scheduled_present += window.vblanks_per_frame as u64;
+            tracing::info!("window: resized to {:?}", size);
+
+            self.size = size;
+            self.shared_state.write().size = size;
         }
 
-        if window.need_repaint {
-            window.need_repaint = false;
-
-            if let Some(submit_id) = window.submit_id {
-                graphics.wait(submit_id);
-                window.submit_id = None;
-            }
-
+        let mut canvas = {
             let rect = {
-                let size = window.size;
+                let size = self.size;
                 Rect::new(0.0, 0.0, size.width as f32, size.height as f32)
             };
 
-            let mut canvas = Canvas::new(&mut window.draw_list, rect);
+            Canvas::new(&mut self.draw_list, rect)
+        };
 
-            let prev_present_time = window
-                .swapchain
-                .prev_present_time()
-                .unwrap_or(Instant::ZERO);
+        let timings = {
+            let prev_present_time = self.swapchain.prev_present_time().unwrap_or(Instant::ZERO);
 
             let next_present_time = {
                 let now = Instant::now();
                 let mut time = prev_present_time;
-                let frame_time = composition_rate.frame_time();
+                let frame_time = self.composition_rate.frame_time();
 
                 while time < now {
-                    time += frame_time.0;
+                    time += frame_time;
                 }
 
                 time
             };
 
-            let instantaneous_frame_rate = {
-                let delta = next_present_time - prev_present_time;
-                SecondsPerFrame(delta).as_frames_per_second()
-            };
-
-            let timings = FrameInfo {
-                target_frame_rate: window.actual_refresh_rate,
-                instantaneous_frame_rate,
+            FrameInfo {
+                target_frame_rate: self.target_frame_rate,
                 prev_present_time,
                 next_present_time,
-            };
+            }
+        };
 
-            // todo: send this to a worker thread
-            window.handler.on_repaint(&mut canvas, &timings);
+        self.handler.on_repaint(&mut canvas, &timings);
 
-            let (image, image_index) = window.swapchain.get_back_buffer();
-            let frame = &mut window.frames_in_flight[image_index as usize];
+        let (image, _) = self.swapchain.get_back_buffer();
+        let frame = &mut self.frames_in_flight[(self.frame_counter % 2) as usize];
 
-            // todo: split this into recording and submission and have the worker thread do the recording
-            let submit_id = graphics.draw(canvas.finish(), frame, image);
-            window.swapchain.present();
-            window.submit_id = Some(submit_id);
-        }
+        let submit_id = self.graphics.draw(canvas.finish(), frame, image);
+        self.swapchain.present();
+
+        self.frame_counter += 1;
+        self.prev_submit = Some(submit_id);
+
+        #[cfg(feature = "profile")]
+        tracing_tracy::client::frame_mark();
+    }
+}
+
+impl<W: WindowEventHandler> Drop for RenderState<W> {
+    fn drop(&mut self) {
+        tracing::info!("window: dropping");
+
+        self.graphics.wait_for_idle();
     }
 }

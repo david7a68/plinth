@@ -8,8 +8,8 @@ pub struct AppWindow {
 }
 
 impl AppWindow {
-    fn constructor(window: Window) -> Box<dyn WindowEventHandler> {
-        Box::new(Self { window })
+    fn new(window: Window) -> Self {
+        Self { window }
     }
 }
 
@@ -54,7 +54,7 @@ impl WindowEventHandler for AppWindow {
 
     fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameInfo) {
         println!("Repaint at {:?}", timing);
-        canvas.clear(Color::WHITE);
+        canvas.clear(Color::GREEN);
     }
 }
 
@@ -67,10 +67,8 @@ impl Drop for AppWindow {
 fn main() {
     let mut app = Application::new(&GraphicsConfig::default());
 
-    app.spawn_window(WindowSpec::default(), &AppWindow::constructor)
+    app.spawn_window(WindowSpec::default(), AppWindow::new)
         .unwrap();
-    // app.spawn_window(WindowSpec::default(), &AppWindow::constructor)
-    //     .unwrap();
 
     app.run();
 }

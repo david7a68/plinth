@@ -44,9 +44,7 @@ fn is_shader_visible(kind: D3D12_DESCRIPTOR_HEAP_TYPE) -> bool {
     match kind {
         D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV => true,
         D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER => true,
-        D3D12_DESCRIPTOR_HEAP_TYPE_RTV => false,
-        D3D12_DESCRIPTOR_HEAP_TYPE_DSV => false,
-        _ => false,
+        D3D12_DESCRIPTOR_HEAP_TYPE_RTV | D3D12_DESCRIPTOR_HEAP_TYPE_DSV | _ => false,
     }
 }
 

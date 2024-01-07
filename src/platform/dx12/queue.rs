@@ -50,7 +50,6 @@ impl Queue {
     }
 
     /// Causes the CPU to wait until the given submission has completed.
-    #[tracing::instrument(skip(self, submission))]
     pub fn wait(&self, submission: SubmitId) {
         if self.is_done(submission) {
             return;
@@ -88,7 +87,6 @@ impl Queue {
     }
 
     /// Causes the CPU to wait until all submissions have completed.
-    #[tracing::instrument(skip(self))]
     pub fn wait_idle(&self) {
         // We have to increment the fence value before waiting, because DXGI may
         // submit work to the queue on our behalf when we call `Present`.

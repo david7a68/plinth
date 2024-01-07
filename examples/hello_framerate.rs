@@ -1,6 +1,7 @@
 use plinth::{
+    frame::{FramesPerSecond, RedrawRequest, SecondsPerFrame},
     graphics::{Canvas, Color, FrameInfo, GraphicsConfig},
-    time::{FramesPerSecond, Instant, SecondsPerFrame},
+    time::Instant,
     Application, Axis, Input, Window, WindowEvent, WindowEventHandler, WindowSpec,
 };
 
@@ -19,12 +20,14 @@ pub struct AppWindow {
 }
 
 impl AppWindow {
-    fn constructor(window: Window) -> Box<dyn WindowEventHandler> {
-        Box::new(Self {
+    fn new(mut window: Window) -> Self {
+        window.request_redraw(RedrawRequest::AtFrameRate(STARTING_REFRESH_RATE));
+
+        Self {
             window,
             refresh_rate: STARTING_REFRESH_RATE,
             prev_draw_start_time: Instant::now(),
-        })
+        }
     }
 }
 
@@ -45,8 +48,8 @@ impl WindowEventHandler for AppWindow {
 
         if axis == Axis::Y {
             self.refresh_rate = (self.refresh_rate + delta as _).max(FramesPerSecond::ZERO);
-
-            self.window.set_animation_frequency(self.refresh_rate);
+            self.window
+                .request_redraw(RedrawRequest::AtFrameRate(self.refresh_rate));
         }
     }
 
@@ -57,14 +60,16 @@ impl WindowEventHandler for AppWindow {
 
         canvas.clear(Color::BLUE);
 
+        let instantaneous_frame_rate = SecondsPerFrame(elapsed).as_frames_per_second();
+
         tracing::info!(
                 "repaint:\n    prev present time: {:?}\n    present time: {:?}\n    frame budget: {:?}\n    target refresh rate: {:?}\n    provided refresh rate: {:?}\n    estimated refresh rate: {:?}",
                 timing.prev_present_time,
                 timing.next_present_time,
                 timing.next_present_time - timing.prev_present_time,
                 self.refresh_rate,
-                timing.instantaneous_frame_rate,
-                SecondsPerFrame(elapsed).as_frames_per_second()
+                timing.target_frame_rate,
+                instantaneous_frame_rate,
             );
     }
 }
@@ -88,10 +93,9 @@ pub fn main() {
         WindowSpec {
             title: "VSync Demo".to_owned(),
             size: (640, 480).into(),
-            refresh_rate: Some(STARTING_REFRESH_RATE),
             ..Default::default()
         },
-        &AppWindow::constructor,
+        AppWindow::new,
     )
     .unwrap();
 

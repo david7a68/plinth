@@ -1,6 +1,6 @@
 use crate::{
-    window::{Window, WindowError, WindowEventHandler, WindowSpec},
-    WindowEventHandlerConstructor,
+    window::{WindowError, WindowSpec},
+    Window, WindowEventHandler,
 };
 
 use crate::graphics::GraphicsConfig;
@@ -18,11 +18,15 @@ impl Application {
         }
     }
 
-    pub fn spawn_window(
+    pub fn spawn_window<W, F>(
         &mut self,
         spec: WindowSpec,
-        constructor: &'static WindowEventHandlerConstructor,
-    ) -> Result<(), WindowError> {
+        constructor: F,
+    ) -> Result<(), WindowError>
+    where
+        W: WindowEventHandler,
+        F: FnMut(Window) -> W + Send + 'static,
+    {
         self.inner.spawn_window(spec, constructor)
     }
 
@@ -46,11 +50,16 @@ impl AppContext {
     ///
     /// The constructor is called on the new thread to initialize any per-window
     /// state once the window has been created, but before it is visible.
-    pub fn spawn_window(
+
+    pub fn spawn_window<W, F>(
         &mut self,
         spec: WindowSpec,
-        constructor: &'static WindowEventHandlerConstructor,
-    ) -> Result<(), WindowError> {
+        constructor: F,
+    ) -> Result<(), WindowError>
+    where
+        W: WindowEventHandler,
+        F: FnMut(Window) -> W + Send + 'static,
+    {
         self.inner.spawn_window(spec, constructor)
     }
 }

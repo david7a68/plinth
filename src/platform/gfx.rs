@@ -62,16 +62,14 @@ impl DrawList {
         self.clears.clear();
         self.commands.clear();
         self.n_rects = 0;
-
         self.is_ended = false;
     }
 
-    pub fn begin<U>(&mut self, clip: Rect<U>) {
+    pub fn begin<U>(&mut self, viewport: Rect<U>) {
         assert!(!self.is_ended);
 
+        self.areas.push(viewport.retype());
         self.commands.push((DrawCommand::Begin, 0));
-        self.commands.push((DrawCommand::Clip, 0));
-        self.areas.push(clip.retype());
     }
 
     pub fn end(&mut self) {

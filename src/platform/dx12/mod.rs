@@ -40,7 +40,7 @@ use crate::graphics::GraphicsConfig;
 
 use self::{descriptor::SingleDescriptorHeap, shaders::RectShader};
 
-use super::gfx::{self, DrawCommand, DrawList};
+use super::gfx::{self, DrawCommand, DrawList, SubmitId};
 
 const DEFAULT_DRAW_BUFFER_SIZE: u64 = 64 * 1024;
 pub struct Image {
@@ -60,6 +60,7 @@ pub struct Frame {
     buffer_size: u64,
     buffer_ptr: *mut u8,
 
+    submit_id: Option<SubmitId>,
     command_list: ID3D12GraphicsCommandList,
     command_list_mem: ID3D12CommandAllocator,
 }
@@ -88,6 +89,7 @@ impl Frame {
             buffer: Some(buffer),
             buffer_size: DEFAULT_DRAW_BUFFER_SIZE,
             buffer_ptr,
+            submit_id: None,
             command_list,
             command_list_mem: command_allocator,
         }
@@ -124,12 +126,17 @@ impl gfx::Context for Context {
         Frame::new(&self.device.device)
     }
 
+    #[tracing::instrument(skip(self, content, frame, target))]
     fn draw(
         &mut self,
         content: &DrawList,
         frame: &mut Self::Frame,
         target: impl Into<Self::Image>,
     ) -> gfx::SubmitId {
+        if let Some(submit_id) = frame.submit_id {
+            self.device.queue.wait(submit_id);
+        }
+
         let target = target.into().image;
 
         let rects_size = std::mem::size_of_val(content.rects.as_slice());
@@ -166,20 +173,29 @@ impl gfx::Context for Context {
                 .CreateRenderTargetView(&target, None, target_rtv);
         }
 
-        let (viewport_scale, viewport) = {
-            let img_desc = unsafe { target.GetDesc() };
-            let scale = [1.0 / img_desc.Width as f32, 1.0 / img_desc.Height as f32];
+        let viewport_rect = {
+            assert!(content.commands[0].0 == DrawCommand::Begin);
+            let rect = content.areas[0];
+            RECT {
+                left: rect.left() as i32,
+                top: rect.top() as i32,
+                right: rect.right() as i32,
+                bottom: rect.bottom() as i32,
+            }
+        };
 
-            let viewport = D3D12_VIEWPORT {
-                TopLeftX: 0.0,
-                TopLeftY: 0.0,
-                Width: img_desc.Width as f32,
-                Height: img_desc.Height as f32,
-                MinDepth: 0.0,
-                MaxDepth: 1.0,
-            };
+        let viewport_scale = [
+            1.0 / viewport_rect.right as f32,
+            1.0 / viewport_rect.bottom as f32,
+        ];
 
-            (scale, viewport)
+        let viewport = D3D12_VIEWPORT {
+            TopLeftX: 0.0,
+            TopLeftY: 0.0,
+            Width: viewport_rect.right as f32,
+            Height: viewport_rect.bottom as f32,
+            MinDepth: 0.0,
+            MaxDepth: 1.0,
         };
 
         let mut rect_idx = 0;
@@ -207,6 +223,7 @@ impl gfx::Context for Context {
                         .OMSetRenderTargets(1, Some(&target_rtv), false, None);
 
                     frame.command_list.RSSetViewports(&[viewport]);
+                    frame.command_list.RSSetScissorRects(&[viewport_rect]);
                 },
                 DrawCommand::End => unsafe {
                     image_barrier(
@@ -241,11 +258,9 @@ impl gfx::Context for Context {
                     // todo: suspect an off-by-one error here
                     let num_rects = *idx - rect_idx;
 
-                    tracing::info!("height: {}", viewport.Height);
-
                     self.shaders.rect_shader.bind(
                         &frame.command_list,
-                        &frame.buffer.as_ref().unwrap(),
+                        frame.buffer.as_ref().unwrap(),
                         viewport_scale,
                         viewport.Height,
                     );
@@ -257,15 +272,22 @@ impl gfx::Context for Context {
             }
         }
 
-        self.device
+        let submit_id = self
+            .device
             .queue
-            .submit(&frame.command_list.cast().unwrap())
+            .submit(&frame.command_list.cast().unwrap());
+
+        frame.submit_id = Some(submit_id);
+
+        submit_id
     }
 
+    #[tracing::instrument(skip(self))]
     fn wait(&self, submit_id: gfx::SubmitId) {
         self.device.queue.wait(submit_id);
     }
 
+    #[tracing::instrument(skip(self))]
     fn wait_for_idle(&self) {
         self.device.queue.wait_idle();
     }

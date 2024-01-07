@@ -1,7 +1,7 @@
 use windows::{
     core::ComInterface,
     Win32::{
-        Foundation::{HWND, RECT},
+        Foundation::{HANDLE, HWND, RECT},
         Graphics::{
             Direct3D12::{ID3D12CommandQueue, ID3D12Resource},
             DirectComposition::{IDCompositionDevice, IDCompositionTarget, IDCompositionVisual},
@@ -11,10 +11,12 @@ use windows::{
                     DXGI_SAMPLE_DESC,
                 },
                 IDXGIFactory2, IDXGISwapChain3, DXGI_FRAME_STATISTICS, DXGI_RGBA,
-                DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
-                DXGI_USAGE_RENDER_TARGET_OUTPUT,
+                DXGI_SCALING_STRETCH, DXGI_SWAP_CHAIN_DESC1,
+                DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT,
+                DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT,
             },
         },
+        System::Threading::WaitForSingleObjectEx,
         UI::WindowsAndMessaging::GetClientRect,
     },
 };
@@ -29,6 +31,10 @@ pub struct Swapchain {
 
     #[allow(dead_code)]
     visual: IDCompositionVisual,
+
+    event: HANDLE,
+
+    size: (u16, u16),
 }
 
 impl Swapchain {
@@ -62,7 +68,7 @@ impl Swapchain {
             Scaling: DXGI_SCALING_STRETCH,
             SwapEffect: DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL,
             AlphaMode: DXGI_ALPHA_MODE_IGNORE, // backbuffer tranparency is ignored
-            Flags: 0,
+            Flags: DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT.0 as _,
         };
 
         let handle = unsafe { dxgi.CreateSwapChainForComposition(queue, &swapchain_desc, None) }
@@ -93,11 +99,19 @@ impl Swapchain {
         unsafe { visual.SetContent(&handle) }.unwrap();
         unsafe { compositor.Commit() }.unwrap();
 
+        let event = unsafe { handle.GetFrameLatencyWaitableObject() };
+
         Self {
             handle,
             target,
             visual,
+            event,
+            size: (width as u16, height as u16),
         }
+    }
+
+    pub fn size(&self) -> (u16, u16) {
+        self.size
     }
 
     pub fn prev_present_time(&self) -> Option<Instant> {
@@ -108,8 +122,8 @@ impl Swapchain {
             .map(|()| Instant::from_ticks(stats.SyncQPCTime as u64))
     }
 
-    #[tracing::instrument(skip(self))]
-    pub fn resize(&mut self, width: u16, height: u16, flex: Option<f32>) {
+    #[tracing::instrument(skip(self, idle))]
+    pub fn resize(&mut self, width: u16, height: u16, flex: Option<f32>, idle: impl Fn()) {
         let width = width as u32;
         let height = height as u32;
 
@@ -120,17 +134,41 @@ impl Swapchain {
             if width > desc.Width || height > desc.Height {
                 let w = ((width as f32) * flex).min(u16::MAX as f32) as u32;
                 let h = ((height as f32) * flex).min(u16::MAX as f32) as u32;
-                unsafe { self.handle.ResizeBuffers(0, w, h, DXGI_FORMAT_UNKNOWN, 0) }.unwrap();
+
+                idle();
+                unsafe {
+                    self.handle.ResizeBuffers(
+                        0,
+                        w,
+                        h,
+                        DXGI_FORMAT_UNKNOWN,
+                        DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT.0 as _,
+                    )
+                }
+                .unwrap();
             }
 
             unsafe { self.handle.SetSourceSize(width, height) }.unwrap();
         } else {
+            idle();
             unsafe {
-                self.handle
-                    .ResizeBuffers(0, width, height, DXGI_FORMAT_UNKNOWN, 0)
+                self.handle.ResizeBuffers(
+                    0,
+                    width,
+                    height,
+                    DXGI_FORMAT_UNKNOWN,
+                    DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT.0 as _,
+                )
             }
             .unwrap();
         }
+
+        self.size = (width as u16, height as u16);
+    }
+
+    #[tracing::instrument(skip(self))]
+    pub fn wait_for_present(&self) {
+        unsafe { WaitForSingleObjectEx(self.event, u32::MAX, true) };
     }
 
     #[tracing::instrument(skip(self))]
@@ -143,5 +181,11 @@ impl Swapchain {
     #[tracing::instrument(skip(self))]
     pub fn present(&mut self) {
         unsafe { self.handle.Present(1, 0) }.unwrap();
+    }
+}
+
+impl Drop for Swapchain {
+    fn drop(&mut self) {
+        // self.handle.getrst
     }
 }

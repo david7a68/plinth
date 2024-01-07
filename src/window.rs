@@ -1,6 +1,7 @@
 use crate::{
     application::AppContext,
-    graphics::{Canvas, FrameInfo, FramesPerSecond, RefreshRate},
+    frame::{RedrawRequest, RefreshRate},
+    graphics::{Canvas, FrameInfo},
     math::{Point, Scale, Size},
 };
 
@@ -76,7 +77,6 @@ pub struct WindowSpec {
     pub max_size: Option<Size<Window>>,
     pub resizable: bool,
     pub visible: bool,
-    pub refresh_rate: Option<FramesPerSecond>,
 }
 
 impl Default for WindowSpec {
@@ -88,7 +88,6 @@ impl Default for WindowSpec {
             max_size: None,
             resizable: true,
             visible: true,
-            refresh_rate: None,
         }
     }
 }
@@ -110,8 +109,9 @@ impl Window {
         self.inner.close();
     }
 
-    pub fn set_animation_frequency(&mut self, freq: FramesPerSecond) {
-        self.inner.set_animation_frequency(freq);
+    pub fn request_redraw(&mut self, request: RedrawRequest) {
+        // mut to suggest that this has side effects
+        self.inner.request_redraw(request);
     }
 
     pub fn refresh_rate(&self) -> RefreshRate {
@@ -135,9 +135,6 @@ impl Window {
         self.inner.set_visible(visible);
     }
 }
-
-pub type WindowEventHandlerConstructor =
-    dyn (Fn(Window) -> Box<dyn WindowEventHandler>) + Send + Sync;
 
 pub trait WindowEventHandler: Send {
     fn on_event(&mut self, event: WindowEvent);

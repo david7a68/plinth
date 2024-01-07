@@ -8,3 +8,4 @@ mod dx12;
 pub use win32::*;
 
 pub(crate) mod gfx;
+pub(crate) mod handle_pool;

@@ -1,5 +1,3 @@
-use std::time::Duration;
-
 use super::Vec2;
 
 pub struct Scale<Src, Dst> {

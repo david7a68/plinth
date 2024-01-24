@@ -28,7 +28,6 @@ use crate::{
 
 use super::{
     swapchain::Swapchain,
-    ui_thread::UiEvent,
     vsync::{VsyncRequest, VsyncThread},
 };
 
@@ -40,7 +39,7 @@ pub enum AppMessage {
 pub struct ApplicationImpl {
     context: AppContextImpl,
     app_receiver: Receiver<AppMessage>,
-    vsync_request_receiver: Receiver<VsyncRequest<UiEvent>>,
+    vsync_request_receiver: Receiver<VsyncRequest>,
 }
 
 impl ApplicationImpl {
@@ -133,7 +132,7 @@ unsafe impl Sync for Win32Context {}
 pub struct AppContextImpl {
     pub inner: Arc<RwLock<Win32Context>>,
     pub sender: Sender<AppMessage>,
-    pub vsync_sender: Sender<VsyncRequest<UiEvent>>,
+    pub vsync_sender: Sender<VsyncRequest>,
 }
 
 impl AppContextImpl {
@@ -141,7 +140,7 @@ impl AppContextImpl {
     fn new(
         config: &GraphicsConfig,
         sender: Sender<AppMessage>,
-        vsync_sender: Sender<VsyncRequest<UiEvent>>,
+        vsync_sender: Sender<VsyncRequest>,
     ) -> Self {
         Self {
             inner: Arc::new(RwLock::new(Win32Context::new(config))),
@@ -161,8 +160,8 @@ impl AppContextImpl {
     {
         let (ui_sender, ui_receiver) = std::sync::mpsc::channel();
 
-        spawn_event_loop(spec, self.sender.clone(), ui_sender.clone());
-        spawn_ui_thread(self.clone(), constructor, ui_sender, ui_receiver);
+        spawn_event_loop(spec, self.sender.clone(), ui_sender);
+        spawn_ui_thread(self.clone(), constructor, ui_receiver);
 
         Ok(())
     }

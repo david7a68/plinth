@@ -1,7 +1,7 @@
 use crate::{math::Size, Window};
 
 /// Maximum number of windows that can be open at once.
-pub const MAX_WINDOWS: usize = 32;
+pub const MAX_WINDOWS: usize = 16;
 
 pub const MAX_TITLE_LENGTH: usize = 255;
 

@@ -15,6 +15,10 @@ use crate::{
 
 pub(super) const UM_DESTROY_WINDOW: u32 = WM_APP;
 pub(super) const UM_REDRAW_REQUEST: u32 = WM_APP + 1;
+
+pub(super) const UM_VSYNC: u32 = WM_APP + 2;
+pub(super) const UM_COMPOSITION_RATE: u32 = WM_APP + 3;
+
 pub(super) const WINDOWS_DEFAULT_DPI: u16 = 96;
 
 #[derive(Clone, Copy, Debug)]
@@ -23,6 +27,8 @@ pub enum Control {
     Redraw(RedrawRequest),
     /// The OS has requested that the window be repainted.
     OsRepaint,
+    VSync(FrameId, Option<FramesPerSecond>),
+    VSyncRateChanged(FrameId, FramesPerSecond),
 }
 
 #[derive(Debug, Default)]

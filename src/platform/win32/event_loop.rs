@@ -39,8 +39,10 @@ use crate::{
 use super::{
     application::AppMessage,
     ui_thread::UiEvent,
+    vsync::{decode_reply_device_update, decode_reply_vsync},
     window::{
-        extract_redraw_request, Control, UM_DESTROY_WINDOW, UM_REDRAW_REQUEST, WINDOWS_DEFAULT_DPI,
+        extract_redraw_request, Control, UM_COMPOSITION_RATE, UM_DESTROY_WINDOW, UM_REDRAW_REQUEST,
+        UM_VSYNC, WINDOWS_DEFAULT_DPI,
     },
 };
 
@@ -292,9 +294,19 @@ fn wndproc(state: &EventLoop, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
         }
         UM_REDRAW_REQUEST => {
             let request = extract_redraw_request(wparam, lparam);
-
             send(UiEvent::ControlEvent(Control::Redraw(request)));
-
+            LRESULT(0)
+        }
+        UM_VSYNC => {
+            let (frame_id, rate) = decode_reply_vsync(wparam, lparam);
+            send(UiEvent::ControlEvent(Control::VSync(frame_id, rate)));
+            LRESULT(0)
+        }
+        UM_COMPOSITION_RATE => {
+            let (frame_id, rate) = decode_reply_device_update(wparam, lparam);
+            send(UiEvent::ControlEvent(Control::VSyncRateChanged(
+                frame_id, rate,
+            )));
             LRESULT(0)
         }
         WM_PAINT => {

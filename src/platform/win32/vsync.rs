@@ -15,7 +15,7 @@
 //! This... might be too much. I'm not sure. But I wanted to consolidate all the
 //! frame timing stuff into one place instead of handling it per-window.
 
-use std::sync::mpsc::{Receiver, Sender};
+use std::sync::mpsc::Receiver;
 
 use arrayvec::ArrayVec;
 use windows::Win32::{
@@ -25,33 +25,28 @@ use windows::Win32::{
         DISPLAYCONFIG_MODE_INFO, DISPLAYCONFIG_PATH_INFO, DISPLAYCONFIG_SOURCE_DEVICE_NAME,
         QDC_ONLY_ACTIVE_PATHS, QUERY_DISPLAY_CONFIG_FLAGS,
     },
-    Foundation::ERROR_INSUFFICIENT_BUFFER,
+    Foundation::{ERROR_INSUFFICIENT_BUFFER, HWND, LPARAM, WPARAM},
     Graphics::{
         Dxgi::{IDXGIOutput, DXGI_OUTPUT_DESC},
         Gdi::{GetMonitorInfoW, HMONITOR, MONITORINFO, MONITORINFOEXW},
     },
+    UI::WindowsAndMessaging::PostMessageW,
 };
 
 use crate::{
     frame::{FrameId, FramesPerSecond},
     limits::MAX_WINDOWS,
-    platform::handle_pool::{Handle, HandlePool},
 };
 
-use super::AppContextImpl;
+use super::{
+    window::{UM_COMPOSITION_RATE, UM_VSYNC},
+    AppContextImpl,
+};
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct VsyncCookie(Handle<()>);
-
-pub enum VsyncRequest<T: From<VSyncReply>> {
-    /// Register the sender with the vsync thread.
-    Register(Sender<T>),
-    /// Deregister the sender with the vsync thread. All pending requests will
-    /// be cancelled. Dropping the receiver will also cause deregistration.
-    Deregister(VsyncCookie),
+pub enum VsyncRequest {
     /// Requests that the vsync thread cancel any pending requests. You will
     /// have to send a new request to be notified of vsync events.
-    Idle(VsyncCookie),
+    Idle(HWND),
     /// Requests that a VSync notification be sent when the specified vblank
     /// occurs. If the vblank has already passed, a reply will be sent
     /// immediately.
@@ -63,7 +58,7 @@ pub enum VsyncRequest<T: From<VSyncReply>> {
     ///
     /// Use this if you need to update something at some time in the future.
     /// This is basically a timer aligned to the nearest vblank.
-    AtFrame(VsyncCookie, FrameId),
+    AtFrame(HWND, FrameId),
     /// Requests that VSync notifications be sent at a rate strictly at or above
     /// the specified rate (e.g. a request for 24 fps might be returned at 30
     /// fps). The vsync thread will attempt to match the requested rate as
@@ -77,43 +72,47 @@ pub enum VsyncRequest<T: From<VSyncReply>> {
     /// aren't sensitive to exact timing. This is basically the same as
     /// `VSyncForInterval`, but automatically recalculated when the main
     /// monitor's refresh rate changes.
-    AtFrameRate(VsyncCookie, FramesPerSecond),
+    AtFrameRate(HWND, FramesPerSecond),
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum VSyncReply {
-    /// Sent once a sender is registered with the vsync thread.
-    Registered {
-        cookie: VsyncCookie,
-        // todo: this is a bad name
-        composition_rate: FramesPerSecond,
-    },
-    /// Send when a client-requested VSync event occurs.
-    VSync {
-        frame: FrameId,
-        /// The rate at which the vsync thread is sending notifications. This is
-        /// `None` if the notification was produced by a `VSyncRequest::VSyncAt`
-        /// request.
-        rate: Option<FramesPerSecond>,
-    },
-    /// Sent when the main monitor's refresh rate changes.
-    DeviceUpdate {
-        /// The vblank when the update occurred. All subsequent vblanks will
-        /// occur with the new composition rate.
-        frame: FrameId,
-        /// The new composition rate.
-        // todo: this is a bad name
-        composition_rate: FramesPerSecond,
-    },
+fn encode_reply_vsync(frame: FrameId, rate: Option<FramesPerSecond>) -> (WPARAM, LPARAM) {
+    let wp = WPARAM(unsafe { std::mem::transmute(frame.0) });
+    let lp = LPARAM(unsafe { std::mem::transmute(rate.unwrap_or_default().0.to_bits()) });
+    (wp, lp)
 }
 
-struct Client<T> {
-    sender: Sender<T>,
+pub fn decode_reply_vsync(wparam: WPARAM, lparam: LPARAM) -> (FrameId, Option<FramesPerSecond>) {
+    let frame = FrameId(unsafe { std::mem::transmute(wparam.0) });
+    let rate: f64 = unsafe { std::mem::transmute(lparam.0) };
+
+    if rate == 0.0 {
+        (frame, None)
+    } else {
+        (frame, Some(FramesPerSecond(rate)))
+    }
+}
+
+fn encode_reply_device_update(
+    frame: FrameId,
+    composition_rate: FramesPerSecond,
+) -> (WPARAM, LPARAM) {
+    let wp = WPARAM(unsafe { std::mem::transmute(frame.0) });
+    let lp = LPARAM(unsafe { std::mem::transmute(composition_rate.0.to_bits()) });
+    (wp, lp)
+}
+
+pub fn decode_reply_device_update(wparam: WPARAM, lparam: LPARAM) -> (FrameId, FramesPerSecond) {
+    let frame = FrameId(unsafe { std::mem::transmute(wparam.0) });
+    let rate = FramesPerSecond(unsafe { std::mem::transmute(lparam.0) });
+    (frame, rate)
+}
+
+struct Client {
+    hwnd: HWND,
     mode: Mode,
 }
 
 enum Mode {
-    Idle,
     AtFrame(FrameId),
     ForFps {
         interval: u16,
@@ -125,11 +124,11 @@ enum Mode {
 // :assert_max_windows_u16:
 const _: () = assert!(MAX_WINDOWS <= u16::MAX as usize);
 
-pub struct VsyncThread<'a, T: From<VSyncReply>> {
+pub struct VsyncThread<'a> {
     context: &'a AppContextImpl,
-    request_receiver: &'a Receiver<VsyncRequest<T>>,
+    request_receiver: &'a Receiver<VsyncRequest>,
 
-    clients: HandlePool<Client<T>, MAX_WINDOWS, ()>,
+    clients: ArrayVec<Client, MAX_WINDOWS>,
 
     counter: u64,
     main_output: IDXGIOutput,
@@ -137,12 +136,9 @@ pub struct VsyncThread<'a, T: From<VSyncReply>> {
     composition_rate: FramesPerSecond,
 }
 
-impl<'a, T: From<VSyncReply> + 'static> VsyncThread<'a, T> {
-    pub fn new(
-        context: &'a AppContextImpl,
-        request_receiver: &'a Receiver<VsyncRequest<T>>,
-    ) -> Self {
-        let clients = HandlePool::new();
+impl<'a> VsyncThread<'a> {
+    pub fn new(context: &'a AppContextImpl, request_receiver: &'a Receiver<VsyncRequest>) -> Self {
+        let clients = ArrayVec::new();
 
         let main_output = {
             let adapter0 = unsafe { context.inner.read().dxgi.EnumAdapters(0) }.unwrap();
@@ -204,28 +200,27 @@ impl<'a, T: From<VSyncReply> + 'static> VsyncThread<'a, T> {
     /// the next vblank of the main monitor.
     pub fn tick(&mut self) {
         let current_frame = FrameId(self.counter);
-        let mut delivery_errors = ArrayVec::<Handle<()>, MAX_WINDOWS>::new();
+        let mut delivery_errors = ArrayVec::<usize, MAX_WINDOWS>::new();
 
         let composition_rate_changed = self.update_composition_rate();
 
         if composition_rate_changed {
-            let msg = VSyncReply::DeviceUpdate {
-                frame: current_frame,
-                composition_rate: self.composition_rate,
-            };
+            let (wp, lp) = encode_reply_device_update(current_frame, self.composition_rate);
 
-            for (handle, client) in self.clients.iter() {
-                Self::try_deliver(handle, client, msg, &mut delivery_errors);
-            }
-
-            for (_, client) in self.clients.iter_mut() {
-                if let Mode::ForFps {
-                    interval,
-                    requested,
-                    next: _,
-                } = &mut client.mode
-                {
-                    *interval = interval_from_rate(*requested, self.composition_rate);
+            for (index, client) in self.clients.iter_mut().enumerate() {
+                let r = unsafe { PostMessageW(client.hwnd, UM_COMPOSITION_RATE, wp, lp) };
+                if r.is_err() {
+                    delivery_errors.push(index);
+                } else {
+                    // todo: do we need to update next? -dz
+                    if let Mode::ForFps {
+                        interval,
+                        requested,
+                        next: _,
+                    } = &mut client.mode
+                    {
+                        *interval = interval_from_rate(*requested, self.composition_rate);
+                    }
                 }
             }
         }
@@ -233,129 +228,79 @@ impl<'a, T: From<VSyncReply> + 'static> VsyncThread<'a, T> {
         // handle any requests
         while let Ok(request) = self.request_receiver.try_recv() {
             match request {
-                VsyncRequest::Register(sender) => {
-                    let Some((handle, client)) = self.clients.insert(Client {
-                        sender,
-                        mode: Mode::Idle,
-                    }) else {
-                        tracing::warn!(
-                            "Attempt to register too many vsync clients. Ignoring request."
-                        );
-
-                        continue;
+                VsyncRequest::Idle(hwnd) => {
+                    match self.clients.binary_search_by_key(&hwnd.0, |c| c.hwnd.0) {
+                        Ok(index) => {
+                            self.clients.remove(index);
+                        }
+                        Err(_) => {} // no-op since the client is already idle
+                    }
+                }
+                VsyncRequest::AtFrame(hwnd, frame) => {
+                    let mode = Mode::AtFrame(frame);
+                    match self.clients.binary_search_by_key(&hwnd.0, |c| c.hwnd.0) {
+                        Ok(index) => self.clients[index].mode = mode,
+                        Err(index) => self.clients.insert(index, Client { hwnd, mode }),
+                    }
+                }
+                VsyncRequest::AtFrameRate(hwnd, rate) => {
+                    let mode = Mode::ForFps {
+                        interval: interval_from_rate(rate, self.composition_rate),
+                        next: FrameId(0),
+                        requested: rate,
                     };
 
-                    let cookie = VsyncCookie(unsafe { handle.retype() });
-
-                    let message = VSyncReply::Registered {
-                        cookie,
-                        composition_rate: self.composition_rate,
-                    };
-
-                    Self::try_deliver(handle, client, message, &mut delivery_errors);
-                }
-                VsyncRequest::Deregister(cookie) => {
-                    if self.clients.remove(cookie.0).is_none() {
-                        tracing::warn!("Attempt to deregister invalid vsync client. Ignoring.");
-                    }
-                }
-                VsyncRequest::Idle(cookie) => {
-                    if let Some(client) = self.clients.get_mut(cookie.0) {
-                        client.mode = Mode::Idle;
-                    } else {
-                        tracing::warn!("Attempt to idle invalid vsync client. Ignoring.");
-                    }
-                }
-                VsyncRequest::AtFrame(cookie, frame) => {
-                    if let Some(client) = self.clients.get_mut(cookie.0) {
-                        client.mode = Mode::AtFrame(frame);
-                    } else {
-                        tracing::warn!("Attempt to idle invalid vsync client. Ignoring.");
-                    }
-                }
-                VsyncRequest::AtFrameRate(cookie, rate) => {
-                    if let Some(client) = self.clients.get_mut(cookie.0) {
-                        client.mode = Mode::ForFps {
-                            interval: interval_from_rate(rate, self.composition_rate),
-                            next: FrameId(0),
-                            requested: rate,
-                        };
-                    } else {
-                        tracing::warn!("Attempt to idle invalid vsync client. Ignoring.");
+                    match self.clients.binary_search_by_key(&hwnd.0, |c| c.hwnd.0) {
+                        Ok(index) => self.clients[index].mode = mode,
+                        Err(index) => self.clients.insert(index, Client { hwnd, mode }),
                     }
                 }
             }
         }
 
         // dispatch any requests that are due
-        for (handle, client) in self.clients.iter_mut() {
-            Self::try_advance(
-                handle,
-                client,
-                current_frame,
-                self.composition_rate,
-                &mut delivery_errors,
-            );
+        for (index, client) in self.clients.iter_mut().enumerate() {
+            // perf: this does not need to be an enum, could remove the branch -dz
+            let (is_due, rate) = match &mut client.mode {
+                Mode::AtFrame(target) => (*target <= current_frame, None),
+                Mode::ForFps {
+                    interval,
+                    requested: _,
+                    next,
+                } => {
+                    let is_due = current_frame >= *next;
+
+                    *next += {
+                        // skip frames if we're behind
+                        let diff = current_frame.0.saturating_sub(next.0);
+                        let catch_up = (diff as f64 / *interval as f64).ceil() as u64;
+                        *interval as u64 * catch_up
+                    };
+
+                    // branchless version of `if is_due { *next += *interval as u64 }`
+                    *next += *interval as u64 * is_due as u64;
+
+                    debug_assert!(next.0 >= current_frame.0);
+                    (is_due, Some(self.composition_rate / *interval as f64))
+                }
+            };
+
+            if is_due {
+                let (wp, lp) = encode_reply_vsync(current_frame, rate);
+                let r = unsafe { PostMessageW(client.hwnd, UM_VSYNC, wp, lp) };
+
+                if r.is_err() {
+                    delivery_errors.push(index);
+                }
+            }
         }
 
-        for handle in delivery_errors {
-            self.clients.remove(handle);
+        for index in delivery_errors.drain(..).rev() {
+            self.clients.remove(index);
         }
 
         unsafe { self.main_output.WaitForVBlank() }.unwrap();
         self.counter += 1;
-    }
-
-    fn try_deliver(
-        handle: Handle<()>,
-        client: &Client<T>,
-        notification: VSyncReply,
-        errors: &mut ArrayVec<Handle<()>, MAX_WINDOWS>,
-    ) {
-        let delivered = client.sender.send(notification.into()).is_ok();
-
-        if !delivered {
-            tracing::warn!("Attempt to deliver vsync notification failed. Reason: channel closed. Removing client.");
-
-            if !errors.contains(&handle) {
-                errors.push(handle);
-            }
-        }
-    }
-
-    fn try_advance(
-        handle: Handle<()>,
-        client: &mut Client<T>,
-        frame: FrameId,
-        composition_rate: FramesPerSecond,
-        errors: &mut ArrayVec<Handle<()>, MAX_WINDOWS>,
-    ) {
-        let (is_due, rate) = match &mut client.mode {
-            Mode::Idle => (false, None),
-            Mode::AtFrame(target) => (*target == frame, None),
-            Mode::ForFps { interval, next, .. } => {
-                let is_due = frame >= *next;
-
-                *next += {
-                    // skip frames if we're behind
-                    let diff = frame.0.saturating_sub(next.0);
-                    let catch_up = (diff as f64 / *interval as f64).ceil() as u64;
-                    *interval as u64 * catch_up
-                };
-
-                // branchless: if is_due { *next += *interval as u64 }
-                *next += *interval as u64 * is_due as u64;
-
-                debug_assert!(next.0 >= frame.0);
-                (is_due, Some(*interval))
-            }
-        };
-
-        let rate = rate.map(|interval| composition_rate / interval as f64);
-
-        if is_due {
-            Self::try_deliver(handle, client, VSyncReply::VSync { frame, rate }, errors);
-        }
     }
 }
 

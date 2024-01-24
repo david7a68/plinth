@@ -1,9 +1,6 @@
 // todo: account for CPU time when scheduling the next repaint
 
-use std::sync::{
-    mpsc::{Receiver, Sender},
-    Arc,
-};
+use std::sync::{mpsc::Receiver, Arc};
 
 use parking_lot::RwLock;
 use windows::Win32::Foundation::HWND;
@@ -16,7 +13,6 @@ use crate::{
     platform::{
         dx12::{Context, Frame},
         gfx::{Context as _, Device as _, DrawList, SubmitId},
-        win32::vsync::VSyncReply,
         WindowImpl,
     },
     time::Instant,
@@ -26,7 +22,7 @@ use crate::{
 
 use super::{
     swapchain::Swapchain,
-    vsync::{VsyncCookie, VsyncRequest},
+    vsync::VsyncRequest,
     window::{Control, WindowState},
     AppContextImpl,
 };
@@ -44,31 +40,22 @@ pub enum UiEvent {
     Input(Input),
     Window(WindowEvent),
     ControlEvent(Control),
-    VSync(VSyncReply),
-}
-
-impl From<VSyncReply> for UiEvent {
-    fn from(notification: VSyncReply) -> Self {
-        UiEvent::VSync(notification)
-    }
 }
 
 pub fn spawn_ui_thread<W, F>(
     context: AppContextImpl,
     constructor: F,
-    ui_sender: Sender<UiEvent>,
     ui_receiver: Receiver<UiEvent>,
 ) where
     W: WindowEventHandler,
     F: FnMut(Window) -> W + Send + 'static,
 {
-    std::thread::spawn(move || run_ui_loop(context, constructor, ui_sender, ui_receiver));
+    std::thread::spawn(move || run_ui_loop(context, constructor, ui_receiver));
 }
 
 pub fn run_ui_loop<W, F>(
     context: AppContextImpl,
     mut constructor: F,
-    ui_sender: Sender<UiEvent>,
     ui_receiver: Receiver<UiEvent>,
 ) where
     W: WindowEventHandler,
@@ -100,6 +87,7 @@ pub fn run_ui_loop<W, F>(
     let draw_list = DrawList::new();
 
     let mut render_state = RenderState {
+        hwnd,
         handler,
         graphics,
         shared_state,
@@ -109,20 +97,13 @@ pub fn run_ui_loop<W, F>(
         frames_in_flight,
         prev_submit: None,
         frame_counter: 0,
-        vsync_cookie: None,
         target_frame_rate: None,
         is_visible: false,
         composition_rate: FramesPerSecond::ZERO,
         is_drag_resizing: false,
         need_repaint: false,
-        deferred_redraw: None,
         deferred_resize: None,
     };
-
-    context
-        .vsync_sender
-        .send(VsyncRequest::Register(ui_sender.clone()))
-        .unwrap();
 
     let request_vsync = |request| context.vsync_sender.send(request).unwrap();
 
@@ -145,6 +126,7 @@ pub fn run_ui_loop<W, F>(
 }
 
 struct RenderState<W: WindowEventHandler> {
+    hwnd: HWND,
     handler: W,
     graphics: Context,
     shared_state: Arc<RwLock<WindowState>>,
@@ -155,9 +137,6 @@ struct RenderState<W: WindowEventHandler> {
     frames_in_flight: [Frame; 2],
     prev_submit: Option<SubmitId>,
 
-    /// Token used to identify the UI thread when sending vsync requests.
-    /// Initialized upon `UiEvent::VSync(VSyncReply::Registered)`.
-    vsync_cookie: Option<VsyncCookie>,
     composition_rate: FramesPerSecond,
     target_frame_rate: Option<FramesPerSecond>,
 
@@ -170,23 +149,19 @@ struct RenderState<W: WindowEventHandler> {
     /// don't repaint several times in a single vblank.
     need_repaint: bool,
 
-    // Deferred events
-    /// A redraw request that was received before the thread was registered with
-    /// the vsync thread. Only happens on init.
-    deferred_redraw: Option<RedrawRequest>,
     /// A resize event. Deferred until repaint to consolidate graphics work and
     /// in case multiple resize events are received in a single frame.
     deferred_resize: Option<(WindowSize, Option<f32>)>,
 }
 
 impl<W: WindowEventHandler> RenderState<W> {
-    fn tick<F: Fn(VsyncRequest<UiEvent>)>(&mut self, event: UiEvent, request_vsync: &F) -> Tick {
-        let mut req_vsync = |cookie: VsyncCookie, request: RedrawRequest| match request {
-            RedrawRequest::Idle => request_vsync(VsyncRequest::Idle(cookie)),
+    fn tick<F: Fn(VsyncRequest)>(&mut self, event: UiEvent, request_vsync: &F) -> Tick {
+        let mut req_vsync = |request: RedrawRequest| match request {
+            RedrawRequest::Idle => request_vsync(VsyncRequest::Idle(self.hwnd)),
             RedrawRequest::Once => self.need_repaint = true,
-            RedrawRequest::AtFrame(frame) => request_vsync(VsyncRequest::AtFrame(cookie, frame)),
+            RedrawRequest::AtFrame(frame) => request_vsync(VsyncRequest::AtFrame(self.hwnd, frame)),
             RedrawRequest::AtFrameRate(rate) => {
-                request_vsync(VsyncRequest::AtFrameRate(cookie, rate))
+                request_vsync(VsyncRequest::AtFrameRate(self.hwnd, rate))
             }
         };
 
@@ -209,34 +184,20 @@ impl<W: WindowEventHandler> RenderState<W> {
             },
             UiEvent::ControlEvent(event) => match event {
                 Control::Redraw(req) => {
-                    if let Some(vsync_cookie) = self.vsync_cookie {
-                        req_vsync(vsync_cookie, req);
-                    } else {
-                        self.deferred_redraw = Some(req);
-                    }
-
+                        req_vsync(req);
                 },
                 Control::OsRepaint => {
                     self.need_repaint = true;
                 },
-            },
-            UiEvent::VSync(vsync) => match vsync {
-                VSyncReply::Registered { cookie, composition_rate } => {
-                    self.vsync_cookie = Some(cookie);
-                    self.composition_rate = composition_rate;
-
-                    if let Some(deferred_redraw) = self.deferred_redraw.take() {
-                        req_vsync(cookie, deferred_redraw);
-                    }
-                },
-                VSyncReply::VSync { frame: _, rate } => {
+                Control::VSync(_frame_id, rate) => {
+                    // todo: what to do about frame_id? -dz
                     self.need_repaint = true;
                     self.target_frame_rate = rate;
                 },
-                VSyncReply::DeviceUpdate { frame: _, composition_rate } => {
-                    // todo: is frame useful?
-                    self.composition_rate = composition_rate;
-                },
+                Control::VSyncRateChanged(_frame_id, rate) => {
+                    // todo: what to do about frame_id? -dz
+                    self.composition_rate = rate;
+                }
             },
         }
 

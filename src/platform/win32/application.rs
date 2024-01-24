@@ -18,17 +18,14 @@ use windows::{
 
 use crate::{
     graphics::GraphicsConfig,
-    platform::{
-        dx12,
-        win32::{event_loop::spawn_event_loop, ui_thread::spawn_ui_thread},
-    },
+    platform::dx12::{self, window::DxWindow},
     window::{WindowError, WindowSpec},
     Window, WindowEventHandler,
 };
 
 use super::{
-    swapchain::Swapchain,
-    vsync::{VsyncRequest, VsyncThread},
+    vsync::{VSyncRequest, VsyncThread},
+    window::spawn_window_thread,
 };
 
 pub enum AppMessage {
@@ -39,7 +36,7 @@ pub enum AppMessage {
 pub struct ApplicationImpl {
     context: AppContextImpl,
     app_receiver: Receiver<AppMessage>,
-    vsync_request_receiver: Receiver<VsyncRequest>,
+    vsync_request_receiver: Receiver<VSyncRequest>,
 }
 
 impl ApplicationImpl {
@@ -132,7 +129,7 @@ unsafe impl Sync for Win32Context {}
 pub struct AppContextImpl {
     pub inner: Arc<RwLock<Win32Context>>,
     pub sender: Sender<AppMessage>,
-    pub vsync_sender: Sender<VsyncRequest>,
+    pub vsync_sender: Sender<VSyncRequest>,
 }
 
 impl AppContextImpl {
@@ -140,7 +137,7 @@ impl AppContextImpl {
     fn new(
         config: &GraphicsConfig,
         sender: Sender<AppMessage>,
-        vsync_sender: Sender<VsyncRequest>,
+        vsync_sender: Sender<VSyncRequest>,
     ) -> Self {
         Self {
             inner: Arc::new(RwLock::new(Win32Context::new(config))),
@@ -158,17 +155,8 @@ impl AppContextImpl {
         W: WindowEventHandler,
         F: FnMut(Window) -> W + Send + 'static,
     {
-        let (ui_sender, ui_receiver) = std::sync::mpsc::channel();
-
-        spawn_event_loop(spec, self.sender.clone(), ui_sender);
-        spawn_ui_thread(self.clone(), constructor, ui_receiver);
-
+        spawn_window_thread(self.clone(), spec, constructor, DxWindow::new);
         Ok(())
-    }
-
-    pub fn create_swapchain(&self, hwnd: HWND) -> Swapchain {
-        let this = self.inner.read();
-        Swapchain::new(&this.dxgi, &this.compositor, this.dx12.queue(), hwnd)
     }
 }
 

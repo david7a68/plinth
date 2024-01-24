@@ -43,7 +43,7 @@ use super::{
     AppContextImpl,
 };
 
-pub enum VsyncRequest {
+pub enum VSyncRequest {
     /// Requests that the vsync thread cancel any pending requests. You will
     /// have to send a new request to be notified of vsync events.
     Idle(HWND),
@@ -126,7 +126,7 @@ const _: () = assert!(MAX_WINDOWS <= u16::MAX as usize);
 
 pub struct VsyncThread<'a> {
     context: &'a AppContextImpl,
-    request_receiver: &'a Receiver<VsyncRequest>,
+    request_receiver: &'a Receiver<VSyncRequest>,
 
     clients: ArrayVec<Client, MAX_WINDOWS>,
 
@@ -137,7 +137,7 @@ pub struct VsyncThread<'a> {
 }
 
 impl<'a> VsyncThread<'a> {
-    pub fn new(context: &'a AppContextImpl, request_receiver: &'a Receiver<VsyncRequest>) -> Self {
+    pub fn new(context: &'a AppContextImpl, request_receiver: &'a Receiver<VSyncRequest>) -> Self {
         let clients = ArrayVec::new();
 
         let main_output = {
@@ -228,7 +228,7 @@ impl<'a> VsyncThread<'a> {
         // handle any requests
         while let Ok(request) = self.request_receiver.try_recv() {
             match request {
-                VsyncRequest::Idle(hwnd) => {
+                VSyncRequest::Idle(hwnd) => {
                     match self.clients.binary_search_by_key(&hwnd.0, |c| c.hwnd.0) {
                         Ok(index) => {
                             self.clients.remove(index);
@@ -236,14 +236,14 @@ impl<'a> VsyncThread<'a> {
                         Err(_) => {} // no-op since the client is already idle
                     }
                 }
-                VsyncRequest::AtFrame(hwnd, frame) => {
+                VSyncRequest::AtFrame(hwnd, frame) => {
                     let mode = Mode::AtFrame(frame);
                     match self.clients.binary_search_by_key(&hwnd.0, |c| c.hwnd.0) {
                         Ok(index) => self.clients[index].mode = mode,
                         Err(index) => self.clients.insert(index, Client { hwnd, mode }),
                     }
                 }
-                VsyncRequest::AtFrameRate(hwnd, rate) => {
+                VSyncRequest::AtFrameRate(hwnd, rate) => {
                     let mode = Mode::ForFps {
                         interval: interval_from_rate(rate, self.composition_rate),
                         next: FrameId(0),

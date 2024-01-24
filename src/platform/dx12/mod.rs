@@ -1,6 +1,7 @@
 mod descriptor;
 mod queue;
 mod shaders;
+pub mod window;
 
 use std::{mem::ManuallyDrop, sync::Arc};
 

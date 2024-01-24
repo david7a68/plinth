@@ -93,7 +93,7 @@ impl Default for WindowSpec {
 }
 
 pub struct Window {
-    inner: platform::WindowImpl,
+    pub(crate) inner: platform::WindowImpl,
 }
 
 impl Window {
@@ -136,7 +136,7 @@ impl Window {
     }
 }
 
-pub trait WindowEventHandler: Send {
+pub trait WindowEventHandler: Send + 'static {
     fn on_event(&mut self, event: WindowEvent);
 
     fn on_input(&mut self, input: Input);

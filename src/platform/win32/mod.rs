@@ -48,15 +48,15 @@
 //!     queue directly.
 
 mod application;
-mod event_loop;
-mod swapchain;
-mod ui_thread;
 mod vsync;
 mod window;
 
 pub use application::{AppContextImpl, ApplicationImpl};
-use lazy_static::lazy_static;
+pub(crate) use vsync::VSyncRequest;
+pub(crate) use window::Win32WindowEventInterposer;
 pub use window::WindowImpl;
+
+use lazy_static::lazy_static;
 use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
 
 lazy_static! {

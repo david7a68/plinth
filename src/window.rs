@@ -7,6 +7,7 @@ use crate::{
 
 #[cfg(target_os = "windows")]
 use crate::platform;
+
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Axis {
@@ -39,25 +40,16 @@ pub enum WindowError {
     TooManyWindows,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct WindowSize {
-    pub width: u16,
-    pub height: u16,
-    pub dpi: u16,
-}
+pub struct LogicalPixel;
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct WindowPoint {
-    pub x: i16,
-    pub y: i16,
-}
+pub struct PhysicalPixel;
 
 #[derive(Clone, Debug)]
 pub struct WindowSpec {
     pub title: String,
-    pub size: WindowSize,
-    pub min_size: Option<WindowSize>,
-    pub max_size: Option<WindowSize>,
+    pub size: Size<u16, PhysicalPixel>,
+    pub min_size: Option<Size<u16, PhysicalPixel>>,
+    pub max_size: Option<Size<u16, PhysicalPixel>>,
     pub resizable: bool,
     pub visible: bool,
 }
@@ -66,11 +58,7 @@ impl Default for WindowSpec {
     fn default() -> Self {
         Self {
             title: String::new(),
-            size: WindowSize {
-                width: 800,
-                height: 600,
-                dpi: 96,
-            },
+            size: Size::new(800, 600),
             min_size: None,
             max_size: None,
             resizable: true,
@@ -108,18 +96,18 @@ impl Window {
     }
 
     #[must_use]
-    pub fn size(&self) -> Size<Window> {
+    pub fn size(&self) -> Size<u16, PhysicalPixel> {
         self.inner.size()
     }
 
     /// The `HiDPI` scale factor.
     #[must_use]
-    pub fn scale(&self) -> Scale<Window, Window> {
+    pub fn scale(&self) -> Scale<f32, PhysicalPixel, LogicalPixel> {
         self.inner.scale()
     }
 
     #[must_use]
-    pub fn pointer_location(&self) -> Option<Point<Window>> {
+    pub fn pointer_location(&self) -> Option<Point<i16, PhysicalPixel>> {
         self.inner.pointer_location()
     }
 
@@ -131,19 +119,31 @@ impl Window {
 pub trait EventHandler: Send + 'static {
     fn on_close_request(&mut self);
 
-    fn on_visible(&mut self, visible: bool);
+    #[allow(unused_variables)]
+    fn on_visible(&mut self, is_visible: bool) {}
 
-    fn on_begin_resize(&mut self);
+    fn on_begin_resize(&mut self) {}
 
-    fn on_resize(&mut self, size: WindowSize);
+    #[allow(unused_variables)]
+    fn on_resize(
+        &mut self,
+        size: Size<u16, PhysicalPixel>,
+        scale: Scale<f32, PhysicalPixel, LogicalPixel>,
+    ) {
+    }
 
-    fn on_end_resize(&mut self);
+    fn on_end_resize(&mut self) {}
 
-    fn on_mouse_button(&mut self, button: MouseButton, state: ButtonState, location: WindowPoint);
+    fn on_mouse_button(
+        &mut self,
+        button: MouseButton,
+        state: ButtonState,
+        location: Point<i16, PhysicalPixel>,
+    );
 
-    fn on_pointer_move(&mut self, location: WindowPoint);
+    fn on_pointer_move(&mut self, location: Point<i16, PhysicalPixel>);
 
-    fn on_pointer_leave(&mut self);
+    fn on_pointer_leave(&mut self) {}
 
     fn on_scroll(&mut self, axis: Axis, delta: f32);
 

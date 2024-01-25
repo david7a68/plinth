@@ -1,8 +1,8 @@
 use plinth::{
     frame::{FramesPerSecond, RedrawRequest},
     graphics::{Canvas, Color, FrameInfo, GraphicsConfig, RoundRect},
-    math::Rect,
-    Application, EventHandler, Window, WindowEvent, WindowSpec,
+    math::{Point, Rect},
+    Application, EventHandler, PhysicalPixel, Window, WindowSpec,
 };
 
 #[cfg(feature = "profile")]
@@ -20,15 +20,8 @@ impl DemoWindow {
 }
 
 impl EventHandler for DemoWindow {
-    fn on_event(&mut self, event: plinth::WindowEvent) {
-        match event {
-            WindowEvent::CloseRequest => self.window.close(),
-            _ => {}
-        }
-    }
-
-    fn on_input(&mut self, _input: plinth::Input) {
-        // no-op
+    fn on_close_request(&mut self) {
+        self.window.close();
     }
 
     fn on_repaint(&mut self, canvas: &mut Canvas<Window>, _timing: &FrameInfo) {
@@ -37,6 +30,23 @@ impl EventHandler for DemoWindow {
         canvas.draw_rect(RoundRect::builder(Rect::new(100.0, 100.0, 40.0, 70.0)).color(Color::RED));
 
         std::thread::sleep(std::time::Duration::from_millis(4));
+    }
+
+    fn on_mouse_button(
+        &mut self,
+        button: plinth::MouseButton,
+        state: plinth::ButtonState,
+        location: Point<i16, PhysicalPixel>,
+    ) {
+        // no-op
+    }
+
+    fn on_pointer_move(&mut self, location: Point<i16, PhysicalPixel>) {
+        // no-op
+    }
+
+    fn on_scroll(&mut self, axis: plinth::Axis, delta: f32) {
+        // no-op
     }
 }
 

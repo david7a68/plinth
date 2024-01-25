@@ -3,13 +3,13 @@ use crate::{math::Rect, platform::gfx::DrawList};
 use super::{Color, RoundRect};
 
 pub struct Canvas<'a, U> {
-    bounds: Rect<U>,
+    bounds: Rect<u16, U>,
     data: &'a mut DrawList,
 }
 
 impl<'a, U> Canvas<'a, U> {
     #[must_use]
-    pub(crate) fn new(data: &'a mut DrawList, bounds: Rect<U>) -> Self {
+    pub(crate) fn new(data: &'a mut DrawList, bounds: Rect<u16, U>) -> Self {
         data.reset();
         data.begin(bounds);
 
@@ -23,7 +23,7 @@ impl<'a, U> Canvas<'a, U> {
     }
 
     #[must_use]
-    pub fn rect(&self) -> &Rect<U> {
+    pub fn rect(&self) -> &Rect<u16, U> {
         &self.bounds
     }
 

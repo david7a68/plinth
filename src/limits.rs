@@ -6,7 +6,7 @@ pub const MAX_WINDOWS: usize = 16;
 pub const MAX_TITLE_LENGTH: usize = 255;
 
 pub const MAX_WINDOW_DIMENSION: u16 = u16::MAX;
-pub const MAX_WINDOW_DIMENSIONS: Size<Window> = Size::new(u16::MAX as _, u16::MAX as _);
+pub const MAX_WINDOW_DIMENSIONS: Size<u16, Window> = Size::new(u16::MAX as _, u16::MAX as _);
 
 pub const MAX_ITEMS_PER_DRAW_LIST: usize = u32::MAX as _;
 

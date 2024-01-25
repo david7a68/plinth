@@ -27,14 +27,14 @@ use crate::{
     frame::{FrameId, FramesPerSecond, RedrawRequest},
     graphics::{Canvas, FrameInfo},
     limits::MAX_WINDOW_DIMENSION,
-    math::Rect,
+    math::{Point, Rect, Scale, Size},
     platform::{
         dx12::Context,
         gfx::{Context as _, Device, DrawList, SubmitId},
-        AppContextImpl, VSyncRequest, Win32WindowEventInterposer,
+        AppContextImpl, GraphicsInterposer, VSyncRequest,
     },
     time::Instant,
-    Axis, ButtonState, EventHandler, MouseButton, WindowPoint, WindowSize,
+    Axis, ButtonState, EventHandler, LogicalPixel, MouseButton, PhysicalPixel,
 };
 
 use super::Frame;
@@ -52,7 +52,7 @@ impl<W: EventHandler> DxWindow<W> {
     }
 }
 
-impl<W: EventHandler> Win32WindowEventInterposer for DxWindow<W> {
+impl<W: EventHandler> GraphicsInterposer for DxWindow<W> {
     #[inline]
     fn on_close_request(&self) {
         self.inner.borrow_mut().on_close_request();
@@ -69,8 +69,12 @@ impl<W: EventHandler> Win32WindowEventInterposer for DxWindow<W> {
     }
 
     #[inline]
-    fn on_resize(&self, size: WindowSize) {
-        self.inner.borrow_mut().on_resize(size);
+    fn on_resize(
+        &self,
+        size: Size<u16, PhysicalPixel>,
+        scale: Scale<f32, PhysicalPixel, LogicalPixel>,
+    ) {
+        self.inner.borrow_mut().on_resize(size, scale);
     }
 
     #[inline]
@@ -79,14 +83,19 @@ impl<W: EventHandler> Win32WindowEventInterposer for DxWindow<W> {
     }
 
     #[inline]
-    fn on_mouse_button(&self, button: MouseButton, state: ButtonState, location: WindowPoint) {
+    fn on_mouse_button(
+        &self,
+        button: MouseButton,
+        state: ButtonState,
+        location: Point<i16, PhysicalPixel>,
+    ) {
         self.inner
             .borrow_mut()
             .on_mouse_button(button, state, location);
     }
 
     #[inline]
-    fn on_pointer_move(&self, location: WindowPoint) {
+    fn on_pointer_move(&self, location: Point<i16, PhysicalPixel>) {
         self.inner.borrow_mut().on_pointer_move(location);
     }
 
@@ -135,7 +144,7 @@ pub struct DxWindowImpl<W: EventHandler> {
     visual: IDCompositionVisual,
     swapchain_ready: HANDLE,
 
-    size: WindowSize,
+    size: Size<u16, PhysicalPixel>,
 
     draw_list: DrawList,
     frames_in_flight: [Frame; 2],
@@ -150,10 +159,11 @@ pub struct DxWindowImpl<W: EventHandler> {
 
     /// A resize event. Deferred until repaint to consolidate graphics work and
     /// in case multiple resize events are received in a single frame.
-    deferred_resize: Option<(WindowSize, Option<f32>)>,
+    deferred_resize: Option<(Size<u16, PhysicalPixel>, Option<f32>)>,
 }
 
 impl<W: EventHandler> DxWindowImpl<W> {
+    #[tracing::instrument(skip(app, user_handler))]
     fn new(app: AppContextImpl, user_handler: W, hwnd: HWND) -> Self {
         let (graphics, swapchain, target, visual) = {
             let device = &app.inner.read(); // needs to be here to drop the lock before creating `Self`.
@@ -236,7 +246,7 @@ impl<W: EventHandler> DxWindowImpl<W> {
             target,
             visual,
             swapchain_ready: latency_event,
-            size: WindowSize::default(),
+            size: Size::default(),
             graphics,
             draw_list,
             frames_in_flight,
@@ -250,46 +260,65 @@ impl<W: EventHandler> DxWindowImpl<W> {
         }
     }
 
+    #[tracing::instrument(skip(self))]
     fn on_close_request(&mut self) {
         self.user_handler.on_close_request();
     }
 
+    #[tracing::instrument(skip(self))]
     fn on_visible(&mut self, visible: bool) {
         self.is_visible = visible;
         self.user_handler.on_visible(visible);
     }
 
+    #[tracing::instrument(skip(self))]
     fn on_begin_resize(&mut self) {
         self.is_drag_resizing = true;
         self.user_handler.on_begin_resize();
     }
 
-    fn on_resize(&mut self, size: WindowSize) {
+    #[tracing::instrument(skip(self))]
+    fn on_resize(
+        &mut self,
+        size: Size<u16, PhysicalPixel>,
+        scale: Scale<f32, PhysicalPixel, LogicalPixel>,
+    ) {
         self.deferred_resize = Some((size, None));
-        self.user_handler.on_resize(size);
+        self.user_handler.on_resize(size, scale);
     }
 
+    #[tracing::instrument(skip(self))]
     fn on_end_resize(&mut self) {
         self.is_drag_resizing = false;
         self.user_handler.on_end_resize();
     }
 
-    fn on_mouse_button(&mut self, button: MouseButton, state: ButtonState, location: WindowPoint) {
+    #[tracing::instrument(skip(self))]
+    fn on_mouse_button(
+        &mut self,
+        button: MouseButton,
+        state: ButtonState,
+        location: Point<i16, PhysicalPixel>,
+    ) {
         self.user_handler.on_mouse_button(button, state, location);
     }
 
-    fn on_pointer_move(&mut self, location: WindowPoint) {
+    #[tracing::instrument(skip(self))]
+    fn on_pointer_move(&mut self, location: Point<i16, PhysicalPixel>) {
         self.user_handler.on_pointer_move(location);
     }
 
+    #[tracing::instrument(skip(self))]
     fn on_pointer_leave(&mut self) {
         self.user_handler.on_pointer_leave();
     }
 
+    #[tracing::instrument(skip(self))]
     fn on_scroll(&mut self, axis: Axis, delta: f32) {
         self.user_handler.on_scroll(axis, delta);
     }
 
+    #[tracing::instrument(skip(self))]
     fn on_os_paint(&mut self) {
         unsafe { WaitForSingleObjectEx(self.swapchain_ready, u32::MAX, true) };
 
@@ -306,7 +335,7 @@ impl<W: EventHandler> DxWindowImpl<W> {
         let mut canvas = {
             let rect = {
                 let size = self.size;
-                Rect::new(0.0, 0.0, f32::from(size.width), f32::from(size.height))
+                Rect::new(0, 0, size.width, size.height)
             };
 
             Canvas::new(&mut self.draw_list, rect)
@@ -361,14 +390,17 @@ impl<W: EventHandler> DxWindowImpl<W> {
         tracing_tracy::client::frame_mark();
     }
 
+    #[tracing::instrument(skip(self))]
     fn on_vsync(&mut self, _frame_id: FrameId, rate: Option<FramesPerSecond>) {
         self.target_frame_rate = rate;
     }
 
+    #[tracing::instrument(skip(self))]
     fn on_composition_rate(&mut self, _frame_id: FrameId, rate: FramesPerSecond) {
         self.composition_rate = rate;
     }
 
+    #[tracing::instrument(skip(self))]
     fn on_redraw_request(&mut self, request: RedrawRequest) {
         let send = |r| self.app.vsync_sender.send(r).unwrap();
 

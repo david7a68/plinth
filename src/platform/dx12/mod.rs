@@ -1,7 +1,7 @@
 mod descriptor;
+pub mod dxwindow;
 mod queue;
 mod shaders;
-pub mod window;
 
 use std::{mem::ManuallyDrop, sync::Arc};
 
@@ -140,132 +140,144 @@ impl gfx::Context for Context {
 
         let target = target.into().image;
 
-        let rects_size = std::mem::size_of_val(content.rects.as_slice());
-        let buffer_size = rects_size as u64;
+        {
+            #[cfg(feature = "profile")]
+            let _s = tracing_tracy::client::span!("copy rects to buffer");
 
-        if frame.buffer_size < buffer_size {
-            let _ = frame.buffer.take();
+            let rects_size = std::mem::size_of_val(content.rects.as_slice());
+            let buffer_size = rects_size as u64;
 
-            let buffer = alloc_buffer(&self.device.device, buffer_size);
+            if frame.buffer_size < buffer_size {
+                let _ = frame.buffer.take();
 
-            frame.buffer_ptr = {
-                let mut mapped = std::ptr::null_mut();
-                unsafe { buffer.Map(0, None, Some(&mut mapped)) }.unwrap();
-                mapped.cast()
+                let buffer = alloc_buffer(&self.device.device, buffer_size);
+
+                frame.buffer_ptr = {
+                    let mut mapped = std::ptr::null_mut();
+                    unsafe { buffer.Map(0, None, Some(&mut mapped)) }.unwrap();
+                    mapped.cast()
+                };
+
+                frame.buffer = Some(buffer);
+                frame.buffer_size = buffer_size;
+            }
+
+            unsafe {
+                std::ptr::copy_nonoverlapping(
+                    content.rects.as_ptr().cast(),
+                    frame.buffer_ptr,
+                    rects_size,
+                );
+            }
+        }
+
+        {
+            #[cfg(feature = "profile")]
+            let _s = tracing_tracy::client::span!("record command buffer");
+            let target_rtv = self.rtv_heap.cpu_handle();
+
+            unsafe {
+                self.device
+                    .device
+                    .CreateRenderTargetView(&target, None, target_rtv);
+            }
+
+            let viewport_rect = {
+                assert!(content.commands[0].0 == DrawCommand::Begin);
+                content.areas[0]
             };
 
-            frame.buffer = Some(buffer);
-            frame.buffer_size = buffer_size;
-        }
+            let viewport_scale = [
+                1.0 / f32::from(viewport_rect.right()),
+                1.0 / f32::from(viewport_rect.bottom()),
+            ];
 
-        unsafe {
-            std::ptr::copy_nonoverlapping(
-                content.rects.as_ptr().cast(),
-                frame.buffer_ptr,
-                rects_size,
-            );
-        }
+            let viewport = D3D12_VIEWPORT {
+                TopLeftX: 0.0,
+                TopLeftY: 0.0,
+                Width: viewport_rect.right().into(),
+                Height: viewport_rect.bottom().into(),
+                MinDepth: 0.0,
+                MaxDepth: 1.0,
+            };
 
-        let target_rtv = self.rtv_heap.cpu_handle();
+            let mut rect_idx = 0;
+            let mut area_idx = 0;
+            let mut color_idx = 0;
 
-        unsafe {
-            self.device
-                .device
-                .CreateRenderTargetView(&target, None, target_rtv);
-        }
+            for (command, idx) in &content.commands {
+                match command {
+                    DrawCommand::Begin => unsafe {
+                        frame.command_list_mem.Reset().unwrap();
+                        frame
+                            .command_list
+                            .Reset(&frame.command_list_mem, None)
+                            .unwrap();
 
-        let viewport_rect = {
-            assert!(content.commands[0].0 == DrawCommand::Begin);
-            content.areas[0]
-        };
-
-        let viewport_scale = [1.0 / viewport_rect.right(), 1.0 / viewport_rect.bottom()];
-
-        let viewport = D3D12_VIEWPORT {
-            TopLeftX: 0.0,
-            TopLeftY: 0.0,
-            Width: viewport_rect.right(),
-            Height: viewport_rect.bottom(),
-            MinDepth: 0.0,
-            MaxDepth: 1.0,
-        };
-
-        let mut rect_idx = 0;
-        let mut area_idx = 0;
-        let mut color_idx = 0;
-
-        for (command, idx) in &content.commands {
-            match command {
-                DrawCommand::Begin => unsafe {
-                    frame.command_list_mem.Reset().unwrap();
-                    frame
-                        .command_list
-                        .Reset(&frame.command_list_mem, None)
-                        .unwrap();
-
-                    image_barrier(
-                        &frame.command_list,
-                        &target,
-                        D3D12_RESOURCE_STATE_PRESENT,
-                        D3D12_RESOURCE_STATE_RENDER_TARGET,
-                    );
-
-                    frame
-                        .command_list
-                        .OMSetRenderTargets(1, Some(&target_rtv), false, None);
-
-                    frame.command_list.RSSetViewports(&[viewport]);
-                    // todo: allow Rect<u16> to be a type
-                    frame.command_list.RSSetScissorRects(&[RECT {
-                        left: viewport_rect.left() as i32,
-                        top: viewport_rect.top() as i32,
-                        right: viewport_rect.right() as i32,
-                        bottom: viewport_rect.bottom() as i32,
-                    }]);
-                },
-                DrawCommand::End => unsafe {
-                    image_barrier(
-                        &frame.command_list,
-                        &target,
-                        D3D12_RESOURCE_STATE_RENDER_TARGET,
-                        D3D12_RESOURCE_STATE_PRESENT,
-                    );
-                    frame.command_list.Close().unwrap();
-                },
-                DrawCommand::Clip => {
-                    let scissor = RECT {
-                        left: content.areas[area_idx].left() as i32,
-                        top: content.areas[area_idx].top() as i32,
-                        right: content.areas[area_idx].right() as i32,
-                        bottom: content.areas[area_idx].bottom() as i32,
-                    };
-                    unsafe { frame.command_list.RSSetScissorRects(&[scissor]) };
-                    area_idx += 1;
-                }
-                DrawCommand::Clear => {
-                    unsafe {
-                        frame.command_list.ClearRenderTargetView(
-                            target_rtv,
-                            &content.clears[color_idx].to_array_f32(),
-                            None,
+                        image_barrier(
+                            &frame.command_list,
+                            &target,
+                            D3D12_RESOURCE_STATE_PRESENT,
+                            D3D12_RESOURCE_STATE_RENDER_TARGET,
                         );
+
+                        frame
+                            .command_list
+                            .OMSetRenderTargets(1, Some(&target_rtv), false, None);
+
+                        frame.command_list.RSSetViewports(&[viewport]);
+                        // todo: allow Rect<u16> to be a type
+                        frame.command_list.RSSetScissorRects(&[RECT {
+                            left: viewport_rect.left() as i32,
+                            top: viewport_rect.top() as i32,
+                            right: viewport_rect.right() as i32,
+                            bottom: viewport_rect.bottom() as i32,
+                        }]);
+                    },
+                    DrawCommand::End => unsafe {
+                        image_barrier(
+                            &frame.command_list,
+                            &target,
+                            D3D12_RESOURCE_STATE_RENDER_TARGET,
+                            D3D12_RESOURCE_STATE_PRESENT,
+                        );
+                        frame.command_list.Close().unwrap();
+                    },
+                    DrawCommand::Clip => {
+                        let scissor = RECT {
+                            left: content.areas[area_idx].left() as i32,
+                            top: content.areas[area_idx].top() as i32,
+                            right: content.areas[area_idx].right() as i32,
+                            bottom: content.areas[area_idx].bottom() as i32,
+                        };
+                        unsafe { frame.command_list.RSSetScissorRects(&[scissor]) };
+                        area_idx += 1;
                     }
-                    color_idx += 1;
-                }
-                DrawCommand::DrawRects => {
-                    // todo: suspect an off-by-one error here
-                    let num_rects = *idx - rect_idx;
+                    DrawCommand::Clear => {
+                        unsafe {
+                            frame.command_list.ClearRenderTargetView(
+                                target_rtv,
+                                &content.clears[color_idx].to_array_f32(),
+                                None,
+                            );
+                        }
+                        color_idx += 1;
+                    }
+                    DrawCommand::DrawRects => {
+                        // todo: suspect an off-by-one error here
+                        let num_rects = *idx - rect_idx;
 
-                    self.shaders.rect_shader.bind(
-                        &frame.command_list,
-                        frame.buffer.as_ref().unwrap(),
-                        viewport_scale,
-                        viewport.Height,
-                    );
+                        self.shaders.rect_shader.bind(
+                            &frame.command_list,
+                            frame.buffer.as_ref().unwrap(),
+                            viewport_scale,
+                            viewport.Height,
+                        );
 
-                    unsafe { frame.command_list.DrawInstanced(4, num_rects, 0, rect_idx) };
+                        unsafe { frame.command_list.DrawInstanced(4, num_rects, 0, rect_idx) };
 
-                    rect_idx = *idx;
+                        rect_idx = *idx;
+                    }
                 }
             }
         }
@@ -377,6 +389,7 @@ unsafe extern "system" fn dx12_debug_callback(
     }
 }
 
+#[tracing::instrument(skip(device))]
 pub fn alloc_buffer(device: &ID3D12Device, size: u64) -> ID3D12Resource {
     let heap_desc = D3D12_HEAP_PROPERTIES {
         Type: D3D12_HEAP_TYPE_UPLOAD,

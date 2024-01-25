@@ -1,14 +1,13 @@
-use super::{scale::Scale, translate::Translate, Vec2};
-
-pub struct Point<U> {
-    pub x: f32,
-    pub y: f32,
+pub struct Point<T, U = ()> {
+    pub x: T,
+    pub y: T,
     _unit: std::marker::PhantomData<U>,
 }
 
-impl<U> Point<U> {
+impl<T, U> Point<T, U> {
+    #[inline]
     #[must_use]
-    pub fn new(x: f32, y: f32) -> Self {
+    pub fn new(x: T, y: T) -> Self {
         Self {
             x,
             y,
@@ -16,95 +15,37 @@ impl<U> Point<U> {
         }
     }
 
+    #[inline]
     #[must_use]
-    pub fn retype<U2>(self) -> Point<U2> {
+    pub fn splat(x: T) -> Self
+    where
+        T: Copy,
+    {
+        Self::new(x, x)
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn retype<U2>(self) -> Point<T, U2> {
         Point::new(self.x, self.y)
     }
 }
 
-impl<U, U2> std::ops::Add<Translate<U, U2>> for Point<U> {
-    type Output = Point<U2>;
-
-    fn add(self, rhs: Translate<U, U2>) -> Self::Output {
-        Point::new(self.x + rhs.x, self.y + rhs.y)
-    }
-}
-
-impl<U> std::ops::AddAssign<Translate<U, U>> for Point<U> {
-    fn add_assign(&mut self, rhs: Translate<U, U>) {
-        self.x += rhs.x;
-        self.y += rhs.y;
-    }
-}
-
-impl<U, U2> std::ops::Sub<Translate<U, U2>> for Point<U2> {
-    type Output = Point<U>;
-
-    fn sub(self, rhs: Translate<U, U2>) -> Self::Output {
-        Point::new(self.x - rhs.x, self.y - rhs.y)
-    }
-}
-
-impl<U> std::ops::SubAssign<Translate<U, U>> for Point<U> {
-    fn sub_assign(&mut self, rhs: Translate<U, U>) {
-        self.x -= rhs.x;
-        self.y -= rhs.y;
-    }
-}
-
-impl<U, U2> std::ops::Sub<Point<U2>> for Point<U> {
-    type Output = Translate<U, U2>;
-
-    fn sub(self, rhs: Point<U2>) -> Self::Output {
-        Translate::new(self.x - rhs.x, self.y - rhs.y)
-    }
-}
-
-impl<U, U2> std::ops::Mul<Scale<U, U2>> for Point<U> {
-    type Output = Point<U2>;
-
-    fn mul(self, rhs: Scale<U, U2>) -> Self::Output {
-        Point::new(self.x * rhs.x, self.y * rhs.y)
-    }
-}
-
-impl<U> std::ops::MulAssign<Scale<U, U>> for Point<U> {
-    fn mul_assign(&mut self, rhs: Scale<U, U>) {
-        self.x *= rhs.x;
-        self.y *= rhs.y;
-    }
-}
-
-impl<U, U2> std::ops::Div<Scale<U, U2>> for Point<U2> {
-    type Output = Point<U>;
-
-    fn div(self, rhs: Scale<U, U2>) -> Self::Output {
-        Point::new(self.x / rhs.x, self.y / rhs.y)
-    }
-}
-
-impl<U> std::ops::DivAssign<Scale<U, U>> for Point<U> {
-    fn div_assign(&mut self, rhs: Scale<U, U>) {
-        self.x /= rhs.x;
-        self.y /= rhs.y;
-    }
-}
-
-impl<U> Clone for Point<U> {
+impl<T: Clone, U> Clone for Point<T, U> {
     fn clone(&self) -> Self {
-        *self
+        Self::new(self.x.clone(), self.y.clone())
     }
 }
 
-impl<U> Copy for Point<U> {}
+impl<T: Copy, U> Copy for Point<T, U> {}
 
-impl<U> Default for Point<U> {
+impl<T: Default, U> Default for Point<T, U> {
     fn default() -> Self {
-        Self::new(0.0, 0.0)
+        Self::new(Default::default(), Default::default())
     }
 }
 
-impl<U> std::fmt::Debug for Point<U> {
+impl<T: std::fmt::Debug, U> std::fmt::Debug for Point<T, U> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Point")
             .field("x", &self.x)
@@ -114,84 +55,44 @@ impl<U> std::fmt::Debug for Point<U> {
     }
 }
 
-impl<U> std::fmt::Display for Point<U> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        <Self as std::fmt::Debug>::fmt(self, f)
+impl<T, U> std::ops::Index<usize> for Point<T, U> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        match index {
+            0 => &self.x,
+            1 => &self.y,
+            _ => panic!("Index out of bounds"),
+        }
     }
 }
 
-macro_rules! from_tuple {
-    ($($kind:ty),+) => {
+impl<T, U> std::ops::IndexMut<usize> for Point<T, U> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        match index {
+            0 => &mut self.x,
+            1 => &mut self.y,
+            _ => panic!("Index out of bounds"),
+        }
+    }
+}
+
+macro_rules! impl_from {
+    ($($t:ty),+) => {
         $(
-            impl<U> From<($kind, $kind)> for Point<U> {
-                fn from((x, y): ($kind, $kind)) -> Self {
-                    Self::new(x as f32, y as f32)
+            impl<U> From<$t> for Point<$t, U> {
+                fn from(value: $t) -> Self {
+                    Self::new(value, value)
+                }
+            }
+
+            impl<U> From<($t, $t)> for Point<$t, U> {
+                fn from(value: ($t, $t)) -> Self {
+                    Self::new(value.0, value.1)
                 }
             }
         )+
     };
 }
 
-from_tuple!(u8, u16, u32, i8, i16, i32, f32);
-
-impl<U> From<Vec2<U>> for Point<U> {
-    fn from(vec: Vec2<U>) -> Self {
-        Self::new(vec.x, vec.y)
-    }
-}
-
-impl<U> PartialEq for Point<U> {
-    fn eq(&self, rhs: &Self) -> bool {
-        self.x == rhs.x && self.y == rhs.y
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn new() {
-        let point = Point::<()>::new(1.0, 2.0);
-        assert_eq!(point.x, 1.0);
-        assert_eq!(point.y, 2.0);
-    }
-
-    #[test]
-    fn diff() {
-        let a = Point::<()>::new(1.0, 2.0);
-        let b = Point::<()>::new(3.0, 4.0);
-
-        assert_eq!(b - a, Translate::<(), ()>::new(2.0, 2.0));
-    }
-
-    #[test]
-    fn transforms() {
-        struct A;
-        struct B;
-
-        let point = Point::<A>::new(1.0, 2.0);
-
-        let translate = Translate::<A, B>::new(3.0, 4.0);
-        assert_eq!(point + translate, Point::<B>::new(4.0, 6.0));
-        assert_eq!(point + -translate, Point::<B>::new(-2.0, -2.0));
-        assert_eq!(point + translate - translate, point);
-
-        let scale = Scale::<A, B>::new(5.0, 6.0);
-        assert_eq!(point * scale, Point::<B>::new(5.0, 12.0));
-        assert_eq!(point * scale / scale, point);
-
-        let mut point = point;
-        point += Translate::new(7.0, 8.0);
-        assert_eq!(point, Point::<A>::new(8.0, 10.0));
-
-        point -= Translate::new(7.0, 8.0);
-        assert_eq!(point, Point::<A>::new(1.0, 2.0));
-
-        point *= Scale::new(9.0, 10.0);
-        assert_eq!(point, Point::<A>::new(9.0, 20.0));
-
-        point /= Scale::new(9.0, 10.0);
-        assert_eq!(point, Point::<A>::new(1.0, 2.0));
-    }
-}
+impl_from!(i16, u16, f32);

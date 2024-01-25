@@ -34,8 +34,8 @@ use crate::{
     limits::MAX_TITLE_LENGTH,
     math::{Point, Scale, Size},
     platform::win32::application::AppMessage,
-    window::{Window, WindowPoint, WindowSize},
-    Axis, ButtonState, EventHandler, MouseButton, WindowSpec,
+    window::Window,
+    Axis, ButtonState, EventHandler, LogicalPixel, MouseButton, PhysicalPixel, WindowSpec,
 };
 
 use super::{
@@ -51,16 +51,15 @@ pub(super) const UM_REDRAW_REQUEST: u32 = WM_APP + 1;
 pub(super) const UM_VSYNC: u32 = WM_APP + 2;
 pub(super) const UM_COMPOSITION_RATE: u32 = WM_APP + 3;
 
-pub(super) const WINDOWS_DEFAULT_DPI: u16 = 96;
-
 #[derive(Debug, Default)]
 pub struct SharedWindowState {
-    pub size: WindowSize,
+    pub size: Size<u16, PhysicalPixel>,
+    pub scale: Scale<f32, PhysicalPixel, LogicalPixel>,
 
     pub is_visible: bool,
     pub is_resizing: bool,
 
-    pub pointer_location: Option<WindowPoint>,
+    pub pointer_location: Option<Point<i16, Window>>,
 
     pub composition_rate: FramesPerSecond,
     pub actual_refresh_rate: FramesPerSecond,
@@ -96,18 +95,13 @@ impl WindowImpl {
         }
     }
 
-    pub fn size(&self) -> Size<Window> {
+    pub fn size(&self) -> Size<u16, PhysicalPixel> {
         let size = self.state.read().size;
-        Size::new(f32::from(size.width), f32::from(size.height))
+        Size::new(size.width, size.height)
     }
 
-    pub fn scale(&self) -> Scale<Window, Window> {
-        let dpi = self.state.read().size.dpi;
-
-        Scale::new(
-            f32::from(dpi) / f32::from(WINDOWS_DEFAULT_DPI),
-            f32::from(dpi) / f32::from(WINDOWS_DEFAULT_DPI),
-        )
+    pub fn scale(&self) -> Scale<f32, PhysicalPixel, LogicalPixel> {
+        self.state.read().scale
     }
 
     pub fn set_visible(&mut self, visible: bool) {
@@ -115,9 +109,9 @@ impl WindowImpl {
         unsafe { ShowWindow(self.hwnd, flag) };
     }
 
-    pub fn pointer_location(&self) -> Option<Point<Window>> {
+    pub fn pointer_location(&self) -> Option<Point<i16, PhysicalPixel>> {
         let p = self.state.read().pointer_location?;
-        Some(Point::new(f32::from(p.x), f32::from(p.y)))
+        Some(Point::new(p.x, p.y))
     }
 }
 
@@ -148,14 +142,23 @@ pub(super) fn extract_redraw_request(wparam: WPARAM, lparam: LPARAM) -> RedrawRe
     }
 }
 
-pub trait Win32WindowEventInterposer: 'static {
+pub trait GraphicsInterposer: 'static {
     fn on_close_request(&self);
     fn on_visible(&self, visible: bool);
     fn on_begin_resize(&self);
-    fn on_resize(&self, size: WindowSize);
+    fn on_resize(
+        &self,
+        size: Size<u16, PhysicalPixel>,
+        scale: Scale<f32, PhysicalPixel, LogicalPixel>,
+    );
     fn on_end_resize(&self);
-    fn on_mouse_button(&self, button: MouseButton, state: ButtonState, location: WindowPoint);
-    fn on_pointer_move(&self, location: WindowPoint);
+    fn on_mouse_button(
+        &self,
+        button: MouseButton,
+        state: ButtonState,
+        location: Point<i16, PhysicalPixel>,
+    );
+    fn on_pointer_move(&self, location: Point<i16, PhysicalPixel>);
     fn on_pointer_leave(&self);
     fn on_scroll(&self, axis: Axis, delta: f32);
 
@@ -166,7 +169,7 @@ pub trait Win32WindowEventInterposer: 'static {
 }
 
 struct EventLoop {
-    interposer: Cell<*const dyn Win32WindowEventInterposer>,
+    interposer: Cell<*const dyn GraphicsInterposer>,
     size: Cell<(u16, u16)>,
     pointer_in_window: Cell<bool>,
     is_in_size_move: Cell<bool>,
@@ -180,7 +183,7 @@ pub fn spawn_window_thread<W, I, C, F>(
     interposer_constructor: C,
 ) where
     W: EventHandler,
-    I: Win32WindowEventInterposer,
+    I: GraphicsInterposer,
     F: FnOnce(Window) -> W + Send + 'static,
     C: FnOnce(AppContextImpl, W, HWND) -> I + Send + 'static,
 {
@@ -340,12 +343,12 @@ unsafe extern "system" fn wndproc_trampoline(
     }
 }
 
-#[tracing::instrument(skip(state, hwnd, msg, wparam, lparam))]
 fn wndproc(state: &EventLoop, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    fn mouse_coords(lparam: LPARAM) -> WindowPoint {
+    #[inline]
+    fn mouse_coords(lparam: LPARAM) -> Point<i16, PhysicalPixel> {
         let x = (lparam.0 & 0xffff) as i16;
         let y = ((lparam.0 >> 16) & 0xffff) as i16;
-        WindowPoint { x, y }
+        (x, y).into()
     }
 
     let handler = unsafe { &*state.interposer.get() };
@@ -400,11 +403,8 @@ fn wndproc(state: &EventLoop, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
 
                 state.size.set((width, height));
 
-                handler.on_resize(WindowSize {
-                    width,
-                    height,
-                    dpi: WINDOWS_DEFAULT_DPI,
-                });
+                // todo: handle dpi change -dz
+                handler.on_resize(Size::new(width, height), Scale::new(1.0, 1.0));
             }
 
             LRESULT(0)

@@ -151,7 +151,7 @@ impl SecondsPerFrame {
 
     #[must_use]
     pub fn as_frames_per_second(&self) -> FramesPerSecond {
-        FramesPerSecond(1.0 / self.0 .0)
+        FramesPerSecond(Duration(1.0) / self.0)
     }
 }
 

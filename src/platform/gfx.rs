@@ -36,7 +36,7 @@ pub enum DrawCommand {
 #[repr(align(16))]
 pub struct DrawList {
     pub(super) rects: Vec<RRect>,
-    pub(super) areas: Vec<Rect<()>>,
+    pub(super) areas: Vec<Rect<u16>>,
     pub(super) clears: Vec<Color>,
     pub(super) commands: Vec<(DrawCommand, u32)>,
 
@@ -66,7 +66,7 @@ impl DrawList {
         self.is_ended = false;
     }
 
-    pub fn begin<U>(&mut self, viewport: Rect<U>) {
+    pub fn begin<U>(&mut self, viewport: Rect<u16, U>) {
         assert!(!self.is_ended);
 
         self.areas.push(viewport.retype());
@@ -153,14 +153,14 @@ mod tests {
     fn draw_list() {
         let mut list = DrawList::new();
 
-        list.begin(Rect::<()>::new(0.0, 0.0, 100.0, 100.0));
+        list.begin(Rect::<u16, ()>::new(0, 0, 100, 100));
         list.clear(Color::WHITE);
         list.draw_rect(RoundRect::<()> {
-            rect: Rect::ZERO,
+            rect: Rect::<f32>::ZERO,
             color: Color::BLACK,
         });
         list.draw_rect(RoundRect::<()> {
-            rect: Rect::ZERO,
+            rect: Rect::<f32>::ZERO,
             color: Color::BLACK,
         });
         list.end();

@@ -198,6 +198,7 @@ impl<'a> VsyncThread<'a> {
 
     /// Receives vsync requests, dispatches requests that are due, and waits for
     /// the next vblank of the main monitor.
+    #[tracing::instrument(skip(self))]
     pub fn tick(&mut self) {
         let current_frame = FrameId(self.counter);
         let mut delivery_errors = ArrayVec::<usize, MAX_WINDOWS>::new();
@@ -439,5 +440,5 @@ fn interval_from_rate(rate: FramesPerSecond, composition_rate: FramesPerSecond) 
     #[allow(clippy::cast_sign_loss)]
     let r = (composition_rate.0 / rate.0).floor() as u16;
 
-    r
+    r.max(1) // we can't go faster than the composition rate
 }

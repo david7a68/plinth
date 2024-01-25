@@ -15,7 +15,7 @@ use windows::{
 
 use crate::{
     graphics::GraphicsConfig,
-    platform::dx12::{self, window::DxWindow},
+    platform::dx12::{self, dxwindow::DxWindow},
     window::{WindowError, WindowSpec},
     EventHandler, Window,
 };
@@ -152,6 +152,7 @@ impl AppContextImpl {
         W: EventHandler,
         F: FnMut(Window) -> W + Send + 'static,
     {
+        // todo: select interposer based on active graphics api
         spawn_window_thread(self.clone(), spec, constructor, DxWindow::new);
 
         // todo: error handling -dz

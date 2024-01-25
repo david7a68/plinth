@@ -192,15 +192,6 @@ impl gfx::Context for Context {
                 1.0 / f32::from(viewport_rect.bottom()),
             ];
 
-            let viewport = D3D12_VIEWPORT {
-                TopLeftX: 0.0,
-                TopLeftY: 0.0,
-                Width: viewport_rect.right().into(),
-                Height: viewport_rect.bottom().into(),
-                MinDepth: 0.0,
-                MaxDepth: 1.0,
-            };
-
             let mut rect_idx = 0;
             let mut area_idx = 0;
             let mut color_idx = 0;
@@ -225,8 +216,15 @@ impl gfx::Context for Context {
                             .command_list
                             .OMSetRenderTargets(1, Some(&target_rtv), false, None);
 
-                        frame.command_list.RSSetViewports(&[viewport]);
-                        // todo: allow Rect<u16> to be a type
+                        frame.command_list.RSSetViewports(&[D3D12_VIEWPORT {
+                            TopLeftX: 0.0,
+                            TopLeftY: 0.0,
+                            Width: viewport_rect.right().into(),
+                            Height: viewport_rect.bottom().into(),
+                            MinDepth: 0.0,
+                            MaxDepth: 1.0,
+                        }]);
+
                         frame.command_list.RSSetScissorRects(&[RECT {
                             left: viewport_rect.left() as i32,
                             top: viewport_rect.top() as i32,
@@ -243,16 +241,6 @@ impl gfx::Context for Context {
                         );
                         frame.command_list.Close().unwrap();
                     },
-                    DrawCommand::Clip => {
-                        let scissor = RECT {
-                            left: content.areas[area_idx].left() as i32,
-                            top: content.areas[area_idx].top() as i32,
-                            right: content.areas[area_idx].right() as i32,
-                            bottom: content.areas[area_idx].bottom() as i32,
-                        };
-                        unsafe { frame.command_list.RSSetScissorRects(&[scissor]) };
-                        area_idx += 1;
-                    }
                     DrawCommand::Clear => {
                         unsafe {
                             frame.command_list.ClearRenderTargetView(
@@ -264,14 +252,13 @@ impl gfx::Context for Context {
                         color_idx += 1;
                     }
                     DrawCommand::DrawRects => {
-                        // todo: suspect an off-by-one error here
                         let num_rects = *idx - rect_idx;
 
                         self.shaders.rect_shader.bind(
                             &frame.command_list,
                             frame.buffer.as_ref().unwrap(),
                             viewport_scale,
-                            viewport.Height,
+                            viewport_rect.height.into(),
                         );
 
                         unsafe { frame.command_list.DrawInstanced(4, num_rects, 0, rect_idx) };

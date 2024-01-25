@@ -39,14 +39,14 @@ impl EventHandler for AppWindow {
 
     fn on_mouse_button(
         &mut self,
-        button: plinth::MouseButton,
-        state: plinth::ButtonState,
-        location: Point<i16, PhysicalPixel>,
+        _button: plinth::MouseButton,
+        _state: plinth::ButtonState,
+        _location: Point<i16, PhysicalPixel>,
     ) {
         // no-op
     }
 
-    fn on_pointer_move(&mut self, location: Point<i16, PhysicalPixel>) {
+    fn on_pointer_move(&mut self, _location: Point<i16, PhysicalPixel>) {
         // no-op
     }
 

@@ -2,7 +2,7 @@ use plinth::{
     frame::{FramesPerSecond, RedrawRequest},
     graphics::{Canvas, Color, FrameInfo, GraphicsConfig, RoundRect},
     math::{Point, Rect},
-    Application, EventHandler, PhysicalPixel, Window, WindowSpec,
+    Application, Axis, EventHandler, PhysicalPixel, Window, WindowSpec,
 };
 
 #[cfg(feature = "profile")]
@@ -34,18 +34,19 @@ impl EventHandler for DemoWindow {
 
     fn on_mouse_button(
         &mut self,
-        button: plinth::MouseButton,
-        state: plinth::ButtonState,
-        location: Point<i16, PhysicalPixel>,
+        _button: plinth::MouseButton,
+        _state: plinth::ButtonState,
+        _location: Point<i16, PhysicalPixel>,
     ) {
         // no-op
     }
 
-    fn on_pointer_move(&mut self, location: Point<i16, PhysicalPixel>) {
+    fn on_pointer_move(&mut self, _location: Point<i16, PhysicalPixel>) {
         // no-op
     }
 
-    fn on_scroll(&mut self, axis: plinth::Axis, delta: f32) {
+    fn on_scroll(&mut self, _axis: Axis, delta: f32) {
+        let _ = delta;
         // no-op
     }
 }

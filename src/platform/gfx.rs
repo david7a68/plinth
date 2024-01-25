@@ -28,7 +28,6 @@ impl<U> From<RoundRect<U>> for RRect {
 pub enum DrawCommand {
     Begin,
     End,
-    Clip,
     Clear,
     DrawRects,
 }
@@ -153,7 +152,7 @@ mod tests {
     fn draw_list() {
         let mut list = DrawList::new();
 
-        list.begin(Rect::<u16, ()>::new(0, 0, 100, 100));
+        list.begin(Rect::<u16>::new(0, 0, 100, 100));
         list.clear(Color::WHITE);
         list.draw_rect(RoundRect::<()> {
             rect: Rect::<f32>::ZERO,
@@ -165,15 +164,14 @@ mod tests {
         });
         list.end();
 
-        assert_eq!(list.commands.len(), 5);
+        assert_eq!(list.commands.len(), 4);
         assert_eq!(list.rects.len(), 2);
         assert_eq!(list.areas.len(), 1);
         assert_eq!(list.clears.len(), 1);
 
         assert_eq!(list.commands[0], (DrawCommand::Begin, 0));
-        assert_eq!(list.commands[1], (DrawCommand::Clip, 0));
-        assert_eq!(list.commands[2], (DrawCommand::Clear, 0));
-        assert_eq!(list.commands[3], (DrawCommand::DrawRects, 2));
-        assert_eq!(list.commands[4], (DrawCommand::End, 0));
+        assert_eq!(list.commands[1], (DrawCommand::Clear, 0));
+        assert_eq!(list.commands[2], (DrawCommand::DrawRects, 2));
+        assert_eq!(list.commands[3], (DrawCommand::End, 0));
     }
 }

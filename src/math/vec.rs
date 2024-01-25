@@ -195,7 +195,7 @@ mod tests {
         let a = Vec2::<u16>::new(2, 6);
 
         // implicit conversion
-        assert_eq!(a * 2, (2, 12).into());
+        assert_eq!(a * 2, (4, 12).into());
         assert_eq!(a / 2, (1, 3).into());
         assert_eq!(a % 3, (2, 0).into());
 
@@ -219,7 +219,7 @@ mod tests {
         let a = Vec2::<i16>::new(2, 6);
 
         // implicit conversion
-        assert_eq!(a * 2, (2, 12).into());
+        assert_eq!(a * 2, (4, 12).into());
         assert_eq!(a / 2, (1, 3).into());
         assert_eq!(a % 3, (2, 0).into());
 

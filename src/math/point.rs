@@ -7,6 +7,7 @@ pub struct Point<U> {
 }
 
 impl<U> Point<U> {
+    #[must_use]
     pub fn new(x: f32, y: f32) -> Self {
         Self {
             x,
@@ -15,6 +16,7 @@ impl<U> Point<U> {
         }
     }
 
+    #[must_use]
     pub fn retype<U2>(self) -> Point<U2> {
         Point::new(self.x, self.y)
     }

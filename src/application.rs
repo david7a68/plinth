@@ -1,6 +1,6 @@
 use crate::{
     window::{WindowError, WindowSpec},
-    Window, WindowEventHandler,
+    EventHandler, Window,
 };
 
 use crate::graphics::GraphicsConfig;
@@ -12,6 +12,7 @@ pub struct Application {
 }
 
 impl Application {
+    #[must_use]
     pub fn new(graphics: &GraphicsConfig) -> Self {
         Self {
             inner: platform::ApplicationImpl::new(graphics),
@@ -24,7 +25,7 @@ impl Application {
         constructor: F,
     ) -> Result<(), WindowError>
     where
-        W: WindowEventHandler,
+        W: EventHandler,
         F: FnMut(Window) -> W + Send + 'static,
     {
         self.inner.spawn_window(spec, constructor)
@@ -57,7 +58,7 @@ impl AppContext {
         constructor: F,
     ) -> Result<(), WindowError>
     where
-        W: WindowEventHandler,
+        W: EventHandler,
         F: FnMut(Window) -> W + Send + 'static,
     {
         self.inner.spawn_window(spec, constructor)

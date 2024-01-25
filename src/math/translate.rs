@@ -9,6 +9,7 @@ pub struct Translate<Src, Dst> {
 }
 
 impl<Src, Dst> Translate<Src, Dst> {
+    #[must_use]
     pub fn new(x: f32, y: f32) -> Self {
         Self {
             x,
@@ -107,8 +108,8 @@ impl<Src, Dst> std::ops::Mul<Duration> for Translate<Src, Dst> {
 
     fn mul(self, rhs: Duration) -> Self::Output {
         Self::new(
-            (self.x as f64 * rhs.0) as f32,
-            (self.y as f64 * rhs.0) as f32,
+            (f64::from(self.x) * rhs.0) as f32,
+            (f64::from(self.y) * rhs.0) as f32,
         )
     }
 }
@@ -116,8 +117,8 @@ impl<Src, Dst> std::ops::Mul<Duration> for Translate<Src, Dst> {
 impl<Src, Dst> std::ops::MulAssign<Duration> for Translate<Src, Dst> {
     fn mul_assign(&mut self, rhs: Duration) {
         let seconds = rhs.0;
-        self.x = (self.x as f64 * seconds) as f32;
-        self.y = (self.y as f64 * seconds) as f32;
+        self.x = (f64::from(self.x) * seconds) as f32;
+        self.y = (f64::from(self.y) * seconds) as f32;
     }
 }
 
@@ -126,8 +127,8 @@ impl<Src, Dst> std::ops::Div<Duration> for Translate<Src, Dst> {
 
     fn div(self, rhs: Duration) -> Self::Output {
         Self::new(
-            (self.x as f64 / rhs.0) as f32,
-            (self.y as f64 / rhs.0) as f32,
+            (f64::from(self.x) / rhs.0) as f32,
+            (f64::from(self.y) / rhs.0) as f32,
         )
     }
 }
@@ -135,8 +136,8 @@ impl<Src, Dst> std::ops::Div<Duration> for Translate<Src, Dst> {
 impl<Src, Dst> std::ops::DivAssign<Duration> for Translate<Src, Dst> {
     fn div_assign(&mut self, rhs: Duration) {
         let seconds = rhs.0;
-        self.x = (self.x as f64 / seconds) as f32;
-        self.y = (self.y as f64 / seconds) as f32;
+        self.x = (f64::from(self.x) / seconds) as f32;
+        self.y = (f64::from(self.y) / seconds) as f32;
     }
 }
 

@@ -1,3 +1,5 @@
+#![allow(clippy::cast_possible_truncation, clippy::module_name_repetitions)]
+
 pub mod frame;
 pub mod graphics;
 pub mod limits;

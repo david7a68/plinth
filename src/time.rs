@@ -9,22 +9,27 @@ pub struct Instant(pub f64);
 impl Instant {
     pub const ZERO: Self = Self(0.0);
 
+    #[must_use]
     pub fn now() -> Self {
         Self(crate::platform::present_time_now())
     }
 
+    #[must_use]
     pub fn elapsed(&self) -> Duration {
         Duration(crate::platform::present_time_now() - self.0)
     }
 
-    pub fn from_ticks(ticks: u64) -> Self {
+    #[must_use]
+    pub fn from_ticks(ticks: i64) -> Self {
         Self(crate::platform::present_time_from_ticks(ticks))
     }
 
+    #[must_use]
     pub fn max(&self, rhs: &Self) -> Self {
         Self(self.0.max(rhs.0))
     }
 
+    #[must_use]
     pub fn saturating_sub(&self, rhs: &Self) -> Duration {
         Duration((self.0 - rhs.0).max(0.0))
     }

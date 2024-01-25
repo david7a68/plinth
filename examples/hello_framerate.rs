@@ -2,7 +2,7 @@ use plinth::{
     frame::{FramesPerSecond, RedrawRequest, SecondsPerFrame},
     graphics::{Canvas, Color, FrameInfo, GraphicsConfig},
     time::Instant,
-    Application, Axis, Input, Window, WindowEvent, WindowEventHandler, WindowSpec,
+    Application, Axis, EventHandler, Input, Window, WindowEvent, WindowSpec,
 };
 
 #[cfg(feature = "profile")]
@@ -31,7 +31,7 @@ impl AppWindow {
     }
 }
 
-impl WindowEventHandler for AppWindow {
+impl EventHandler for AppWindow {
     fn on_event(&mut self, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequest => {

@@ -2,7 +2,7 @@ use plinth::{
     frame::{FramesPerSecond, RedrawRequest},
     graphics::{Canvas, Color, FrameInfo, GraphicsConfig, RoundRect},
     math::Rect,
-    Application, Window, WindowEvent, WindowEventHandler, WindowSpec,
+    Application, EventHandler, Window, WindowEvent, WindowSpec,
 };
 
 #[cfg(feature = "profile")]
@@ -19,7 +19,7 @@ impl DemoWindow {
     }
 }
 
-impl WindowEventHandler for DemoWindow {
+impl EventHandler for DemoWindow {
     fn on_event(&mut self, event: plinth::WindowEvent) {
         match event {
             WindowEvent::CloseRequest => self.window.close(),
@@ -60,10 +60,8 @@ fn main() {
     });
 
     let spec = WindowSpec::default();
-    app.spawn_window(spec.clone(), |window| Box::new(DemoWindow::new(window)))
-        .unwrap();
-    app.spawn_window(spec.clone(), |window| Box::new(DemoWindow::new(window)))
-        .unwrap();
+    app.spawn_window(spec.clone(), DemoWindow::new).unwrap();
+    app.spawn_window(spec.clone(), DemoWindow::new).unwrap();
     // app.spawn_window(spec, |window| Box::new(DemoWindow::new(window)))
     //     .unwrap();
     app.run();

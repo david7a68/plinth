@@ -7,6 +7,7 @@ pub struct Size<U> {
 }
 
 impl<U> Size<U> {
+    #[must_use]
     pub const fn new(width: f32, height: f32) -> Self {
         Self {
             width,

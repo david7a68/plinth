@@ -6,13 +6,10 @@ use std::sync::{
 use parking_lot::RwLock;
 use windows::{
     core::ComInterface,
-    Win32::{
-        Foundation::HWND,
-        Graphics::{
-            Direct3D12::{D3D12GetDebugInterface, ID3D12Debug1, ID3D12Debug5},
-            DirectComposition::{DCompositionCreateDevice2, IDCompositionDevice},
-            Dxgi::{CreateDXGIFactory2, IDXGIFactory2, DXGI_CREATE_FACTORY_DEBUG},
-        },
+    Win32::Graphics::{
+        Direct3D12::{D3D12GetDebugInterface, ID3D12Debug1, ID3D12Debug5},
+        DirectComposition::{DCompositionCreateDevice2, IDCompositionDevice},
+        Dxgi::{CreateDXGIFactory2, IDXGIFactory2, DXGI_CREATE_FACTORY_DEBUG},
     },
 };
 
@@ -20,7 +17,7 @@ use crate::{
     graphics::GraphicsConfig,
     platform::dx12::{self, window::DxWindow},
     window::{WindowError, WindowSpec},
-    Window, WindowEventHandler,
+    EventHandler, Window,
 };
 
 use super::{
@@ -61,7 +58,7 @@ impl ApplicationImpl {
         constructor: F,
     ) -> Result<(), WindowError>
     where
-        W: WindowEventHandler,
+        W: EventHandler,
         F: FnMut(Window) -> W + Send + 'static,
     {
         self.context.spawn_window(spec, constructor)
@@ -152,10 +149,12 @@ impl AppContextImpl {
         constructor: F,
     ) -> Result<(), WindowError>
     where
-        W: WindowEventHandler,
+        W: EventHandler,
         F: FnMut(Window) -> W + Send + 'static,
     {
         spawn_window_thread(self.clone(), spec, constructor, DxWindow::new);
+
+        // todo: error handling -dz
         Ok(())
     }
 }

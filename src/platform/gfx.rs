@@ -1,5 +1,6 @@
 use crate::{
     graphics::{Color, RoundRect},
+    limits::enforce_draw_list_max_items_u32,
     math::Rect,
 };
 
@@ -86,8 +87,10 @@ impl DrawList {
 
         self.flush_command(DrawCommand::DrawRects);
 
-        self.commands
-            .push((DrawCommand::Clear, self.clears.len() as u32));
+        self.commands.push((
+            DrawCommand::Clear,
+            enforce_draw_list_max_items_u32(self.clears.len()),
+        ));
         self.clears.push(color);
     }
 
@@ -100,8 +103,8 @@ impl DrawList {
     }
 
     fn flush_command(&mut self, command: DrawCommand) {
-        if command != DrawCommand::DrawRects && self.n_rects < self.rects.len() as u32 {
-            let end = self.rects.len() as u32;
+        if command != DrawCommand::DrawRects && self.rects.len() > self.n_rects as usize {
+            let end = enforce_draw_list_max_items_u32(self.rects.len());
             self.commands.push((DrawCommand::DrawRects, end));
             self.n_rects = end;
         }

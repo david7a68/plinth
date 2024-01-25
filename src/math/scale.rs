@@ -7,6 +7,7 @@ pub struct Scale<Src, Dst> {
 }
 
 impl<Src, Dst> Scale<Src, Dst> {
+    #[must_use]
     pub fn new(x: f32, y: f32) -> Self {
         Self {
             x,
@@ -15,6 +16,7 @@ impl<Src, Dst> Scale<Src, Dst> {
         }
     }
 
+    #[must_use]
     pub fn inverse(self) -> Scale<Dst, Src> {
         Scale::new(1.0 / self.x, 1.0 / self.y)
     }

@@ -7,6 +7,7 @@ pub struct Vec2<U> {
 }
 
 impl<U> Vec2<U> {
+    #[must_use]
     pub fn new(x: f32, y: f32) -> Self {
         Self {
             x,
@@ -15,6 +16,7 @@ impl<U> Vec2<U> {
         }
     }
 
+    #[must_use]
     pub fn retype<U2>(self) -> Vec2<U2> {
         Vec2::new(self.x, self.y)
     }

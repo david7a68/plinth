@@ -176,25 +176,16 @@ impl gfx::Context for Context {
 
         let viewport_rect = {
             assert!(content.commands[0].0 == DrawCommand::Begin);
-            let rect = content.areas[0];
-            RECT {
-                left: rect.left() as i32,
-                top: rect.top() as i32,
-                right: rect.right() as i32,
-                bottom: rect.bottom() as i32,
-            }
+            content.areas[0]
         };
 
-        let viewport_scale = [
-            1.0 / viewport_rect.right as f32,
-            1.0 / viewport_rect.bottom as f32,
-        ];
+        let viewport_scale = [1.0 / viewport_rect.right(), 1.0 / viewport_rect.bottom()];
 
         let viewport = D3D12_VIEWPORT {
             TopLeftX: 0.0,
             TopLeftY: 0.0,
-            Width: viewport_rect.right as f32,
-            Height: viewport_rect.bottom as f32,
+            Width: viewport_rect.right(),
+            Height: viewport_rect.bottom(),
             MinDepth: 0.0,
             MaxDepth: 1.0,
         };
@@ -224,7 +215,13 @@ impl gfx::Context for Context {
                         .OMSetRenderTargets(1, Some(&target_rtv), false, None);
 
                     frame.command_list.RSSetViewports(&[viewport]);
-                    frame.command_list.RSSetScissorRects(&[viewport_rect]);
+                    // todo: allow Rect<u16> to be a type
+                    frame.command_list.RSSetScissorRects(&[RECT {
+                        left: viewport_rect.left() as i32,
+                        top: viewport_rect.top() as i32,
+                        right: viewport_rect.right() as i32,
+                        bottom: viewport_rect.bottom() as i32,
+                    }]);
                 },
                 DrawCommand::End => unsafe {
                     image_barrier(
@@ -331,7 +328,7 @@ impl Device {
     }
 
     pub fn queue(&self) -> &ID3D12CommandQueue {
-        &self.queue.queue
+        &self.queue.handle
     }
 }
 

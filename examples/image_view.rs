@@ -2,7 +2,7 @@ use plinth::{
     graphics::{Canvas, FrameInfo, GraphicsConfig},
     input::Axis,
     time::FramesPerSecond,
-    Application, Window, WindowEventHandler, WindowSpec,
+    Application, EventHandler, Window, WindowSpec,
 };
 
 // const SCROLL_SCALE: f64 = 1.1;
@@ -17,7 +17,7 @@ impl DemoWindow {
     }
 }
 
-impl WindowEventHandler for DemoWindow {
+impl EventHandler for DemoWindow {
     fn on_close_request(&mut self) {
         self.window.close();
     }

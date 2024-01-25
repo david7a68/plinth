@@ -11,6 +11,7 @@ pub struct Rect<U> {
 impl<U> Rect<U> {
     pub const ZERO: Self = Self::new(0.0, 0.0, 0.0, 0.0);
 
+    #[must_use]
     pub const fn new(x: f32, y: f32, width: f32, height: f32) -> Self {
         Self {
             x,
@@ -21,6 +22,7 @@ impl<U> Rect<U> {
         }
     }
 
+    #[must_use]
     pub fn from_points(top_left: Point<U>, bottom_right: Point<U>) -> Self {
         Self::new(
             top_left.x,
@@ -30,14 +32,17 @@ impl<U> Rect<U> {
         )
     }
 
+    #[must_use]
     pub fn from_zero(size: Size<U>) -> Self {
         Self::new(0.0, 0.0, size.width, size.height)
     }
 
+    #[must_use]
     pub fn from_origin(point: Point<U>, size: Size<U>) -> Self {
         Self::new(point.x, point.y, size.width, size.height)
     }
 
+    #[must_use]
     pub fn from_center(center: Point<U>, size: Size<U>) -> Self {
         Self::new(
             center.x - size.width / 2.0,
@@ -50,6 +55,7 @@ impl<U> Rect<U> {
     /// Reinterprets the `Rect` as its own coordinate space.
     ///
     /// Also returns the translation back to the original coordinate space.
+    #[must_use]
     pub fn reinterpret_coordinate_space<U2>(&self) -> (Rect<U2>, Translate<U2, U>) {
         (
             Rect::new(0.0, 0.0, self.width, self.height),
@@ -57,14 +63,17 @@ impl<U> Rect<U> {
         )
     }
 
+    #[must_use]
     pub fn retype<U2>(&self) -> Rect<U2> {
         Rect::new(self.x, self.y, self.width, self.height)
     }
 
+    #[must_use]
     pub fn center(&self) -> Point<U> {
         Point::new(self.x + self.width / 2.0, self.y + self.height / 2.0)
     }
 
+    #[must_use]
     pub fn intersection(&self, other: &Self) -> Option<Self> {
         let left = self.left().max(other.left());
         let right = self.right().min(other.right());
@@ -78,43 +87,53 @@ impl<U> Rect<U> {
         }
     }
 
+    #[must_use]
     pub fn top(&self) -> f32 {
         self.y
     }
 
+    #[must_use]
     pub fn bottom(&self) -> f32 {
         self.y + self.height
     }
 
+    #[must_use]
     pub fn left(&self) -> f32 {
         self.x
     }
 
+    #[must_use]
     pub fn right(&self) -> f32 {
         self.x + self.width
     }
 
+    #[must_use]
     pub fn top_left(&self) -> Point<U> {
         Point::new(self.x, self.y)
     }
 
+    #[must_use]
     pub fn top_right(&self) -> Point<U> {
         Point::new(self.x + self.width, self.y)
     }
 
+    #[must_use]
     pub fn bottom_left(&self) -> Point<U> {
         Point::new(self.x, self.y + self.height)
     }
 
+    #[must_use]
     pub fn bottom_right(&self) -> Point<U> {
         Point::new(self.x + self.width, self.y + self.height)
     }
 
     #[inline]
+    #[must_use]
     pub fn to_xywh(&self) -> [f32; 4] {
         [self.x, self.y, self.width, self.height]
     }
 
+    #[must_use]
     pub fn size(&self) -> Size<U> {
         Size::new(self.width, self.height)
     }

@@ -39,23 +39,6 @@ pub enum WindowError {
     TooManyWindows,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum Input {
-    MouseButton(MouseButton, ButtonState, WindowPoint),
-    PointerMove(WindowPoint),
-    PointerLeave,
-    Scroll(Axis, f32),
-}
-
-#[derive(Clone, Copy, Debug)]
-pub enum WindowEvent {
-    CloseRequest,
-    Visible(bool),
-    BeginResize,
-    Resize(WindowSize),
-    EndResize,
-}
-
 #[derive(Clone, Copy, Debug, Default)]
 pub struct WindowSize {
     pub width: u16,
@@ -69,12 +52,12 @@ pub struct WindowPoint {
     pub y: i16,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct WindowSpec {
     pub title: String,
-    pub size: Size<Window>,
-    pub min_size: Option<Size<Window>>,
-    pub max_size: Option<Size<Window>>,
+    pub size: WindowSize,
+    pub min_size: Option<WindowSize>,
+    pub max_size: Option<WindowSize>,
     pub resizable: bool,
     pub visible: bool,
 }
@@ -83,7 +66,11 @@ impl Default for WindowSpec {
     fn default() -> Self {
         Self {
             title: String::new(),
-            size: Size::new(800.0, 600.0),
+            size: WindowSize {
+                width: 800,
+                height: 600,
+                dpi: 96,
+            },
             min_size: None,
             max_size: None,
             resizable: true,
@@ -101,6 +88,7 @@ impl Window {
         Self { inner }
     }
 
+    #[must_use]
     pub fn app(&self) -> &AppContext {
         self.inner.app()
     }
@@ -114,19 +102,23 @@ impl Window {
         self.inner.request_redraw(request);
     }
 
+    #[must_use]
     pub fn refresh_rate(&self) -> RefreshRate {
         self.inner.refresh_rate()
     }
 
+    #[must_use]
     pub fn size(&self) -> Size<Window> {
         self.inner.size()
     }
 
-    /// The HiDPI scale factor.
+    /// The `HiDPI` scale factor.
+    #[must_use]
     pub fn scale(&self) -> Scale<Window, Window> {
         self.inner.scale()
     }
 
+    #[must_use]
     pub fn pointer_location(&self) -> Option<Point<Window>> {
         self.inner.pointer_location()
     }
@@ -136,24 +128,24 @@ impl Window {
     }
 }
 
-pub trait WindowEventHandler: Send + 'static {
-    fn on_event(&mut self, event: WindowEvent);
+pub trait EventHandler: Send + 'static {
+    fn on_close_request(&mut self);
 
-    fn on_input(&mut self, input: Input);
+    fn on_visible(&mut self, visible: bool);
+
+    fn on_begin_resize(&mut self);
+
+    fn on_resize(&mut self, size: WindowSize);
+
+    fn on_end_resize(&mut self);
+
+    fn on_mouse_button(&mut self, button: MouseButton, state: ButtonState, location: WindowPoint);
+
+    fn on_pointer_move(&mut self, location: WindowPoint);
+
+    fn on_pointer_leave(&mut self);
+
+    fn on_scroll(&mut self, axis: Axis, delta: f32);
 
     fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameInfo);
-}
-
-impl<W: WindowEventHandler> WindowEventHandler for Box<W> {
-    fn on_event(&mut self, event: WindowEvent) {
-        self.as_mut().on_event(event);
-    }
-
-    fn on_input(&mut self, input: Input) {
-        self.as_mut().on_input(input);
-    }
-
-    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameInfo) {
-        self.as_mut().on_repaint(canvas, timing);
-    }
 }

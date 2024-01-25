@@ -1,6 +1,6 @@
 use plinth::{
     graphics::{Canvas, Color, FrameInfo, GraphicsConfig},
-    Application, Input, Window, WindowEvent, WindowEventHandler, WindowSpec,
+    Application, EventHandler, Input, Window, WindowEvent, WindowSpec,
 };
 
 pub struct AppWindow {
@@ -13,7 +13,7 @@ impl AppWindow {
     }
 }
 
-impl WindowEventHandler for AppWindow {
+impl EventHandler for AppWindow {
     fn on_event(&mut self, event: plinth::WindowEvent) {
         match event {
             WindowEvent::CloseRequest => {

@@ -16,7 +16,7 @@ use crate::platform::gfx::SubmitId;
 ///
 /// Based on the implementation described here: <https://alextardif.com/D3D11To12P1.html>
 pub struct Queue {
-    pub queue: ID3D12CommandQueue,
+    pub handle: ID3D12CommandQueue,
     fence: ID3D12Fence,
     fence_event: Mutex<HANDLE>,
     num_submitted: AtomicU64,
@@ -41,7 +41,7 @@ impl Queue {
         unsafe { fence.Signal(0) }.unwrap();
 
         Self {
-            queue,
+            handle: queue,
             fence,
             fence_event: Mutex::new(fence_event),
             num_submitted: AtomicU64::new(0),
@@ -95,7 +95,7 @@ impl Queue {
         let id = {
             // todo: relax ordering if possible
             let signal = self.num_submitted.fetch_add(1, Ordering::SeqCst);
-            unsafe { self.queue.Signal(&self.fence, signal) }.unwrap();
+            unsafe { self.handle.Signal(&self.fence, signal) }.unwrap();
             SubmitId(signal)
         };
 
@@ -115,8 +115,8 @@ impl Queue {
         // todo: relax ordering if possible
         let signal = self.num_submitted.fetch_add(1, Ordering::SeqCst);
 
-        unsafe { self.queue.ExecuteCommandLists(&[Some(commands.clone())]) };
-        unsafe { self.queue.Signal(&self.fence, signal) }.unwrap();
+        unsafe { self.handle.ExecuteCommandLists(&[Some(commands.clone())]) };
+        unsafe { self.handle.Signal(&self.fence, signal) }.unwrap();
 
         SubmitId(signal)
     }

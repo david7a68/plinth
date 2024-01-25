@@ -8,6 +8,7 @@ pub struct Canvas<'a, U> {
 }
 
 impl<'a, U> Canvas<'a, U> {
+    #[must_use]
     pub(crate) fn new(data: &'a mut DrawList, bounds: Rect<U>) -> Self {
         data.reset();
         data.begin(bounds);
@@ -15,11 +16,13 @@ impl<'a, U> Canvas<'a, U> {
         Self { bounds, data }
     }
 
+    #[must_use]
     pub(crate) fn finish(self) -> &'a mut DrawList {
         self.data.end();
         self.data
     }
 
+    #[must_use]
     pub fn rect(&self) -> &Rect<U> {
         &self.bounds
     }

@@ -83,7 +83,7 @@ fn encode_reply_vsync(frame: FrameId, rate: Option<FramesPerSecond>) -> (WPARAM,
 
 pub fn decode_reply_vsync(wparam: WPARAM, lparam: LPARAM) -> (FrameId, Option<FramesPerSecond>) {
     let frame = FrameId(unsafe { std::mem::transmute(wparam.0) });
-    let rate: f64 = unsafe { std::mem::transmute(lparam.0) };
+    let rate: f64 = f64::from_bits(unsafe { std::mem::transmute(lparam.0) });
 
     if rate == 0.0 {
         (frame, None)
@@ -103,7 +103,7 @@ fn encode_reply_device_update(
 
 pub fn decode_reply_device_update(wparam: WPARAM, lparam: LPARAM) -> (FrameId, FramesPerSecond) {
     let frame = FrameId(unsafe { std::mem::transmute(wparam.0) });
-    let rate = FramesPerSecond(unsafe { std::mem::transmute(lparam.0) });
+    let rate = FramesPerSecond(f64::from_bits(unsafe { std::mem::transmute(lparam.0) }));
     (frame, rate)
 }
 
@@ -229,11 +229,8 @@ impl<'a> VsyncThread<'a> {
         while let Ok(request) = self.request_receiver.try_recv() {
             match request {
                 VSyncRequest::Idle(hwnd) => {
-                    match self.clients.binary_search_by_key(&hwnd.0, |c| c.hwnd.0) {
-                        Ok(index) => {
-                            self.clients.remove(index);
-                        }
-                        Err(_) => {} // no-op since the client is already idle
+                    if let Ok(index) = self.clients.binary_search_by_key(&hwnd.0, |c| c.hwnd.0) {
+                        self.clients.remove(index);
                     }
                 }
                 VSyncRequest::AtFrame(hwnd, frame) => {
@@ -273,15 +270,18 @@ impl<'a> VsyncThread<'a> {
                     *next += {
                         // skip frames if we're behind
                         let diff = current_frame.0.saturating_sub(next.0);
-                        let catch_up = (diff as f64 / *interval as f64).ceil() as u64;
-                        *interval as u64 * catch_up
+
+                        // 402 thousand years at 360 fps
+                        #[allow(clippy::cast_sign_loss, clippy::cast_precision_loss)]
+                        let catch_up = (diff as f64 / f64::from(*interval)).ceil() as u64;
+                        u64::from(*interval) * catch_up
                     };
 
                     // branchless version of `if is_due { *next += *interval as u64 }`
-                    *next += *interval as u64 * is_due as u64;
+                    *next += u64::from(*interval) * u64::from(is_due);
 
                     debug_assert!(next.0 >= current_frame.0);
-                    (is_due, Some(self.composition_rate / *interval as f64))
+                    (is_due, Some(self.composition_rate / f64::from(*interval)))
                 }
             };
 
@@ -426,7 +426,7 @@ fn get_output_refresh_rate_from_path(
             let numerator = path.targetInfo.refreshRate.Numerator;
             let denominator = path.targetInfo.refreshRate.Denominator;
 
-            return numerator as f64 / denominator as f64;
+            return f64::from(numerator) / f64::from(denominator);
         }
     }
 
@@ -434,5 +434,10 @@ fn get_output_refresh_rate_from_path(
 }
 
 fn interval_from_rate(rate: FramesPerSecond, composition_rate: FramesPerSecond) -> u16 {
-    (composition_rate.0 / rate.0).floor() as u16
+    debug_assert!(rate.0 > 0.0 && composition_rate.0 > 0.0);
+
+    #[allow(clippy::cast_sign_loss)]
+    let r = (composition_rate.0 / rate.0).floor() as u16;
+
+    r
 }

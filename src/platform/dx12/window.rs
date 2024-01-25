@@ -26,6 +26,7 @@ use windows::{
 use crate::{
     frame::{FrameId, FramesPerSecond, RedrawRequest},
     graphics::{Canvas, FrameInfo},
+    limits::MAX_WINDOW_DIMENSION,
     math::Rect,
     platform::{
         dx12::Context,
@@ -33,16 +34,16 @@ use crate::{
         AppContextImpl, VSyncRequest, Win32WindowEventInterposer,
     },
     time::Instant,
-    Input, WindowEvent, WindowEventHandler, WindowSize,
+    Axis, ButtonState, EventHandler, MouseButton, WindowPoint, WindowSize,
 };
 
 use super::Frame;
 
-pub struct DxWindow<W: WindowEventHandler> {
+pub struct DxWindow<W: EventHandler> {
     inner: RefCell<DxWindowImpl<W>>,
 }
 
-impl<W: WindowEventHandler> DxWindow<W> {
+impl<W: EventHandler> DxWindow<W> {
     pub fn new(context: AppContextImpl, user_handler: W, hwnd: HWND) -> Self {
         let inner = DxWindowImpl::new(context, user_handler, hwnd);
         Self {
@@ -51,33 +52,76 @@ impl<W: WindowEventHandler> DxWindow<W> {
     }
 }
 
-impl<W: WindowEventHandler> Win32WindowEventInterposer for DxWindow<W> {
-    fn on_event(&self, event: WindowEvent) {
-        self.inner.borrow_mut().on_event(event);
+impl<W: EventHandler> Win32WindowEventInterposer for DxWindow<W> {
+    #[inline]
+    fn on_close_request(&self) {
+        self.inner.borrow_mut().on_close_request();
     }
 
-    fn on_input(&self, input: Input) {
-        self.inner.borrow_mut().on_input(input);
+    #[inline]
+    fn on_visible(&self, visible: bool) {
+        self.inner.borrow_mut().on_visible(visible);
     }
 
+    #[inline]
+    fn on_begin_resize(&self) {
+        self.inner.borrow_mut().on_begin_resize();
+    }
+
+    #[inline]
+    fn on_resize(&self, size: WindowSize) {
+        self.inner.borrow_mut().on_resize(size);
+    }
+
+    #[inline]
+    fn on_end_resize(&self) {
+        self.inner.borrow_mut().on_end_resize();
+    }
+
+    #[inline]
+    fn on_mouse_button(&self, button: MouseButton, state: ButtonState, location: WindowPoint) {
+        self.inner
+            .borrow_mut()
+            .on_mouse_button(button, state, location);
+    }
+
+    #[inline]
+    fn on_pointer_move(&self, location: WindowPoint) {
+        self.inner.borrow_mut().on_pointer_move(location);
+    }
+
+    #[inline]
+    fn on_pointer_leave(&self) {
+        self.inner.borrow_mut().on_pointer_leave();
+    }
+
+    #[inline]
+    fn on_scroll(&self, axis: Axis, delta: f32) {
+        self.inner.borrow_mut().on_scroll(axis, delta);
+    }
+
+    #[inline]
     fn on_os_paint(&self) {
         self.inner.borrow_mut().on_os_paint();
     }
 
+    #[inline]
     fn on_vsync(&self, frame_id: FrameId, rate: Option<FramesPerSecond>) {
         self.inner.borrow_mut().on_vsync(frame_id, rate);
     }
 
+    #[inline]
     fn on_composition_rate(&self, frame_id: FrameId, rate: FramesPerSecond) {
         self.inner.borrow_mut().on_composition_rate(frame_id, rate);
     }
 
+    #[inline]
     fn on_redraw_request(&self, request: RedrawRequest) {
         self.inner.borrow_mut().on_redraw_request(request);
     }
 }
 
-pub struct DxWindowImpl<W: WindowEventHandler> {
+pub struct DxWindowImpl<W: EventHandler> {
     user_handler: W,
 
     hwnd: HWND,
@@ -109,7 +153,7 @@ pub struct DxWindowImpl<W: WindowEventHandler> {
     deferred_resize: Option<(WindowSize, Option<f32>)>,
 }
 
-impl<W: WindowEventHandler> DxWindowImpl<W> {
+impl<W: EventHandler> DxWindowImpl<W> {
     fn new(app: AppContextImpl, user_handler: W, hwnd: HWND) -> Self {
         let (graphics, swapchain, target, visual) = {
             let device = &app.inner.read(); // needs to be here to drop the lock before creating `Self`.
@@ -144,7 +188,7 @@ impl<W: WindowEventHandler> DxWindowImpl<W> {
 
             let swapchain = unsafe {
                 device.dxgi.CreateSwapChainForComposition(
-                    &device.dx12.queue.queue,
+                    &device.dx12.queue.handle,
                     &swapchain_desc,
                     None,
                 )
@@ -206,22 +250,44 @@ impl<W: WindowEventHandler> DxWindowImpl<W> {
         }
     }
 
-    fn on_event(&mut self, event: WindowEvent) {
-        match event {
-            WindowEvent::CloseRequest => {}
-            WindowEvent::Visible(is_visible) => self.is_visible = is_visible,
-            WindowEvent::BeginResize => self.is_drag_resizing = true,
-            WindowEvent::EndResize => self.is_drag_resizing = false,
-            WindowEvent::Resize(new_size) => {
-                self.deferred_resize = Some((new_size, None));
-            }
-        };
-
-        self.user_handler.on_event(event);
+    fn on_close_request(&mut self) {
+        self.user_handler.on_close_request();
     }
 
-    fn on_input(&mut self, input: Input) {
-        self.user_handler.on_input(input);
+    fn on_visible(&mut self, visible: bool) {
+        self.is_visible = visible;
+        self.user_handler.on_visible(visible);
+    }
+
+    fn on_begin_resize(&mut self) {
+        self.is_drag_resizing = true;
+        self.user_handler.on_begin_resize();
+    }
+
+    fn on_resize(&mut self, size: WindowSize) {
+        self.deferred_resize = Some((size, None));
+        self.user_handler.on_resize(size);
+    }
+
+    fn on_end_resize(&mut self) {
+        self.is_drag_resizing = false;
+        self.user_handler.on_end_resize();
+    }
+
+    fn on_mouse_button(&mut self, button: MouseButton, state: ButtonState, location: WindowPoint) {
+        self.user_handler.on_mouse_button(button, state, location);
+    }
+
+    fn on_pointer_move(&mut self, location: WindowPoint) {
+        self.user_handler.on_pointer_move(location);
+    }
+
+    fn on_pointer_leave(&mut self) {
+        self.user_handler.on_pointer_leave();
+    }
+
+    fn on_scroll(&mut self, axis: Axis, delta: f32) {
+        self.user_handler.on_scroll(axis, delta);
     }
 
     fn on_os_paint(&mut self) {
@@ -229,7 +295,7 @@ impl<W: WindowEventHandler> DxWindowImpl<W> {
 
         if let Some((size, flex)) = self.deferred_resize.take() {
             resize_swapchain(&self.swapchain, size.width, size.height, flex, || {
-                self.graphics.wait_for_idle()
+                self.graphics.wait_for_idle();
             });
 
             tracing::info!("window: resized to {:?}", size);
@@ -240,7 +306,7 @@ impl<W: WindowEventHandler> DxWindowImpl<W> {
         let mut canvas = {
             let rect = {
                 let size = self.size;
-                Rect::new(0.0, 0.0, size.width as f32, size.height as f32)
+                Rect::new(0.0, 0.0, f32::from(size.width), f32::from(size.height))
             };
 
             Canvas::new(&mut self.draw_list, rect)
@@ -251,8 +317,10 @@ impl<W: WindowEventHandler> DxWindowImpl<W> {
                 let mut stats = DXGI_FRAME_STATISTICS::default();
                 unsafe { self.swapchain.GetFrameStatistics(&mut stats) }
                     .ok()
-                    .map(|()| Instant::from_ticks(stats.SyncQPCTime as u64))
-                    .unwrap_or(Instant::ZERO)
+                    .map_or(Instant::ZERO, |()| {
+                        #[allow(clippy::cast_sign_loss)]
+                        Instant::from_ticks(stats.SyncQPCTime)
+                    })
             };
 
             let next_present_time = {
@@ -323,16 +391,15 @@ pub fn resize_swapchain(
     flex: Option<f32>,
     idle: impl Fn(),
 ) {
-    let width = width as u32;
-    let height = height as u32;
-
     if let Some(flex) = flex {
-        let mut desc = Default::default();
+        let mut desc = DXGI_SWAP_CHAIN_DESC1::default();
         unsafe { swapchain.GetDesc1(&mut desc) }.unwrap();
 
-        if width > desc.Width || height > desc.Height {
-            let w = ((width as f32) * flex).min(u16::MAX as f32) as u32;
-            let h = ((height as f32) * flex).min(u16::MAX as f32) as u32;
+        if u32::from(width) > desc.Width || u32::from(height) > desc.Height {
+            #[allow(clippy::cast_sign_loss)]
+            let w = ((f32::from(width)) * flex).min(f32::from(MAX_WINDOW_DIMENSION)) as u32;
+            #[allow(clippy::cast_sign_loss)]
+            let h = ((f32::from(height)) * flex).min(f32::from(MAX_WINDOW_DIMENSION)) as u32;
 
             idle();
             unsafe {
@@ -347,14 +414,14 @@ pub fn resize_swapchain(
             .unwrap();
         }
 
-        unsafe { swapchain.SetSourceSize(width, height) }.unwrap();
+        unsafe { swapchain.SetSourceSize(u32::from(width), u32::from(height)) }.unwrap();
     } else {
         idle();
         unsafe {
             swapchain.ResizeBuffers(
                 0,
-                width,
-                height,
+                u32::from(width),
+                u32::from(height),
                 DXGI_FORMAT_UNKNOWN,
                 DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT.0 as _,
             )

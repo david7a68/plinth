@@ -8,10 +8,12 @@ pub struct RoundRect<U> {
 }
 
 impl<U> RoundRect<U> {
+    #[must_use]
     pub fn builder(rect: Rect<U>) -> RoundRectBuilder<U> {
         RoundRectBuilder::new(rect)
     }
 
+    #[must_use]
     pub fn retype<U2>(self) -> RoundRect<U2> {
         RoundRect {
             rect: self.rect.retype(),
@@ -32,6 +34,7 @@ pub struct RoundRectBuilder<U> {
 }
 
 impl<U> RoundRectBuilder<U> {
+    #[must_use]
     pub fn new(rect: Rect<U>) -> Self {
         Self {
             rect,
@@ -39,11 +42,13 @@ impl<U> RoundRectBuilder<U> {
         }
     }
 
+    #[must_use]
     pub fn color(mut self, color: Color) -> Self {
         self.color = color;
         self
     }
 
+    #[must_use]
     pub fn build(self) -> RoundRect<U> {
         RoundRect {
             rect: self.rect,

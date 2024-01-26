@@ -5,7 +5,10 @@ use windows::{
     Win32::{
         Foundation::{HANDLE, HWND, RECT},
         Graphics::{
-            Direct3D12::ID3D12Resource,
+            Direct3D12::{
+                ID3D12Resource, D3D12_CPU_DESCRIPTOR_HANDLE, D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
+                D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_VIEWPORT,
+            },
             DirectComposition::{IDCompositionTarget, IDCompositionVisual},
             Dxgi::{
                 Common::{
@@ -29,15 +32,14 @@ use crate::{
     limits::MAX_WINDOW_DIMENSION,
     math::{Point, Rect, Scale, Size},
     platform::{
-        dx12::Context,
-        gfx::{Context as _, Device, DrawList, SubmitId},
+        gfx::{DrawCommand, DrawList},
         AppContextImpl, GraphicsInterposer, VSyncRequest,
     },
     time::Instant,
     Axis, ButtonState, EventHandler, LogicalPixel, MouseButton, PhysicalPixel,
 };
 
-use super::Frame;
+use super::{descriptor::SingleDescriptorHeap, image_barrier, queue::SubmitId, Device, Frame};
 
 pub struct DxWindow<W: EventHandler> {
     inner: RefCell<DxWindowImpl<W>>,
@@ -135,7 +137,7 @@ pub struct DxWindowImpl<W: EventHandler> {
 
     hwnd: HWND,
     app: AppContextImpl,
-    graphics: Context,
+    device: Device,
 
     swapchain: IDXGISwapChain3,
     #[allow(dead_code)]
@@ -143,6 +145,7 @@ pub struct DxWindowImpl<W: EventHandler> {
     #[allow(dead_code)]
     visual: IDCompositionVisual,
     swapchain_ready: HANDLE,
+    swapchain_rtv: SingleDescriptorHeap,
 
     size: Size<u16, PhysicalPixel>,
 
@@ -165,12 +168,12 @@ pub struct DxWindowImpl<W: EventHandler> {
 impl<W: EventHandler> DxWindowImpl<W> {
     #[tracing::instrument(skip(app, user_handler))]
     fn new(app: AppContextImpl, user_handler: W, hwnd: HWND) -> Self {
-        let (graphics, swapchain, target, visual) = {
-            let device = &app.inner.read(); // needs to be here to drop the lock before creating `Self`.
-            let graphics = device.dx12.create_context();
+        let (device, swapchain, target, visual) = {
+            let app = &app.inner.read(); // needs to be here to drop the lock before creating `Self`.
+            let device = app.dx12.clone();
 
-            let target = unsafe { device.compositor.CreateTargetForHwnd(hwnd, true) }.unwrap();
-            let visual = unsafe { device.compositor.CreateVisual() }.unwrap();
+            let target = unsafe { app.compositor.CreateTargetForHwnd(hwnd, true) }.unwrap();
+            let visual = unsafe { app.compositor.CreateVisual() }.unwrap();
             unsafe { target.SetRoot(&visual) }.unwrap();
 
             let (width, height) = {
@@ -197,11 +200,8 @@ impl<W: EventHandler> DxWindowImpl<W> {
             };
 
             let swapchain = unsafe {
-                device.dxgi.CreateSwapChainForComposition(
-                    &device.dx12.queue.handle,
-                    &swapchain_desc,
-                    None,
-                )
+                app.dxgi
+                    .CreateSwapChainForComposition(device.queue(), &swapchain_desc, None)
             }
             .unwrap_or_else(|e| {
                 tracing::error!("Failed to create swapchain: {:?}", e);
@@ -228,14 +228,16 @@ impl<W: EventHandler> DxWindowImpl<W> {
             }
 
             unsafe { visual.SetContent(&swapchain) }.unwrap();
-            unsafe { device.compositor.Commit() }.unwrap();
+            unsafe { app.compositor.Commit() }.unwrap();
 
-            (graphics, swapchain, target, visual)
+            (device, swapchain, target, visual)
         };
+
+        let swapchain_rtv = SingleDescriptorHeap::new(&device, D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
         let latency_event = unsafe { swapchain.GetFrameLatencyWaitableObject() };
 
-        let frames_in_flight = [graphics.create_frame(), graphics.create_frame()];
+        let frames_in_flight = [Frame::new(&device), Frame::new(&device)];
         let draw_list = DrawList::new();
 
         Self {
@@ -247,7 +249,8 @@ impl<W: EventHandler> DxWindowImpl<W> {
             visual,
             swapchain_ready: latency_event,
             size: Size::default(),
-            graphics,
+            device,
+            swapchain_rtv,
             draw_list,
             frames_in_flight,
             prev_submit: None,
@@ -324,7 +327,7 @@ impl<W: EventHandler> DxWindowImpl<W> {
 
         if let Some((size, flex)) = self.deferred_resize.take() {
             resize_swapchain(&self.swapchain, size.width, size.height, flex, || {
-                self.graphics.wait_for_idle();
+                self.device.wait_for_idle();
             });
 
             tracing::info!("window: resized to {:?}", size);
@@ -380,7 +383,21 @@ impl<W: EventHandler> DxWindowImpl<W> {
 
         let frame = &mut self.frames_in_flight[(self.frame_counter % 2) as usize];
 
-        let submit_id = self.graphics.draw(canvas.finish(), frame, image);
+        let rtv = {
+            let rtv = self.swapchain_rtv.cpu_handle();
+
+            unsafe {
+                self.device
+                    .inner
+                    .device
+                    .CreateRenderTargetView(&image, None, rtv);
+            }
+
+            rtv
+        };
+
+        let submit_id = upload_draw_list(&self.device, canvas.finish(), frame, &image, rtv);
+
         unsafe { self.swapchain.Present(1, 0) }.unwrap();
 
         self.frame_counter += 1;
@@ -460,4 +477,140 @@ pub fn resize_swapchain(
         }
         .unwrap();
     }
+}
+
+#[allow(clippy::too_many_lines)]
+fn upload_draw_list(
+    device: &Device,
+    content: &DrawList,
+    frame: &mut Frame,
+    target: &ID3D12Resource,
+    target_rtv: D3D12_CPU_DESCRIPTOR_HANDLE,
+) -> SubmitId {
+    if let Some(submit_id) = frame.submit_id {
+        device.wait(submit_id);
+    }
+
+    {
+        #[cfg(feature = "profile")]
+        let _s = tracing_tracy::client::span!("copy rects to buffer");
+
+        let rects_size = std::mem::size_of_val(content.rects.as_slice());
+        let buffer_size = rects_size as u64;
+
+        if frame.buffer_size < buffer_size {
+            let _ = frame.buffer.take();
+
+            let buffer = device.alloc_buffer(buffer_size);
+
+            frame.buffer_ptr = {
+                let mut mapped = std::ptr::null_mut();
+                unsafe { buffer.Map(0, None, Some(&mut mapped)) }.unwrap();
+                mapped.cast()
+            };
+
+            frame.buffer = Some(buffer);
+            frame.buffer_size = buffer_size;
+        }
+
+        unsafe {
+            std::ptr::copy_nonoverlapping(
+                content.rects.as_ptr().cast(),
+                frame.buffer_ptr,
+                rects_size,
+            );
+        }
+    }
+
+    let viewport_rect = {
+        assert!(content.commands[0].0 == DrawCommand::Begin);
+        content.areas[0]
+    };
+
+    let viewport_scale = [
+        1.0 / f32::from(viewport_rect.right()),
+        1.0 / f32::from(viewport_rect.bottom()),
+    ];
+
+    let mut rect_idx = 0;
+    let mut area_idx = 0;
+    let mut color_idx = 0;
+
+    for (command, idx) in &content.commands {
+        match command {
+            DrawCommand::Begin => unsafe {
+                frame.command_list_mem.Reset().unwrap();
+                frame
+                    .command_list
+                    .Reset(&frame.command_list_mem, None)
+                    .unwrap();
+
+                image_barrier(
+                    &frame.command_list,
+                    target,
+                    D3D12_RESOURCE_STATE_PRESENT,
+                    D3D12_RESOURCE_STATE_RENDER_TARGET,
+                );
+
+                frame
+                    .command_list
+                    .OMSetRenderTargets(1, Some(&target_rtv), false, None);
+
+                frame.command_list.RSSetViewports(&[D3D12_VIEWPORT {
+                    TopLeftX: 0.0,
+                    TopLeftY: 0.0,
+                    Width: viewport_rect.right().into(),
+                    Height: viewport_rect.bottom().into(),
+                    MinDepth: 0.0,
+                    MaxDepth: 1.0,
+                }]);
+
+                frame.command_list.RSSetScissorRects(&[RECT {
+                    left: i32::from(viewport_rect.left()),
+                    top: i32::from(viewport_rect.top()),
+                    right: i32::from(viewport_rect.right()),
+                    bottom: i32::from(viewport_rect.bottom()),
+                }]);
+            },
+            DrawCommand::End => unsafe {
+                image_barrier(
+                    &frame.command_list,
+                    target,
+                    D3D12_RESOURCE_STATE_RENDER_TARGET,
+                    D3D12_RESOURCE_STATE_PRESENT,
+                );
+                frame.command_list.Close().unwrap();
+            },
+            DrawCommand::Clear => {
+                unsafe {
+                    frame.command_list.ClearRenderTargetView(
+                        target_rtv,
+                        &content.clears[color_idx].to_array_f32(),
+                        None,
+                    );
+                }
+                color_idx += 1;
+            }
+            DrawCommand::DrawRects => {
+                let num_rects = *idx - rect_idx;
+
+                device.inner.rect_shader.bind(
+                    &frame.command_list,
+                    frame.buffer.as_ref().unwrap(),
+                    viewport_scale,
+                    viewport_rect.height.into(),
+                );
+
+                unsafe { frame.command_list.DrawInstanced(4, num_rects, 0, rect_idx) };
+
+                rect_idx = *idx;
+            }
+        }
+    }
+
+    let submit_id = device.submit_graphics(&frame.command_list);
+
+    frame.submit_id = Some(submit_id);
+
+    submit_id
 }

@@ -4,9 +4,6 @@ use crate::{
     math::Rect,
 };
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct SubmitId(pub u64);
-
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct RRect {
@@ -108,40 +105,6 @@ impl DrawList {
             self.n_rects = end;
         }
     }
-}
-
-pub trait Frame {}
-
-pub trait Image {}
-
-pub trait RenderTarget: Image {}
-
-pub trait Context {
-    type Frame: Frame;
-    type Image: Image;
-
-    fn create_frame(&self) -> Self::Frame;
-
-    fn draw(
-        &mut self,
-        content: &DrawList,
-        frame: &mut Self::Frame,
-        image: impl Into<Self::Image>,
-    ) -> SubmitId;
-
-    fn wait(&self, submit_id: SubmitId);
-
-    fn wait_for_idle(&self);
-}
-
-pub trait Device {
-    type Context: Context;
-
-    fn create_context(&self) -> Self::Context;
-
-    fn wait(&self, submit_id: SubmitId);
-
-    fn wait_for_idle(&self);
 }
 
 #[cfg(test)]

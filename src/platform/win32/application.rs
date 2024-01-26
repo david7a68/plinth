@@ -94,7 +94,7 @@ impl ApplicationImpl {
 
 pub struct Win32Context {
     pub dxgi: IDXGIFactory2,
-    pub dx12: Arc<dx12::Device>,
+    pub dx12: dx12::Device,
     pub compositor: IDCompositionDevice,
     debug_mode: bool,
 }

@@ -10,7 +10,8 @@ use windows::Win32::{
     System::Threading::{CreateEventW, WaitForSingleObject, INFINITE},
 };
 
-use crate::platform::gfx::SubmitId;
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct SubmitId(pub u64);
 
 /// A queue of GPU commands.
 ///

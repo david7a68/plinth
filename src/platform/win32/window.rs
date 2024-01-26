@@ -343,6 +343,7 @@ unsafe extern "system" fn wndproc_trampoline(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn wndproc(state: &EventLoop, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     #[inline]
     fn mouse_coords(lparam: LPARAM) -> Point<i16, PhysicalPixel> {

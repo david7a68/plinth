@@ -27,7 +27,7 @@ use windows::Win32::{
     },
     Foundation::{ERROR_INSUFFICIENT_BUFFER, HWND, LPARAM, WPARAM},
     Graphics::{
-        Dxgi::{IDXGIOutput, DXGI_OUTPUT_DESC},
+        Dxgi::{CreateDXGIFactory1, IDXGIFactory1, IDXGIOutput, DXGI_OUTPUT_DESC},
         Gdi::{GetMonitorInfoW, HMONITOR, MONITORINFO, MONITORINFOEXW},
     },
     UI::WindowsAndMessaging::PostMessageW,
@@ -38,10 +38,7 @@ use crate::{
     limits::MAX_WINDOWS,
 };
 
-use super::{
-    window::{UM_COMPOSITION_RATE, UM_VSYNC},
-    AppContextImpl,
-};
+use super::window::{UM_COMPOSITION_RATE, UM_VSYNC};
 
 pub enum VSyncRequest {
     /// Requests that the vsync thread cancel any pending requests. You will
@@ -125,7 +122,7 @@ enum Mode {
 const _: () = assert!(MAX_WINDOWS <= u16::MAX as usize);
 
 pub struct VsyncThread<'a> {
-    context: &'a AppContextImpl,
+    dxgi: IDXGIFactory1,
     request_receiver: &'a Receiver<VSyncRequest>,
 
     clients: ArrayVec<Client, MAX_WINDOWS>,
@@ -137,25 +134,17 @@ pub struct VsyncThread<'a> {
 }
 
 impl<'a> VsyncThread<'a> {
-    pub fn new(context: &'a AppContextImpl, request_receiver: &'a Receiver<VSyncRequest>) -> Self {
+    pub fn new(request_receiver: &'a Receiver<VSyncRequest>) -> Self {
         let clients = ArrayVec::new();
 
-        let main_output = {
-            let adapter0 = unsafe { context.inner.read().dxgi.EnumAdapters(0) }.unwrap();
-            unsafe { adapter0.EnumOutputs(0) }.unwrap()
-        };
+        let dxgi: IDXGIFactory1 = unsafe { CreateDXGIFactory1() }.unwrap();
 
-        // todo: handle boosted clocks
-        let composition_rate = get_output_refresh_rate(&main_output);
+        let (main_output, main_monitor) = get_main_output(&dxgi);
 
-        let main_monitor = {
-            let mut desc = DXGI_OUTPUT_DESC::default();
-            unsafe { main_output.GetDesc(&mut desc) }.unwrap();
-            desc.Monitor
-        };
+        let composition_rate = get_output_refresh_rate(&main_output, main_monitor);
 
         Self {
-            context,
+            dxgi,
             request_receiver,
             clients,
             counter: 0,
@@ -166,34 +155,23 @@ impl<'a> VsyncThread<'a> {
     }
 
     fn update_composition_rate(&mut self) -> bool {
-        let composition_rate: FramesPerSecond =
-            if unsafe { self.context.inner.read().dxgi.IsCurrent() }.as_bool() {
-                self.composition_rate
-            } else {
-                let (main_output, main_monitor) = {
-                    let mut inner = self.context.inner.write();
-                    inner.update_device();
-
-                    let adapter0 = unsafe { inner.dxgi.EnumAdapters(0) }.unwrap();
-                    let output = unsafe { adapter0.EnumOutputs(0) }.unwrap();
-
-                    let mut desc = DXGI_OUTPUT_DESC::default();
-                    unsafe { output.GetDesc(&mut desc) }.unwrap();
-                    (output, desc.Monitor)
-                };
-
-                if main_monitor != self.main_monitor {
-                    self.main_output = main_output;
-                    self.main_monitor = main_monitor;
-                    get_output_refresh_rate(&self.main_output);
-                }
-
-                get_output_refresh_rate(&self.main_output)
+        if unsafe { self.dxgi.IsCurrent() }.as_bool() {
+            false
+        } else {
+            let (main_output, main_monitor) = {
+                self.dxgi = unsafe { CreateDXGIFactory1() }.unwrap();
+                get_main_output(&self.dxgi)
             };
 
-        let changed = composition_rate != self.composition_rate;
-        self.composition_rate = composition_rate;
-        changed
+            if main_monitor != self.main_monitor {
+                self.composition_rate = get_output_refresh_rate(&main_output, main_monitor);
+                self.main_output = main_output;
+                self.main_monitor = main_monitor;
+                true
+            } else {
+                false
+            }
+        }
     }
 
     /// Receives vsync requests, dispatches requests that are due, and waits for
@@ -305,13 +283,30 @@ impl<'a> VsyncThread<'a> {
     }
 }
 
-#[tracing::instrument(skip(output))]
-fn get_output_refresh_rate(output: &IDXGIOutput) -> FramesPerSecond {
-    let monitor = {
+fn get_main_output(dxgi: &IDXGIFactory1) -> (IDXGIOutput, HMONITOR) {
+    let adapter0 = unsafe { dxgi.EnumAdapters(0) }.unwrap();
+    let output0 = unsafe { adapter0.EnumOutputs(0) }.unwrap();
+
+    let main_monitor = {
         let mut desc = DXGI_OUTPUT_DESC::default();
-        unsafe { output.GetDesc(&mut desc) }.unwrap();
+        unsafe { output0.GetDesc(&mut desc) }.unwrap();
         desc.Monitor
     };
+
+    (output0, main_monitor)
+}
+
+#[tracing::instrument(skip(output))]
+fn get_output_refresh_rate(output: &IDXGIOutput, monitor: HMONITOR) -> FramesPerSecond {
+    #[cfg(debug_assertions)]
+    {
+        let m = {
+            let mut desc = DXGI_OUTPUT_DESC::default();
+            unsafe { output.GetDesc(&mut desc) }.unwrap();
+            desc.Monitor
+        };
+        assert_eq!(m, monitor);
+    }
 
     let monitor_info = {
         let mut info = MONITORINFOEXW {

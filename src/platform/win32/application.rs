@@ -3,19 +3,11 @@ use std::sync::{
     Arc,
 };
 
-use parking_lot::RwLock;
-use windows::{
-    core::ComInterface,
-    Win32::Graphics::{
-        Direct3D12::{D3D12GetDebugInterface, ID3D12Debug1, ID3D12Debug5},
-        DirectComposition::{DCompositionCreateDevice2, IDCompositionDevice},
-        Dxgi::{CreateDXGIFactory2, IDXGIFactory2, DXGI_CREATE_FACTORY_DEBUG},
-    },
-};
+use windows::Win32::Graphics::DirectComposition::{DCompositionCreateDevice2, IDCompositionDevice};
 
 use crate::{
     graphics::GraphicsConfig,
-    platform::dx12::{self, dxwindow::DxWindow},
+    platform::dx12,
     window::{WindowError, WindowSpec},
     EventHandler, Window,
 };
@@ -66,7 +58,7 @@ impl ApplicationImpl {
 
     pub fn run(&mut self) {
         let mut window_count = 0;
-        let mut vsync = VsyncThread::new(&self.context, &self.vsync_request_receiver);
+        let mut vsync = VsyncThread::new(&self.vsync_request_receiver);
 
         // block on messages to start
         match self.app_receiver.recv() {
@@ -92,39 +84,9 @@ impl ApplicationImpl {
     }
 }
 
-pub struct Win32Context {
-    pub dxgi: IDXGIFactory2,
-    pub dx12: dx12::Device,
-    pub compositor: IDCompositionDevice,
-    debug_mode: bool,
-}
-
-impl Win32Context {
-    fn new(config: &GraphicsConfig) -> Self {
-        let dxgi: IDXGIFactory2 = create_factory(config.debug_mode);
-        let dx12 = dx12::Device::new(&dxgi, config);
-
-        let compositor = unsafe { DCompositionCreateDevice2(None) }.unwrap();
-
-        Self {
-            dxgi,
-            dx12,
-            compositor,
-            debug_mode: config.debug_mode,
-        }
-    }
-
-    pub fn update_device(&mut self) {
-        self.dxgi = create_factory(self.debug_mode);
-    }
-}
-
-unsafe impl Send for Win32Context {}
-unsafe impl Sync for Win32Context {}
-
 #[derive(Clone)]
 pub struct AppContextImpl {
-    pub inner: Arc<RwLock<Win32Context>>,
+    pub inner: Arc<Win32Context>,
     pub sender: Sender<AppMessage>,
     pub vsync_sender: Sender<VSyncRequest>,
 }
@@ -137,7 +99,7 @@ impl AppContextImpl {
         vsync_sender: Sender<VSyncRequest>,
     ) -> Self {
         Self {
-            inner: Arc::new(RwLock::new(Win32Context::new(config))),
+            inner: Arc::new(Win32Context::new(config)),
             sender,
             vsync_sender,
         }
@@ -152,35 +114,28 @@ impl AppContextImpl {
         W: EventHandler,
         F: FnMut(Window) -> W + Send + 'static,
     {
-        // todo: select interposer based on active graphics api
-        spawn_window_thread(self.clone(), spec, constructor, DxWindow::new);
+        // todo: select interposer based on active graphics api - dz
+        spawn_window_thread(self.clone(), spec, constructor, dx12::Interposer::new);
 
         // todo: error handling -dz
         Ok(())
     }
 }
 
-fn create_factory(debug: bool) -> IDXGIFactory2 {
-    let mut dxgi_flags = 0;
-
-    if debug {
-        let mut controller: Option<ID3D12Debug1> = None;
-        unsafe { D3D12GetDebugInterface(&mut controller) }.unwrap();
-
-        if let Some(controller) = controller {
-            tracing::info!("Enabling D3D12 debug layer");
-            unsafe { controller.EnableDebugLayer() };
-            unsafe { controller.SetEnableGPUBasedValidation(true) };
-
-            if let Ok(controller) = controller.cast::<ID3D12Debug5>() {
-                unsafe { controller.SetEnableAutoName(true) };
-            }
-        } else {
-            tracing::warn!("Failed to enable D3D12 debug layer");
-        }
-
-        dxgi_flags |= DXGI_CREATE_FACTORY_DEBUG;
-    }
-
-    unsafe { CreateDXGIFactory2(dxgi_flags) }.unwrap()
+pub struct Win32Context {
+    pub dx12: Arc<dx12::Device>,
+    pub compositor: IDCompositionDevice,
 }
+
+impl Win32Context {
+    fn new(config: &GraphicsConfig) -> Self {
+        let dx12 = dx12::Device::new(config);
+
+        let compositor = unsafe { DCompositionCreateDevice2(None) }.unwrap();
+
+        Self { dx12, compositor }
+    }
+}
+
+unsafe impl Send for Win32Context {}
+unsafe impl Sync for Win32Context {}

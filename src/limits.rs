@@ -17,7 +17,7 @@ pub const MAX_ITEMS_PER_DRAW_LIST: usize = u32::MAX as _;
 ///
 /// Panics if `value` is greater than [`MAX_ITEMS_PER_DRAW_LIST`].
 #[must_use]
-pub fn enforce_draw_list_max_items_u32(value: usize) -> u32 {
+pub fn enforce_draw_list_max_commands_u32(value: usize) -> u32 {
     const _: () = assert!(u32::MAX as usize <= MAX_ITEMS_PER_DRAW_LIST);
 
     assert!(value <= MAX_ITEMS_PER_DRAW_LIST);

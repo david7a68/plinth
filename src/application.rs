@@ -5,7 +5,7 @@ use crate::{
 
 use crate::graphics::GraphicsConfig;
 #[cfg(target_os = "windows")]
-use crate::platform;
+use crate::platform::win32 as platform;
 
 pub struct Application {
     inner: platform::ApplicationImpl,

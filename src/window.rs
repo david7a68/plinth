@@ -6,7 +6,7 @@ use crate::{
 };
 
 #[cfg(target_os = "windows")]
-use crate::platform;
+use crate::platform::win32 as platform;
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -116,7 +116,7 @@ impl Window {
     }
 }
 
-pub trait EventHandler: Send + 'static {
+pub trait EventHandler: 'static {
     fn on_close_request(&mut self);
 
     #[allow(unused_variables)]
@@ -147,5 +147,5 @@ pub trait EventHandler: Send + 'static {
 
     fn on_scroll(&mut self, axis: Axis, delta: f32);
 
-    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameInfo);
+    fn on_repaint(&mut self, canvas: &mut dyn Canvas, timing: &FrameInfo);
 }

@@ -1,37 +1,12 @@
-use crate::{math::Rect, platform::gfx::DrawList};
+use crate::{math::Rect, LogicalPixel};
 
 use super::{Color, RoundRect};
 
-pub struct Canvas<'a, U> {
-    bounds: Rect<u16, U>,
-    data: &'a mut DrawList,
-}
-
-impl<'a, U> Canvas<'a, U> {
+pub trait Canvas {
     #[must_use]
-    pub(crate) fn new(data: &'a mut DrawList, bounds: Rect<u16, U>) -> Self {
-        data.reset();
-        data.begin(bounds);
+    fn region(&self) -> Rect<u16, LogicalPixel>;
 
-        Self { bounds, data }
-    }
+    fn clear(&mut self, color: Color);
 
-    #[must_use]
-    pub(crate) fn finish(self) -> &'a mut DrawList {
-        self.data.end();
-        self.data
-    }
-
-    #[must_use]
-    pub fn rect(&self) -> &Rect<u16, U> {
-        &self.bounds
-    }
-
-    pub fn clear(&mut self, color: Color) {
-        self.data.clear(color);
-    }
-
-    pub fn draw_rect(&mut self, rect: impl Into<RoundRect<U>>) {
-        self.data.draw_rect(rect);
-    }
+    fn draw_rect(&mut self, rect: RoundRect);
 }

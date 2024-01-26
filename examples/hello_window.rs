@@ -53,7 +53,7 @@ impl EventHandler for AppWindow {
         println!("Scroll {:?} by {}", axis, delta);
     }
 
-    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameInfo) {
+    fn on_repaint(&mut self, canvas: &mut dyn Canvas, timing: &FrameInfo) {
         println!("Repaint at {:?}", timing);
         canvas.clear(Color::GREEN);
     }

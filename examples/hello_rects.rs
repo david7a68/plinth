@@ -24,10 +24,18 @@ impl EventHandler for DemoWindow {
         self.window.close();
     }
 
-    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, _timing: &FrameInfo) {
+    fn on_repaint(&mut self, canvas: &mut dyn Canvas, _timing: &FrameInfo) {
         canvas.clear(Color::BLACK);
-        canvas.draw_rect(RoundRect::builder(Rect::new(50.0, 100.0, 40.0, 70.0)).color(Color::BLUE));
-        canvas.draw_rect(RoundRect::builder(Rect::new(100.0, 100.0, 40.0, 70.0)).color(Color::RED));
+        canvas.draw_rect(
+            RoundRect::builder(Rect::new(50.0, 100.0, 40.0, 70.0))
+                .color(Color::BLUE)
+                .build(),
+        );
+        canvas.draw_rect(
+            RoundRect::builder(Rect::new(100.0, 100.0, 40.0, 70.0))
+                .color(Color::RED)
+                .build(),
+        );
 
         std::thread::sleep(std::time::Duration::from_millis(4));
     }

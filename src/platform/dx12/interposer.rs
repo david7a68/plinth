@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::{mem::ManuallyDrop, sync::Arc};
 
 use windows::{
     core::ComInterface,
@@ -6,8 +6,14 @@ use windows::{
         Foundation::{HANDLE, HWND, RECT},
         Graphics::{
             Direct3D12::{
-                ID3D12Resource, D3D12_CPU_DESCRIPTOR_HANDLE, D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
-                D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_VIEWPORT,
+                ID3D12CommandAllocator, ID3D12DescriptorHeap, ID3D12GraphicsCommandList,
+                ID3D12Resource, D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_CPU_DESCRIPTOR_HANDLE,
+                D3D12_DESCRIPTOR_HEAP_DESC, D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
+                D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_RESOURCE_BARRIER, D3D12_RESOURCE_BARRIER_0,
+                D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_BARRIER_FLAG_NONE,
+                D3D12_RESOURCE_BARRIER_TYPE_TRANSITION, D3D12_RESOURCE_STATES,
+                D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET,
+                D3D12_RESOURCE_TRANSITION_BARRIER, D3D12_VIEWPORT,
             },
             DirectComposition::{IDCompositionTarget, IDCompositionVisual},
             Dxgi::{
@@ -28,116 +34,25 @@ use windows::{
 
 use crate::{
     frame::{FrameId, FramesPerSecond, RedrawRequest},
-    graphics::{Canvas, FrameInfo},
+    graphics::FrameInfo,
     limits::MAX_WINDOW_DIMENSION,
     math::{Point, Rect, Scale, Size},
-    platform::{
-        gfx::{DrawCommand, DrawList},
-        AppContextImpl, GraphicsInterposer, VSyncRequest,
-    },
+    platform::{dx12::canvas::DrawCommand, win32},
     time::Instant,
     Axis, ButtonState, EventHandler, LogicalPixel, MouseButton, PhysicalPixel,
 };
 
-use super::{descriptor::SingleDescriptorHeap, image_barrier, queue::SubmitId, Device, Frame};
+use super::{
+    canvas::{Canvas, DrawList},
+    device::{Device, SubmitId},
+};
 
-pub struct DxWindow<W: EventHandler> {
-    inner: RefCell<DxWindowImpl<W>>,
-}
-
-impl<W: EventHandler> DxWindow<W> {
-    pub fn new(context: AppContextImpl, user_handler: W, hwnd: HWND) -> Self {
-        let inner = DxWindowImpl::new(context, user_handler, hwnd);
-        Self {
-            inner: RefCell::new(inner),
-        }
-    }
-}
-
-impl<W: EventHandler> GraphicsInterposer for DxWindow<W> {
-    #[inline]
-    fn on_close_request(&self) {
-        self.inner.borrow_mut().on_close_request();
-    }
-
-    #[inline]
-    fn on_visible(&self, visible: bool) {
-        self.inner.borrow_mut().on_visible(visible);
-    }
-
-    #[inline]
-    fn on_begin_resize(&self) {
-        self.inner.borrow_mut().on_begin_resize();
-    }
-
-    #[inline]
-    fn on_resize(
-        &self,
-        size: Size<u16, PhysicalPixel>,
-        scale: Scale<f32, PhysicalPixel, LogicalPixel>,
-    ) {
-        self.inner.borrow_mut().on_resize(size, scale);
-    }
-
-    #[inline]
-    fn on_end_resize(&self) {
-        self.inner.borrow_mut().on_end_resize();
-    }
-
-    #[inline]
-    fn on_mouse_button(
-        &self,
-        button: MouseButton,
-        state: ButtonState,
-        location: Point<i16, PhysicalPixel>,
-    ) {
-        self.inner
-            .borrow_mut()
-            .on_mouse_button(button, state, location);
-    }
-
-    #[inline]
-    fn on_pointer_move(&self, location: Point<i16, PhysicalPixel>) {
-        self.inner.borrow_mut().on_pointer_move(location);
-    }
-
-    #[inline]
-    fn on_pointer_leave(&self) {
-        self.inner.borrow_mut().on_pointer_leave();
-    }
-
-    #[inline]
-    fn on_scroll(&self, axis: Axis, delta: f32) {
-        self.inner.borrow_mut().on_scroll(axis, delta);
-    }
-
-    #[inline]
-    fn on_os_paint(&self) {
-        self.inner.borrow_mut().on_os_paint();
-    }
-
-    #[inline]
-    fn on_vsync(&self, frame_id: FrameId, rate: Option<FramesPerSecond>) {
-        self.inner.borrow_mut().on_vsync(frame_id, rate);
-    }
-
-    #[inline]
-    fn on_composition_rate(&self, frame_id: FrameId, rate: FramesPerSecond) {
-        self.inner.borrow_mut().on_composition_rate(frame_id, rate);
-    }
-
-    #[inline]
-    fn on_redraw_request(&self, request: RedrawRequest) {
-        self.inner.borrow_mut().on_redraw_request(request);
-    }
-}
-
-pub struct DxWindowImpl<W: EventHandler> {
-    user_handler: W,
-
+pub struct Interposer<W: EventHandler> {
     hwnd: HWND,
-    app: AppContextImpl,
-    device: Device,
+
+    app: win32::AppContextImpl,
+    device: Arc<Device>,
+    user_handler: W,
 
     swapchain: IDXGISwapChain3,
     #[allow(dead_code)]
@@ -145,7 +60,9 @@ pub struct DxWindowImpl<W: EventHandler> {
     #[allow(dead_code)]
     visual: IDCompositionVisual,
     swapchain_ready: HANDLE,
-    swapchain_rtv: SingleDescriptorHeap,
+    #[allow(dead_code)]
+    swapchain_rtv_heap: ID3D12DescriptorHeap,
+    swapchain_rtv: D3D12_CPU_DESCRIPTOR_HANDLE,
 
     size: Size<u16, PhysicalPixel>,
 
@@ -165,15 +82,14 @@ pub struct DxWindowImpl<W: EventHandler> {
     deferred_resize: Option<(Size<u16, PhysicalPixel>, Option<f32>)>,
 }
 
-impl<W: EventHandler> DxWindowImpl<W> {
+impl<W: EventHandler> Interposer<W> {
     #[tracing::instrument(skip(app, user_handler))]
-    fn new(app: AppContextImpl, user_handler: W, hwnd: HWND) -> Self {
+    pub fn new(app: win32::AppContextImpl, user_handler: W, hwnd: HWND) -> Self {
         let (device, swapchain, target, visual) = {
-            let app = &app.inner.read(); // needs to be here to drop the lock before creating `Self`.
-            let device = app.dx12.clone();
+            let device = app.inner.dx12.clone();
 
-            let target = unsafe { app.compositor.CreateTargetForHwnd(hwnd, true) }.unwrap();
-            let visual = unsafe { app.compositor.CreateVisual() }.unwrap();
+            let target = unsafe { app.inner.compositor.CreateTargetForHwnd(hwnd, true) }.unwrap();
+            let visual = unsafe { app.inner.compositor.CreateVisual() }.unwrap();
             unsafe { target.SetRoot(&visual) }.unwrap();
 
             let (width, height) = {
@@ -199,22 +115,16 @@ impl<W: EventHandler> DxWindowImpl<W> {
                 Flags: DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT.0 as _,
             };
 
-            let swapchain = unsafe {
-                app.dxgi
-                    .CreateSwapChainForComposition(device.queue(), &swapchain_desc, None)
-            }
-            .unwrap_or_else(|e| {
-                tracing::error!("Failed to create swapchain: {:?}", e);
-                panic!();
-            })
-            .cast::<IDXGISwapChain3>()
-            .unwrap_or_else(|e| {
-                tracing::error!(
+            let swapchain = device
+                .create_swapchain(&swapchain_desc)
+                .cast::<IDXGISwapChain3>()
+                .unwrap_or_else(|e| {
+                    tracing::error!(
                     "The running version of windows doesn't support IDXGISwapchain3. Error: {:?}",
                     e
                 );
-                panic!()
-            });
+                    panic!()
+                });
 
             unsafe {
                 swapchain
@@ -228,12 +138,26 @@ impl<W: EventHandler> DxWindowImpl<W> {
             }
 
             unsafe { visual.SetContent(&swapchain) }.unwrap();
-            unsafe { app.compositor.Commit() }.unwrap();
+            unsafe { app.inner.compositor.Commit() }.unwrap();
 
             (device, swapchain, target, visual)
         };
 
-        let swapchain_rtv = SingleDescriptorHeap::new(&device, D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
+        let swapchain_rtv_heap: ID3D12DescriptorHeap = {
+            let heap_desc = D3D12_DESCRIPTOR_HEAP_DESC {
+                Type: D3D12_DESCRIPTOR_HEAP_TYPE_RTV,
+                NumDescriptors: 1,
+                Flags: D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
+                NodeMask: 0,
+            };
+
+            unsafe { device.handle.CreateDescriptorHeap(&heap_desc) }.unwrap_or_else(|e| {
+                tracing::error!("Failed to create descriptor heap: {:?}", e);
+                panic!()
+            })
+        };
+
+        let swapchain_rtv = unsafe { swapchain_rtv_heap.GetCPUDescriptorHandleForHeapStart() };
 
         let latency_event = unsafe { swapchain.GetFrameLatencyWaitableObject() };
 
@@ -250,6 +174,7 @@ impl<W: EventHandler> DxWindowImpl<W> {
             swapchain_ready: latency_event,
             size: Size::default(),
             device,
+            swapchain_rtv_heap,
             swapchain_rtv,
             draw_list,
             frames_in_flight,
@@ -262,7 +187,9 @@ impl<W: EventHandler> DxWindowImpl<W> {
             deferred_resize: None,
         }
     }
+}
 
+impl<W: EventHandler> win32::Interposer for Interposer<W> {
     #[tracing::instrument(skip(self))]
     fn on_close_request(&mut self) {
         self.user_handler.on_close_request();
@@ -323,6 +250,9 @@ impl<W: EventHandler> DxWindowImpl<W> {
 
     #[tracing::instrument(skip(self))]
     fn on_os_paint(&mut self) {
+        // todo: how to handle multiple repaint events in a single frame (when
+        // animating and resizing at the same time)? -dz
+
         unsafe { WaitForSingleObjectEx(self.swapchain_ready, u32::MAX, true) };
 
         if let Some((size, flex)) = self.deferred_resize.take() {
@@ -383,20 +313,19 @@ impl<W: EventHandler> DxWindowImpl<W> {
 
         let frame = &mut self.frames_in_flight[(self.frame_counter % 2) as usize];
 
-        let rtv = {
-            let rtv = self.swapchain_rtv.cpu_handle();
-
-            unsafe {
-                self.device
-                    .inner
-                    .device
-                    .CreateRenderTargetView(&image, None, rtv);
-            }
-
-            rtv
+        unsafe {
+            self.device
+                .handle
+                .CreateRenderTargetView(&image, None, self.swapchain_rtv)
         };
 
-        let submit_id = upload_draw_list(&self.device, canvas.finish(), frame, &image, rtv);
+        let submit_id = upload_draw_list(
+            &self.device,
+            canvas.finish(),
+            frame,
+            &image,
+            self.swapchain_rtv,
+        );
 
         unsafe { self.swapchain.Present(1, 0) }.unwrap();
 
@@ -422,14 +351,94 @@ impl<W: EventHandler> DxWindowImpl<W> {
         let send = |r| self.app.vsync_sender.send(r).unwrap();
 
         match request {
-            RedrawRequest::Idle => send(VSyncRequest::Idle(self.hwnd)),
+            RedrawRequest::Idle => send(win32::VSyncRequest::Idle(self.hwnd)),
             RedrawRequest::Once => unsafe {
                 RedrawWindow(self.hwnd, None, None, RDW_INTERNALPAINT);
             },
-            RedrawRequest::AtFrame(frame_id) => send(VSyncRequest::AtFrame(self.hwnd, frame_id)),
-            RedrawRequest::AtFrameRate(rate) => send(VSyncRequest::AtFrameRate(self.hwnd, rate)),
+            RedrawRequest::AtFrame(frame_id) => {
+                send(win32::VSyncRequest::AtFrame(self.hwnd, frame_id))
+            }
+            RedrawRequest::AtFrameRate(rate) => {
+                send(win32::VSyncRequest::AtFrameRate(self.hwnd, rate))
+            }
         }
     }
+}
+
+const DEFAULT_DRAW_BUFFER_SIZE: u64 = 64 * 1024;
+
+pub struct Frame {
+    buffer: Option<ID3D12Resource>,
+    buffer_size: u64,
+    buffer_ptr: *mut u8,
+
+    submit_id: Option<SubmitId>,
+    command_list: ID3D12GraphicsCommandList,
+    command_list_mem: ID3D12CommandAllocator,
+}
+
+impl Frame {
+    fn new(device: &Device) -> Self {
+        let buffer = device.alloc_buffer(DEFAULT_DRAW_BUFFER_SIZE);
+
+        let buffer_ptr = {
+            let mut mapped = std::ptr::null_mut();
+            unsafe { buffer.Map(0, None, Some(&mut mapped)) }.unwrap();
+            mapped.cast()
+        };
+
+        let command_allocator: ID3D12CommandAllocator = unsafe {
+            device
+                .handle
+                .CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT)
+        }
+        .unwrap();
+
+        let command_list: ID3D12GraphicsCommandList = unsafe {
+            device.handle.CreateCommandList(
+                0,
+                D3D12_COMMAND_LIST_TYPE_DIRECT,
+                &command_allocator,
+                None,
+            )
+        }
+        .unwrap();
+
+        unsafe { command_list.Close() }.unwrap();
+
+        Self {
+            buffer: Some(buffer),
+            buffer_size: DEFAULT_DRAW_BUFFER_SIZE,
+            buffer_ptr,
+            submit_id: None,
+            command_list,
+            command_list_mem: command_allocator,
+        }
+    }
+}
+
+pub fn image_barrier(
+    command_list: &ID3D12GraphicsCommandList,
+    image: &ID3D12Resource,
+    from: D3D12_RESOURCE_STATES,
+    to: D3D12_RESOURCE_STATES,
+) {
+    let transition = D3D12_RESOURCE_TRANSITION_BARRIER {
+        pResource: unsafe { std::mem::transmute_copy(image) },
+        Subresource: D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+        StateBefore: from,
+        StateAfter: to,
+    };
+
+    let barrier = D3D12_RESOURCE_BARRIER {
+        Type: D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+        Flags: D3D12_RESOURCE_BARRIER_FLAG_NONE,
+        Anonymous: D3D12_RESOURCE_BARRIER_0 {
+            Transition: ManuallyDrop::new(transition),
+        },
+    };
+
+    unsafe { command_list.ResourceBarrier(&[barrier]) };
 }
 
 #[tracing::instrument(skip(swapchain, idle))]
@@ -533,7 +542,7 @@ fn upload_draw_list(
     ];
 
     let mut rect_idx = 0;
-    let mut area_idx = 0;
+    // let mut area_idx = 0;
     let mut color_idx = 0;
 
     for (command, idx) in &content.commands {
@@ -594,7 +603,7 @@ fn upload_draw_list(
             DrawCommand::DrawRects => {
                 let num_rects = *idx - rect_idx;
 
-                device.inner.rect_shader.bind(
+                device.rect_shader.bind(
                     &frame.command_list,
                     frame.buffer.as_ref().unwrap(),
                     viewport_scale,
@@ -608,7 +617,7 @@ fn upload_draw_list(
         }
     }
 
-    let submit_id = device.submit_graphics(&frame.command_list);
+    let submit_id = device.submit(&frame.command_list);
 
     frame.submit_id = Some(submit_id);
 

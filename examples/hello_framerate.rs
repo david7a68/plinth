@@ -58,7 +58,7 @@ impl EventHandler for AppWindow {
         }
     }
 
-    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameInfo) {
+    fn on_repaint(&mut self, canvas: &mut dyn Canvas, timing: &FrameInfo) {
         let now = Instant::now();
         let elapsed = now - self.prev_draw_start_time;
         self.prev_draw_start_time = now;

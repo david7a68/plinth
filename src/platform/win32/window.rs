@@ -1,4 +1,8 @@
-use std::{cell::Cell, ptr::addr_of, sync::Arc};
+use std::{
+    cell::{Cell, RefCell},
+    ptr::addr_of,
+    sync::Arc,
+};
 
 use parking_lot::RwLock;
 
@@ -142,34 +146,35 @@ pub(super) fn extract_redraw_request(wparam: WPARAM, lparam: LPARAM) -> RedrawRe
     }
 }
 
-pub trait GraphicsInterposer: 'static {
-    fn on_close_request(&self);
-    fn on_visible(&self, visible: bool);
-    fn on_begin_resize(&self);
+// todo: not happy with this duplication of EventHandler's methods -dz
+pub trait Interposer: 'static {
+    fn on_close_request(&mut self);
+    fn on_visible(&mut self, visible: bool);
+    fn on_begin_resize(&mut self);
     fn on_resize(
-        &self,
+        &mut self,
         size: Size<u16, PhysicalPixel>,
         scale: Scale<f32, PhysicalPixel, LogicalPixel>,
     );
-    fn on_end_resize(&self);
+    fn on_end_resize(&mut self);
     fn on_mouse_button(
-        &self,
+        &mut self,
         button: MouseButton,
         state: ButtonState,
         location: Point<i16, PhysicalPixel>,
     );
-    fn on_pointer_move(&self, location: Point<i16, PhysicalPixel>);
-    fn on_pointer_leave(&self);
-    fn on_scroll(&self, axis: Axis, delta: f32);
+    fn on_pointer_move(&mut self, location: Point<i16, PhysicalPixel>);
+    fn on_pointer_leave(&mut self);
+    fn on_scroll(&mut self, axis: Axis, delta: f32);
 
-    fn on_os_paint(&self);
-    fn on_vsync(&self, frame_id: FrameId, rate: Option<FramesPerSecond>);
-    fn on_composition_rate(&self, frame_id: FrameId, rate: FramesPerSecond);
-    fn on_redraw_request(&self, request: RedrawRequest);
+    fn on_os_paint(&mut self);
+    fn on_vsync(&mut self, frame_id: FrameId, rate: Option<FramesPerSecond>);
+    fn on_composition_rate(&mut self, frame_id: FrameId, rate: FramesPerSecond);
+    fn on_redraw_request(&mut self, request: RedrawRequest);
 }
 
 struct EventLoop {
-    interposer: Cell<*const dyn GraphicsInterposer>,
+    interposer: Cell<*const RefCell<dyn Interposer>>,
     size: Cell<(u16, u16)>,
     pointer_in_window: Cell<bool>,
     is_in_size_move: Cell<bool>,
@@ -183,7 +188,7 @@ pub fn spawn_window_thread<W, I, C, F>(
     interposer_constructor: C,
 ) where
     W: EventHandler,
-    I: GraphicsInterposer,
+    I: Interposer,
     F: FnOnce(Window) -> W + Send + 'static,
     C: FnOnce(AppContextImpl, W, HWND) -> I + Send + 'static,
 {
@@ -200,7 +205,7 @@ pub fn spawn_window_thread<W, I, C, F>(
         });
 
         let user_handler = user_constructor(window);
-        let interposer = interposer_constructor(app.clone(), user_handler, hwnd);
+        let interposer = RefCell::new(interposer_constructor(app.clone(), user_handler, hwnd));
 
         let event_loop = EventLoop {
             interposer: Cell::new(addr_of!(interposer)),
@@ -352,11 +357,11 @@ fn wndproc(state: &EventLoop, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
         (x, y).into()
     }
 
-    let handler = unsafe { &*state.interposer.get() };
+    let handler = || unsafe { &*state.interposer.get() }.borrow_mut();
 
     match msg {
         WM_CLOSE => {
-            handler.on_close_request();
+            handler().on_close_request();
             LRESULT(0)
         }
         UM_DESTROY_WINDOW => {
@@ -370,7 +375,7 @@ fn wndproc(state: &EventLoop, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
             LRESULT(0)
         }
         WM_SHOWWINDOW => {
-            handler.on_visible(wparam.0 != 0);
+            handler().on_visible(wparam.0 != 0);
             LRESULT(0)
         }
         WM_ENTERSIZEMOVE => {
@@ -381,7 +386,7 @@ fn wndproc(state: &EventLoop, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
             if state.is_resizing.get() {
                 state.is_resizing.set(false);
                 state.is_in_size_move.set(false);
-                handler.on_end_resize();
+                handler().on_end_resize();
             }
             LRESULT(0)
         }
@@ -398,26 +403,26 @@ fn wndproc(state: &EventLoop, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
 
             if is_resizing {
                 if state.is_in_size_move.get() && !state.is_resizing.get() {
-                    handler.on_begin_resize();
+                    handler().on_begin_resize();
                     state.is_resizing.set(true);
                 }
 
                 state.size.set((width, height));
 
                 // todo: handle dpi change -dz
-                handler.on_resize(Size::new(width, height), Scale::new(1.0, 1.0));
+                handler().on_resize(Size::new(width, height), Scale::new(1.0, 1.0));
             }
 
             LRESULT(0)
         }
         UM_REDRAW_REQUEST => {
             let request = extract_redraw_request(wparam, lparam);
-            handler.on_redraw_request(request);
+            handler().on_redraw_request(request);
             LRESULT(0)
         }
         UM_VSYNC => {
             let (frame_id, rate) = decode_reply_vsync(wparam, lparam);
-            handler.on_vsync(frame_id, rate);
+            handler().on_vsync(frame_id, rate);
 
             unsafe { RedrawWindow(hwnd, None, None, RDW_INTERNALPAINT) };
 
@@ -425,7 +430,7 @@ fn wndproc(state: &EventLoop, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
         }
         UM_COMPOSITION_RATE => {
             let (frame_id, rate) = decode_reply_device_update(wparam, lparam);
-            handler.on_composition_rate(frame_id, rate);
+            handler().on_composition_rate(frame_id, rate);
             LRESULT(0)
         }
         WM_PAINT => {
@@ -433,7 +438,7 @@ fn wndproc(state: &EventLoop, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
             let _hdc = unsafe { BeginPaint(hwnd, &mut ps) };
             unsafe { EndPaint(hwnd, &ps) };
 
-            handler.on_os_paint();
+            handler().on_os_paint();
             LRESULT(0)
         }
         WM_MOUSEMOVE => {
@@ -452,27 +457,27 @@ fn wndproc(state: &EventLoop, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
             }
 
             let mouse_coords = mouse_coords(lparam);
-            handler.on_pointer_move(mouse_coords);
+            handler().on_pointer_move(mouse_coords);
             LRESULT(0)
         }
         WM_MOUSELEAVE => {
-            handler.on_pointer_leave();
+            handler().on_pointer_leave();
             LRESULT(0)
         }
         WM_MOUSEWHEEL => {
             #[allow(clippy::cast_possible_wrap)]
             let delta = f32::from((wparam.0 >> 16) as i16) / 120.0;
-            handler.on_scroll(Axis::Y, delta);
+            handler().on_scroll(Axis::Y, delta);
             LRESULT(0)
         }
         WM_MOUSEHWHEEL => {
             #[allow(clippy::cast_possible_wrap)]
             let delta = f32::from((wparam.0 >> 16) as i16) / 120.0;
-            handler.on_scroll(Axis::X, delta);
+            handler().on_scroll(Axis::X, delta);
             LRESULT(0)
         }
         WM_LBUTTONDOWN => {
-            handler.on_mouse_button(
+            handler().on_mouse_button(
                 MouseButton::Left,
                 ButtonState::Pressed,
                 mouse_coords(lparam),
@@ -480,7 +485,7 @@ fn wndproc(state: &EventLoop, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
             LRESULT(0)
         }
         WM_LBUTTONUP => {
-            handler.on_mouse_button(
+            handler().on_mouse_button(
                 MouseButton::Left,
                 ButtonState::Released,
                 mouse_coords(lparam),
@@ -488,7 +493,7 @@ fn wndproc(state: &EventLoop, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
             LRESULT(0)
         }
         WM_RBUTTONDOWN => {
-            handler.on_mouse_button(
+            handler().on_mouse_button(
                 MouseButton::Right,
                 ButtonState::Pressed,
                 mouse_coords(lparam),
@@ -496,7 +501,7 @@ fn wndproc(state: &EventLoop, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
             LRESULT(0)
         }
         WM_RBUTTONUP => {
-            handler.on_mouse_button(
+            handler().on_mouse_button(
                 MouseButton::Right,
                 ButtonState::Released,
                 mouse_coords(lparam),
@@ -504,7 +509,7 @@ fn wndproc(state: &EventLoop, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
             LRESULT(0)
         }
         WM_MBUTTONDOWN => {
-            handler.on_mouse_button(
+            handler().on_mouse_button(
                 MouseButton::Middle,
                 ButtonState::Pressed,
                 mouse_coords(lparam),
@@ -512,7 +517,7 @@ fn wndproc(state: &EventLoop, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
             LRESULT(0)
         }
         WM_MBUTTONUP => {
-            handler.on_mouse_button(
+            handler().on_mouse_button(
                 MouseButton::Middle,
                 ButtonState::Released,
                 mouse_coords(lparam),

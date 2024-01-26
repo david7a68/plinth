@@ -3,6 +3,9 @@ use std::{
     ops::{Add, AddAssign, Div, Mul, Sub},
 };
 
+#[cfg(target_os = "windows")]
+use crate::platform::win32 as platform;
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Instant(pub f64);
 
@@ -11,17 +14,17 @@ impl Instant {
 
     #[must_use]
     pub fn now() -> Self {
-        Self(crate::platform::present_time_now())
+        Self(platform::present_time_now())
     }
 
     #[must_use]
     pub fn elapsed(&self) -> Duration {
-        Duration(crate::platform::present_time_now() - self.0)
+        Duration(platform::present_time_now() - self.0)
     }
 
     #[must_use]
     pub fn from_ticks(ticks: i64) -> Self {
-        Self(crate::platform::present_time_from_ticks(ticks))
+        Self(platform::present_time_from_ticks(ticks))
     }
 
     #[must_use]

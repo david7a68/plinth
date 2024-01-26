@@ -4,7 +4,7 @@ mod window;
 
 pub use application::{AppContextImpl, ApplicationImpl};
 pub(crate) use vsync::VSyncRequest;
-pub(crate) use window::GraphicsInterposer;
+pub(crate) use window::Interposer;
 pub use window::WindowImpl;
 
 use lazy_static::lazy_static;

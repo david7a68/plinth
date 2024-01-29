@@ -1,18 +1,25 @@
-use std::sync::{
-    mpsc::{Receiver, Sender},
-    Arc,
+use std::{
+    borrow::Cow,
+    sync::{
+        mpsc::{Receiver, Sender},
+        Arc,
+    },
 };
 
+use parking_lot::RwLock;
+use slotmap::SlotMap;
 use windows::Win32::Graphics::DirectComposition::{DCompositionCreateDevice2, IDCompositionDevice};
 
 use crate::{
-    graphics::GraphicsConfig,
+    graphics::{GraphicsConfig, Image},
+    io::{self, LocationId},
     platform::dx12,
     window::{WindowError, WindowSpec},
     EventHandler, Window,
 };
 
 use super::{
+    loader::{spawn_resource_thread, LoaderMessage},
     vsync::{VSyncRequest, VsyncThread},
     window::spawn_window_thread,
 };
@@ -42,6 +49,33 @@ impl ApplicationImpl {
             app_receiver,
             vsync_request_receiver,
         }
+    }
+
+    pub fn add_resource_location(&mut self, location: impl io::Location) -> io::LocationId {
+        self.context.add_resource_location(location)
+    }
+
+    pub fn add_image_loader(
+        &mut self,
+        location: io::LocationId,
+        loader: impl io::ImageLoader + Send + 'static,
+    ) -> Result<(), io::Error> {
+        self.context.add_image_loader(location, loader)
+    }
+
+    pub fn load_image(
+        &mut self,
+        path: Cow<'static, str>,
+    ) -> io::AsyncLoad<Result<Image, io::Error>> {
+        self.context.load_image(path)
+    }
+
+    pub fn load_image_from_location(
+        &mut self,
+        location: io::LocationId,
+        path: Cow<'static, str>,
+    ) -> io::AsyncLoad<Result<Image, io::Error>> {
+        self.context.load_image_from_location(location, path)
     }
 
     pub fn spawn_window<W, F>(
@@ -86,9 +120,12 @@ impl ApplicationImpl {
 
 #[derive(Clone)]
 pub struct AppContextImpl {
+    // Don't put senders in Arc since they're refcounted anyway. Not sure if
+    // this is the way to go. -dz
     pub inner: Arc<Win32Context>,
     pub sender: Sender<AppMessage>,
     pub vsync_sender: Sender<VSyncRequest>,
+    pub fs_location: LocationId,
 }
 
 impl AppContextImpl {
@@ -98,11 +135,83 @@ impl AppContextImpl {
         sender: Sender<AppMessage>,
         vsync_sender: Sender<VSyncRequest>,
     ) -> Self {
+        let inner = {
+            let dx12 = dx12::Device::new(config);
+            let compositor = unsafe { DCompositionCreateDevice2(None) }.unwrap();
+            let locations = SlotMap::with_capacity_and_key(1);
+
+            Arc::new(Win32Context {
+                dx12,
+                compositor,
+                locations: RwLock::new(locations),
+            })
+        };
+
+        let fs_location = {
+            let send = spawn_resource_thread(inner.clone(), io::fs::FileSystem::new());
+            inner.locations.write().insert(send)
+        };
+
+        #[cfg(any(feature = "png", feature = "jpeg"))]
+        {
+            let loader = io::image::DefaultLoader::new();
+            inner
+                .locations
+                .read()
+                .get(fs_location)
+                .unwrap()
+                .send(LoaderMessage::AddImageLoader(Box::new(loader)))
+                .unwrap();
+        }
+
         Self {
-            inner: Arc::new(Win32Context::new(config)),
+            inner,
             sender,
             vsync_sender,
+            fs_location,
         }
+    }
+
+    pub fn add_resource_location(&mut self, location: impl io::Location) -> io::LocationId {
+        let send = spawn_resource_thread(self.inner.clone(), location);
+        self.inner.locations.write().insert(send)
+    }
+
+    pub fn add_image_loader(
+        &mut self,
+        location: io::LocationId,
+        loader: impl io::ImageLoader + Send + 'static,
+    ) -> Result<(), io::Error> {
+        let locations = self.inner.locations.read();
+
+        let location = locations
+            .get(location)
+            .ok_or_else(|| io::Error::InvalidLocation(location))?;
+
+        location
+            .send(LoaderMessage::AddImageLoader(Box::new(loader)))
+            .unwrap();
+
+        Ok(())
+    }
+
+    pub fn load_image(
+        &mut self,
+        path: Cow<'static, str>,
+    ) -> io::AsyncLoad<Result<Image, io::Error>> {
+        self.load_image_from_location(self.fs_location, path)
+    }
+
+    pub fn load_image_from_location(
+        &mut self,
+        location: io::LocationId,
+        path: Cow<'static, str>,
+    ) -> io::AsyncLoad<Result<Image, io::Error>> {
+        let (send, recv) = std::sync::mpsc::sync_channel(1);
+        let message = LoaderMessage::LoadImage(path, send);
+        self.inner.locations.read()[location].send(message).unwrap();
+
+        io::AsyncLoad::new(recv)
     }
 
     pub fn spawn_window<W, F>(
@@ -125,16 +234,7 @@ impl AppContextImpl {
 pub struct Win32Context {
     pub dx12: Arc<dx12::Device>,
     pub compositor: IDCompositionDevice,
-}
-
-impl Win32Context {
-    fn new(config: &GraphicsConfig) -> Self {
-        let dx12 = dx12::Device::new(config);
-
-        let compositor = unsafe { DCompositionCreateDevice2(None) }.unwrap();
-
-        Self { dx12, compositor }
-    }
+    pub locations: RwLock<SlotMap<io::LocationId, Sender<LoaderMessage>>>,
 }
 
 unsafe impl Send for Win32Context {}

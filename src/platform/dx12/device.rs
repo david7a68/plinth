@@ -29,12 +29,12 @@ use windows::{
     },
 };
 
-use crate::graphics::GraphicsConfig;
+use crate::graphics::{
+    backend::{SubmitId, TextureId},
+    GraphicsConfig, PixelBufferRef,
+};
 
 use super::shaders::RectShader;
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-pub struct SubmitId(pub u64);
 
 pub struct Device {
     dxgi: IDXGIFactory2,
@@ -106,16 +106,42 @@ impl Device {
         })
     }
 
-    pub fn queue(&self) -> &ID3D12CommandQueue {
-        &self.queue.handle
-    }
-
     pub fn wait(&self, submit_id: SubmitId) {
         self.queue.wait(submit_id);
     }
 
     pub fn wait_for_idle(&self) {
         self.queue.wait_idle();
+    }
+
+    pub fn submit(&self, command_list: &ID3D12GraphicsCommandList) -> SubmitId {
+        self.queue.submit(&command_list.cast().unwrap())
+    }
+
+    pub fn upload_texture(&self, pixels: &PixelBufferRef) -> (TextureId, SubmitId) {
+        // behavior here depends on the size of the texture that we want to
+        // upload. if it's small enough, use a texture atlas, otherwise use a
+        // dedicated allocation.
+        //
+        // uploading happens with fixed-size buffers, which may require multiple
+        // submissions. Wait for all but the last one to complete before
+        // returning. Upload buffer size can be defined at runtime, but must be
+        // at least 65536 * 4 bytes (a 256x256 pixel square). This is a single
+        // row of the largest texture size we support at 4 bytes per pixel. The
+        // larger the upload buffer size, the fewer submissions we need to make
+        // and the faster the upload will be in exchange for memory consumption.
+        //
+        // note: the buffer size restriction is kind of arbitrary. The actual
+        // smallest limit is 256 bytes according to the DX spec.
+        //
+        // Submission strategies:
+        // - upload all at once on the graphics queue (atlas update)
+        // - upload in chunks on a low-priority graphics queue (???)
+        // - upload in chunks on the copy queue (large textures only)
+        //
+        // -dz
+
+        todo!()
     }
 
     pub fn alloc_buffer(&self, size: u64) -> ID3D12Resource {
@@ -169,10 +195,6 @@ impl Device {
             tracing::error!("Failed to create swapchain: {:?}", e);
             panic!();
         })
-    }
-
-    pub fn submit(&self, command_list: &ID3D12GraphicsCommandList) -> SubmitId {
-        self.queue.submit(&command_list.cast().unwrap())
     }
 }
 

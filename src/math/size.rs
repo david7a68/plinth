@@ -1,4 +1,4 @@
-pub struct Size<T, U> {
+pub struct Size<T, U = ()> {
     pub width: T,
     pub height: T,
     _unit: std::marker::PhantomData<U>,

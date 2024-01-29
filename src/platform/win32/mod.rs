@@ -1,4 +1,5 @@
 mod application;
+mod loader;
 mod vsync;
 mod window;
 

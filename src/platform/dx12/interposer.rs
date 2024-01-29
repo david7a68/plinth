@@ -34,7 +34,7 @@ use windows::{
 
 use crate::{
     frame::{FrameId, FramesPerSecond, RedrawRequest},
-    graphics::FrameInfo,
+    graphics::{backend::SubmitId, FrameInfo},
     limits::MAX_WINDOW_DIMENSION,
     math::{Point, Rect, Scale, Size},
     platform::{dx12::canvas::DrawCommand, win32},
@@ -44,7 +44,7 @@ use crate::{
 
 use super::{
     canvas::{Canvas, DrawList},
-    device::{Device, SubmitId},
+    device::Device,
 };
 
 pub struct Interposer<W: EventHandler> {
@@ -316,7 +316,7 @@ impl<W: EventHandler> win32::Interposer for Interposer<W> {
         unsafe {
             self.device
                 .handle
-                .CreateRenderTargetView(&image, None, self.swapchain_rtv)
+                .CreateRenderTargetView(&image, None, self.swapchain_rtv);
         };
 
         let submit_id = upload_draw_list(
@@ -356,10 +356,10 @@ impl<W: EventHandler> win32::Interposer for Interposer<W> {
                 RedrawWindow(self.hwnd, None, None, RDW_INTERNALPAINT);
             },
             RedrawRequest::AtFrame(frame_id) => {
-                send(win32::VSyncRequest::AtFrame(self.hwnd, frame_id))
+                send(win32::VSyncRequest::AtFrame(self.hwnd, frame_id));
             }
             RedrawRequest::AtFrameRate(rate) => {
-                send(win32::VSyncRequest::AtFrameRate(self.hwnd, rate))
+                send(win32::VSyncRequest::AtFrameRate(self.hwnd, rate));
             }
         }
     }

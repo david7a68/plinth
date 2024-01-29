@@ -163,14 +163,14 @@ impl<'a> VsyncThread<'a> {
                 get_main_output(&self.dxgi)
             };
 
-            if main_monitor != self.main_monitor {
+            let changed = main_monitor != self.main_monitor;
+            if changed {
                 self.composition_rate = get_output_refresh_rate(&main_output, main_monitor);
                 self.main_output = main_output;
                 self.main_monitor = main_monitor;
-                true
-            } else {
-                false
             }
+
+            changed
         }
     }
 

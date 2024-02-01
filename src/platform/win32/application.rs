@@ -1,35 +1,27 @@
-use std::sync::{
-    mpsc::{Receiver, Sender},
-    Arc,
+use std::{
+    borrow::Cow,
+    sync::{
+        mpsc::{Receiver, Sender},
+        Arc,
+    },
 };
 
 use parking_lot::RwLock;
-use windows::{
-    core::ComInterface,
-    Win32::{
-        Foundation::HWND,
-        Graphics::{
-            Direct3D12::{D3D12GetDebugInterface, ID3D12Debug1, ID3D12Debug5},
-            DirectComposition::{DCompositionCreateDevice2, IDCompositionDevice},
-            Dxgi::{CreateDXGIFactory2, IDXGIFactory2, DXGI_CREATE_FACTORY_DEBUG},
-        },
-    },
-};
+use slotmap::SlotMap;
+use windows::Win32::Graphics::DirectComposition::{DCompositionCreateDevice2, IDCompositionDevice};
 
 use crate::{
-    graphics::GraphicsConfig,
-    platform::{
-        dx12,
-        win32::{event_loop::spawn_event_loop, ui_thread::spawn_ui_thread},
-    },
+    graphics::{GraphicsConfig, Image},
+    io::{self, LocationId},
+    platform::dx12,
     window::{WindowError, WindowSpec},
-    Window, WindowEventHandler,
+    EventHandler, Window,
 };
 
 use super::{
-    swapchain::Swapchain,
-    ui_thread::UiEvent,
-    vsync::{VsyncRequest, VsyncThread},
+    loader::{spawn_resource_thread, LoaderMessage},
+    vsync::{VSyncRequest, VsyncThread},
+    window::spawn_window_thread,
 };
 
 pub enum AppMessage {
@@ -40,7 +32,7 @@ pub enum AppMessage {
 pub struct ApplicationImpl {
     context: AppContextImpl,
     app_receiver: Receiver<AppMessage>,
-    vsync_request_receiver: Receiver<VsyncRequest<UiEvent>>,
+    vsync_request_receiver: Receiver<VSyncRequest>,
 }
 
 impl ApplicationImpl {
@@ -59,13 +51,40 @@ impl ApplicationImpl {
         }
     }
 
+    pub fn add_resource_location(&mut self, location: impl io::Location) -> io::LocationId {
+        self.context.add_resource_location(location)
+    }
+
+    pub fn add_image_loader(
+        &mut self,
+        location: io::LocationId,
+        loader: impl io::ImageLoader + Send + 'static,
+    ) -> Result<(), io::Error> {
+        self.context.add_image_loader(location, loader)
+    }
+
+    pub fn load_image(
+        &mut self,
+        path: Cow<'static, str>,
+    ) -> io::AsyncLoad<Result<Image, io::Error>> {
+        self.context.load_image(path)
+    }
+
+    pub fn load_image_from_location(
+        &mut self,
+        location: io::LocationId,
+        path: Cow<'static, str>,
+    ) -> io::AsyncLoad<Result<Image, io::Error>> {
+        self.context.load_image_from_location(location, path)
+    }
+
     pub fn spawn_window<W, F>(
         &mut self,
         spec: WindowSpec,
         constructor: F,
     ) -> Result<(), WindowError>
     where
-        W: WindowEventHandler,
+        W: EventHandler,
         F: FnMut(Window) -> W + Send + 'static,
     {
         self.context.spawn_window(spec, constructor)
@@ -73,7 +92,7 @@ impl ApplicationImpl {
 
     pub fn run(&mut self) {
         let mut window_count = 0;
-        let mut vsync = VsyncThread::new(&self.context, &self.vsync_request_receiver);
+        let mut vsync = VsyncThread::new(&self.vsync_request_receiver);
 
         // block on messages to start
         match self.app_receiver.recv() {
@@ -99,41 +118,14 @@ impl ApplicationImpl {
     }
 }
 
-pub struct Win32Context {
-    pub dxgi: IDXGIFactory2,
-    pub dx12: Arc<dx12::Device>,
-    pub compositor: IDCompositionDevice,
-    debug_mode: bool,
-}
-
-impl Win32Context {
-    fn new(config: &GraphicsConfig) -> Self {
-        let dxgi: IDXGIFactory2 = create_factory(config.debug_mode);
-        let dx12 = dx12::Device::new(&dxgi, config);
-
-        let compositor = unsafe { DCompositionCreateDevice2(None) }.unwrap();
-
-        Self {
-            dxgi,
-            dx12,
-            compositor,
-            debug_mode: config.debug_mode,
-        }
-    }
-
-    pub fn update_device(&mut self) {
-        self.dxgi = create_factory(self.debug_mode);
-    }
-}
-
-unsafe impl Send for Win32Context {}
-unsafe impl Sync for Win32Context {}
-
 #[derive(Clone)]
 pub struct AppContextImpl {
-    pub inner: Arc<RwLock<Win32Context>>,
+    // Don't put senders in Arc since they're refcounted anyway. Not sure if
+    // this is the way to go. -dz
+    pub inner: Arc<Win32Context>,
     pub sender: Sender<AppMessage>,
-    pub vsync_sender: Sender<VsyncRequest<UiEvent>>,
+    pub vsync_sender: Sender<VSyncRequest>,
+    pub fs_location: LocationId,
 }
 
 impl AppContextImpl {
@@ -141,13 +133,85 @@ impl AppContextImpl {
     fn new(
         config: &GraphicsConfig,
         sender: Sender<AppMessage>,
-        vsync_sender: Sender<VsyncRequest<UiEvent>>,
+        vsync_sender: Sender<VSyncRequest>,
     ) -> Self {
+        let inner = {
+            let dx12 = dx12::Device::new(config);
+            let compositor = unsafe { DCompositionCreateDevice2(None) }.unwrap();
+            let locations = SlotMap::with_capacity_and_key(1);
+
+            Arc::new(Win32Context {
+                dx12,
+                compositor,
+                locations: RwLock::new(locations),
+            })
+        };
+
+        let fs_location = {
+            let send = spawn_resource_thread(inner.clone(), io::fs::FileSystem::new());
+            inner.locations.write().insert(send)
+        };
+
+        #[cfg(any(feature = "png", feature = "jpeg"))]
+        {
+            let loader = io::image::DefaultLoader::new();
+            inner
+                .locations
+                .read()
+                .get(fs_location)
+                .unwrap()
+                .send(LoaderMessage::AddImageLoader(Box::new(loader)))
+                .unwrap();
+        }
+
         Self {
-            inner: Arc::new(RwLock::new(Win32Context::new(config))),
+            inner,
             sender,
             vsync_sender,
+            fs_location,
         }
+    }
+
+    pub fn add_resource_location(&mut self, location: impl io::Location) -> io::LocationId {
+        let send = spawn_resource_thread(self.inner.clone(), location);
+        self.inner.locations.write().insert(send)
+    }
+
+    pub fn add_image_loader(
+        &mut self,
+        location: io::LocationId,
+        loader: impl io::ImageLoader + Send + 'static,
+    ) -> Result<(), io::Error> {
+        let locations = self.inner.locations.read();
+
+        let location = locations
+            .get(location)
+            .ok_or_else(|| io::Error::InvalidLocation(location))?;
+
+        location
+            .send(LoaderMessage::AddImageLoader(Box::new(loader)))
+            .unwrap();
+
+        Ok(())
+    }
+
+    pub fn load_image(
+        &mut self,
+        path: Cow<'static, str>,
+    ) -> io::AsyncLoad<Result<Image, io::Error>> {
+        self.load_image_from_location(self.fs_location, path)
+    }
+
+    pub fn load_image_from_location(
+        &mut self,
+        location: io::LocationId,
+        path: Cow<'static, str>,
+    ) -> io::AsyncLoad<Result<Image, io::Error>> {
+        let (send, recv) = std::sync::mpsc::sync_channel(1);
+        let message = LoaderMessage::LoadImage(path, send);
+        self.inner.locations.read()[location].send(message).unwrap();
+
+        io::AsyncLoad::new(recv)
     }
 
     pub fn spawn_window<W, F>(
@@ -156,44 +220,22 @@ impl AppContextImpl {
         constructor: F,
     ) -> Result<(), WindowError>
     where
-        W: WindowEventHandler,
+        W: EventHandler,
         F: FnMut(Window) -> W + Send + 'static,
     {
-        let (ui_sender, ui_receiver) = std::sync::mpsc::channel();
+        // todo: select interposer based on active graphics api - dz
+        spawn_window_thread(self.clone(), spec, constructor, dx12::Interposer::new);
 
-        spawn_event_loop(spec, self.sender.clone(), ui_sender.clone());
-        spawn_ui_thread(self.clone(), constructor, ui_sender, ui_receiver);
-
+        // todo: error handling -dz
         Ok(())
     }
-
-    pub fn create_swapchain(&self, hwnd: HWND) -> Swapchain {
-        let this = self.inner.read();
-        Swapchain::new(&this.dxgi, &this.compositor, this.dx12.queue(), hwnd)
-    }
 }
 
-fn create_factory(debug: bool) -> IDXGIFactory2 {
-    let mut dxgi_flags = 0;
-
-    if debug {
-        let mut controller: Option<ID3D12Debug1> = None;
-        unsafe { D3D12GetDebugInterface(&mut controller) }.unwrap();
-
-        if let Some(controller) = controller {
-            tracing::info!("Enabling D3D12 debug layer");
-            unsafe { controller.EnableDebugLayer() };
-            unsafe { controller.SetEnableGPUBasedValidation(true) };
-
-            if let Ok(controller) = controller.cast::<ID3D12Debug5>() {
-                unsafe { controller.SetEnableAutoName(true) };
-            }
-        } else {
-            tracing::warn!("Failed to enable D3D12 debug layer");
-        }
-
-        dxgi_flags |= DXGI_CREATE_FACTORY_DEBUG;
-    }
-
-    unsafe { CreateDXGIFactory2(dxgi_flags) }.unwrap()
+pub struct Win32Context {
+    pub dx12: Arc<dx12::Device>,
+    pub compositor: IDCompositionDevice,
+    pub locations: RwLock<SlotMap<io::LocationId, Sender<LoaderMessage>>>,
 }
+
+unsafe impl Send for Win32Context {}
+unsafe impl Sync for Win32Context {}

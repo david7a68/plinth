@@ -1,8 +1,9 @@
 use plinth::{
     frame::{FramesPerSecond, RedrawRequest, SecondsPerFrame},
     graphics::{Canvas, Color, FrameInfo, GraphicsConfig},
+    math::{Point, Size},
     time::Instant,
-    Application, Axis, Input, Window, WindowEvent, WindowEventHandler, WindowSpec,
+    Application, Axis, EventHandler, PhysicalPixel, Window, WindowSpec,
 };
 
 #[cfg(feature = "profile")]
@@ -31,21 +32,25 @@ impl AppWindow {
     }
 }
 
-impl WindowEventHandler for AppWindow {
-    fn on_event(&mut self, event: WindowEvent) {
-        match event {
-            WindowEvent::CloseRequest => {
-                self.window.close();
-            }
-            _ => {}
-        }
+impl EventHandler for AppWindow {
+    fn on_close_request(&mut self) {
+        self.window.close();
     }
 
-    fn on_input(&mut self, input: Input) {
-        let Input::Scroll(axis, delta) = input else {
-            return;
-        };
+    fn on_mouse_button(
+        &mut self,
+        _button: plinth::MouseButton,
+        _state: plinth::ButtonState,
+        _location: Point<i16, PhysicalPixel>,
+    ) {
+        // no-op
+    }
 
+    fn on_pointer_move(&mut self, _location: Point<i16, PhysicalPixel>) {
+        // no-op
+    }
+
+    fn on_scroll(&mut self, axis: Axis, delta: f32) {
         if axis == Axis::Y {
             self.refresh_rate = (self.refresh_rate + delta as _).max(FramesPerSecond::ZERO);
             self.window
@@ -53,7 +58,7 @@ impl WindowEventHandler for AppWindow {
         }
     }
 
-    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameInfo) {
+    fn on_repaint(&mut self, canvas: &mut dyn Canvas, timing: &FrameInfo) {
         let now = Instant::now();
         let elapsed = now - self.prev_draw_start_time;
         self.prev_draw_start_time = now;
@@ -92,7 +97,7 @@ pub fn main() {
     app.spawn_window(
         WindowSpec {
             title: "VSync Demo".to_owned(),
-            size: (640, 480).into(),
+            size: Size::new(640, 480),
             ..Default::default()
         },
         AppWindow::new,

@@ -2,49 +2,46 @@ use crate::math::Rect;
 
 use super::Color;
 
-pub struct RoundRect<U> {
-    pub rect: Rect<U>,
+pub struct RoundRect {
+    pub rect: Rect<f32>,
     pub color: Color,
 }
 
-impl<U> RoundRect<U> {
-    pub fn builder(rect: Rect<U>) -> RoundRectBuilder<U> {
+impl RoundRect {
+    #[must_use]
+    pub fn builder(rect: Rect<f32>) -> RoundRectBuilder {
         RoundRectBuilder::new(rect)
-    }
-
-    pub fn retype<U2>(self) -> RoundRect<U2> {
-        RoundRect {
-            rect: self.rect.retype(),
-            color: self.color,
-        }
     }
 }
 
-impl<U> From<RoundRectBuilder<U>> for RoundRect<U> {
-    fn from(value: RoundRectBuilder<U>) -> Self {
+impl From<RoundRectBuilder> for RoundRect {
+    fn from(value: RoundRectBuilder) -> Self {
         value.build()
     }
 }
 
-pub struct RoundRectBuilder<U> {
-    rect: Rect<U>,
+pub struct RoundRectBuilder {
+    rect: Rect<f32>,
     color: Color,
 }
 
-impl<U> RoundRectBuilder<U> {
-    pub fn new(rect: Rect<U>) -> Self {
+impl RoundRectBuilder {
+    #[must_use]
+    pub fn new(rect: Rect<f32>) -> Self {
         Self {
             rect,
             color: Color::BLACK,
         }
     }
 
+    #[must_use]
     pub fn color(mut self, color: Color) -> Self {
         self.color = color;
         self
     }
 
-    pub fn build(self) -> RoundRect<U> {
+    #[must_use]
+    pub fn build(self) -> RoundRect {
         RoundRect {
             rect: self.rect,
             color: self.color,

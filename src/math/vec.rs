@@ -1,13 +1,116 @@
-use super::{Scale, Translate};
-
-pub struct Vec2<U> {
-    pub x: f32,
-    pub y: f32,
+pub struct Vec2<T, U = ()> {
+    pub x: T,
+    pub y: T,
     _unit: std::marker::PhantomData<U>,
 }
 
-impl<U> Vec2<U> {
-    pub fn new(x: f32, y: f32) -> Self {
+macro_rules! impl_binop {
+    ($ty:ty, $($trait:ident, $fn:ident, $op:tt),*) => {
+        $(
+            impl<U, R: Into<Vec2<$ty, U>>> std::ops::$trait<R> for Vec2<$ty, U>
+            {
+                type Output = Self;
+
+                #[inline]
+                fn $fn(self, rhs: R) -> Self::Output {
+                    let rhs = rhs.into();
+                    Self::new(self.x $op rhs.x, self.y $op rhs.y)
+                }
+            }
+        )*
+    };
+}
+
+macro_rules! impl_op_assign {
+    ($ty:ty, $($trait:ident, $fn:ident, $op:tt),*) => {
+        $(
+            impl<U, R: Into<Vec2<$ty, U>>> std::ops::$trait<R> for Vec2<$ty, U>
+            {
+                #[inline]
+                fn $fn(&mut self, rhs: R) {
+                    let rhs = rhs.into();
+                    self.x $op rhs.x;
+                    self.y $op rhs.y;
+                }
+            }
+        )*
+    };
+}
+
+macro_rules! impl_vec2_ops {
+    ($($ty:ty),*) => {
+        $(
+            impl<U> From<$ty> for Vec2<$ty, U> {
+                #[inline]
+                fn from(x: $ty) -> Self {
+                    Self::new(x, x)
+                }
+            }
+
+            impl<U> From<($ty, $ty)> for Vec2<$ty, U> {
+                #[inline]
+                fn from((x, y): ($ty, $ty)) -> Self {
+                    Self::new(x, y)
+                }
+            }
+
+            impl<U> From<Vec2<$ty, U>> for ($ty, $ty) {
+                #[inline]
+                fn from(v: Vec2<$ty, U>) -> Self {
+                    (v.x, v.y)
+                }
+            }
+
+            impl<U> PartialEq for Vec2<$ty, U> {
+                #[inline]
+                fn eq(&self, rhs: &Self) -> bool {
+                    self.x == rhs.x && self.y == rhs.y
+                }
+            }
+
+            impl_binop!($ty, Add, add, +);
+            impl_binop!($ty, Sub, sub, -);
+            impl_binop!($ty, Mul, mul, *);
+            impl_binop!($ty, Div, div, /);
+            impl_binop!($ty, Rem, rem, %);
+
+            impl_op_assign!($ty, AddAssign, add_assign, +=);
+            impl_op_assign!($ty, SubAssign, sub_assign, -=);
+            impl_op_assign!($ty, MulAssign, mul_assign, *=);
+            impl_op_assign!($ty, DivAssign, div_assign, /=);
+            impl_op_assign!($ty, RemAssign, rem_assign, %=);
+        )*
+    };
+}
+
+impl_vec2_ops!(u16, i16, f32);
+
+macro_rules! impl_f32_from_promote {
+    ($($other:ty),*) => {
+        $(
+            impl<U> From<Vec2<$other, U>> for Vec2<f32, U> {
+                #[inline]
+                fn from(v: Vec2<$other, U>) -> Self {
+                    Self::new(f32::from(v.x), f32::from(v.y))
+                }
+            }
+
+            impl<U> From<($other, $other)> for Vec2<f32, U> {
+                #[inline]
+                fn from((x, y): ($other, $other)) -> Self {
+                    Self::new(f32::from(x), f32::from(y))
+                }
+            }
+        )*
+    };
+}
+
+impl_f32_from_promote!(u16, i16);
+
+impl<T, U> Vec2<T, U> {
+    #[inline]
+    #[must_use]
+    pub fn new(x: T, y: T) -> Self {
         Self {
             x,
             y,
@@ -15,164 +118,37 @@ impl<U> Vec2<U> {
         }
     }
 
-    pub fn retype<U2>(self) -> Vec2<U2> {
+    #[inline]
+    #[must_use]
+    pub fn splat(x: T) -> Self
+    where
+        T: Copy,
+    {
+        Self::new(x, x)
+    }
+
+    #[inline]
+    #[must_use]
+    pub fn retype<U2>(self) -> Vec2<T, U2> {
         Vec2::new(self.x, self.y)
     }
 }
 
-impl<U> std::ops::Neg for Vec2<U> {
-    type Output = Self;
-
-    fn neg(self) -> Self::Output {
-        Self::new(-self.x, -self.y)
-    }
-}
-
-impl<U> std::ops::Add for Vec2<U> {
-    type Output = Self;
-
-    fn add(self, rhs: Self) -> Self::Output {
-        Self::new(self.x + rhs.x, self.y + rhs.y)
-    }
-}
-
-impl<U> std::ops::AddAssign for Vec2<U> {
-    fn add_assign(&mut self, rhs: Self) {
-        self.x += rhs.x;
-        self.y += rhs.y;
-    }
-}
-
-impl<U> std::ops::Sub for Vec2<U> {
-    type Output = Self;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        Self::new(self.x - rhs.x, self.y - rhs.y)
-    }
-}
-
-impl<U> std::ops::SubAssign for Vec2<U> {
-    fn sub_assign(&mut self, rhs: Self) {
-        self.x -= rhs.x;
-        self.y -= rhs.y;
-    }
-}
-
-impl<U> std::ops::Rem<Vec2<U>> for Vec2<U> {
-    type Output = Self;
-
-    fn rem(self, rhs: Self) -> Self::Output {
-        Self::new(self.x % rhs.x, self.y % rhs.y)
-    }
-}
-
-impl<U> std::ops::RemAssign<Vec2<U>> for Vec2<U> {
-    fn rem_assign(&mut self, rhs: Self) {
-        self.x %= rhs.x;
-        self.y %= rhs.y;
-    }
-}
-
-impl<U, U2> std::ops::Add<Translate<U, U2>> for Vec2<U> {
-    type Output = Vec2<U2>;
-
-    fn add(self, rhs: Translate<U, U2>) -> Self::Output {
-        Vec2::new(self.x + rhs.x, self.y + rhs.y)
-    }
-}
-
-impl<U> std::ops::AddAssign<Translate<U, U>> for Vec2<U> {
-    fn add_assign(&mut self, rhs: Translate<U, U>) {
-        self.x += rhs.x;
-        self.y += rhs.y;
-    }
-}
-
-impl<U, U2> std::ops::Sub<Translate<U, U2>> for Vec2<U2> {
-    type Output = Vec2<U>;
-
-    fn sub(self, rhs: Translate<U, U2>) -> Self::Output {
-        Vec2::new(self.x - rhs.x, self.y - rhs.y)
-    }
-}
-
-impl<U, U2> std::ops::Mul<Scale<U, U2>> for Vec2<U> {
-    type Output = Vec2<U2>;
-
-    fn mul(self, rhs: Scale<U, U2>) -> Self::Output {
-        Vec2::new(self.x * rhs.x, self.y * rhs.y)
-    }
-}
-
-impl<U> std::ops::MulAssign<Scale<U, U>> for Vec2<U> {
-    fn mul_assign(&mut self, rhs: Scale<U, U>) {
-        self.x *= rhs.x;
-        self.y *= rhs.y;
-    }
-}
-
-impl<U, U2> std::ops::Div<Scale<U, U2>> for Vec2<U2> {
-    type Output = Vec2<U>;
-
-    fn div(self, rhs: Scale<U, U2>) -> Self::Output {
-        Vec2::new(self.x / rhs.x, self.y / rhs.y)
-    }
-}
-
-impl<U> std::ops::Mul<f32> for Vec2<U> {
-    type Output = Self;
-
-    fn mul(self, rhs: f32) -> Self::Output {
-        Self::new(self.x * rhs, self.y * rhs)
-    }
-}
-
-impl<U> std::ops::MulAssign<f32> for Vec2<U> {
-    fn mul_assign(&mut self, rhs: f32) {
-        self.x *= rhs;
-        self.y *= rhs;
-    }
-}
-
-impl<U> std::ops::Div<f32> for Vec2<U> {
-    type Output = Self;
-
-    fn div(self, rhs: f32) -> Self::Output {
-        Self::new(self.x / rhs, self.y / rhs)
-    }
-}
-
-impl<U> std::ops::DivAssign<f32> for Vec2<U> {
-    fn div_assign(&mut self, rhs: f32) {
-        self.x /= rhs;
-        self.y /= rhs;
-    }
-}
-
-impl<U> std::ops::Rem<f32> for Vec2<U> {
-    type Output = Self;
-
-    fn rem(self, rhs: f32) -> Self::Output {
-        Self::new(self.x % rhs, self.y % rhs)
-    }
-}
-
-impl<U> std::ops::RemAssign<f32> for Vec2<U> {
-    fn rem_assign(&mut self, rhs: f32) {
-        self.x %= rhs;
-        self.y %= rhs;
-    }
-}
-
-impl<U> Clone for Vec2<U> {
+impl<T: Clone, U> Clone for Vec2<T, U> {
     fn clone(&self) -> Self {
-        *self
+        Self::new(self.x.clone(), self.y.clone())
     }
 }
 
-impl<U> Copy for Vec2<U> {}
+impl<T: Copy, U> Copy for Vec2<T, U> {}
 
-impl<U> std::fmt::Debug for Vec2<U> {
+impl<T: Default, U> Default for Vec2<T, U> {
+    fn default() -> Self {
+        Self::new(Default::default(), Default::default())
+    }
+}
+
+impl<T: std::fmt::Debug, U> std::fmt::Debug for Vec2<T, U> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Vec2")
             .field("x", &self.x)
@@ -182,31 +158,31 @@ impl<U> std::fmt::Debug for Vec2<U> {
     }
 }
 
-impl<U> std::fmt::Display for Vec2<U> {
+impl<T: std::fmt::Display + std::fmt::Debug, U> std::fmt::Display for Vec2<T, U> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         <Self as std::fmt::Debug>::fmt(self, f)
     }
 }
 
-impl<U> PartialEq for Vec2<U> {
-    fn eq(&self, rhs: &Self) -> bool {
-        self.x == rhs.x && self.y == rhs.y
-    }
-}
+impl<T, U> std::ops::Index<usize> for Vec2<T, U> {
+    type Output = T;
 
-impl<U> From<(f32, f32)> for Vec2<U> {
-    fn from((x, y): (f32, f32)) -> Self {
-        Self {
-            x,
-            y,
-            _unit: std::marker::PhantomData,
+    fn index(&self, index: usize) -> &Self::Output {
+        match index {
+            0 => &self.x,
+            1 => &self.y,
+            _ => panic!("Index out of bounds"),
         }
     }
 }
 
-impl<U1, U2, U3> From<Translate<U1, U2>> for Vec2<U3> {
-    fn from(t: Translate<U1, U2>) -> Self {
-        Self::new(t.x, t.y)
+impl<T, U> std::ops::IndexMut<usize> for Vec2<T, U> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        match index {
+            0 => &mut self.x,
+            1 => &mut self.y,
+            _ => panic!("Index out of bounds"),
+        }
     }
 }
 
@@ -215,58 +191,74 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ops() {
-        let a = Vec2::<()>::new(1.0, 2.0);
-        let b = Vec2::<()>::new(3.0, 4.0);
+    fn u16_ops() {
+        let a = Vec2::<u16>::new(2, 6);
 
-        assert_eq!(-a, Vec2::new(-1.0, -2.0));
-        assert_eq!(a + b, Vec2::new(4.0, 6.0));
-        assert_eq!(a - b, Vec2::new(-2.0, -2.0));
-        assert_eq!(a % b, Vec2::new(1.0, 2.0));
+        // implicit conversion
+        assert_eq!(a * 2, (4, 12).into());
+        assert_eq!(a / 2, (1, 3).into());
+        assert_eq!(a % 3, (2, 0).into());
 
-        let mut c = a;
+        // explicit conversion
+        assert_eq!(a * Vec2::new(2, 2), (4, 12).into());
+        assert_eq!(a / Vec2::new(2, 2), (1, 3).into());
+        assert_eq!(a % Vec2::splat(3), (2, 0).into());
 
-        c += b;
-        assert_eq!(c, Vec2::new(4.0, 6.0));
+        let mut b = a;
 
-        c -= b;
-        assert_eq!(c, Vec2::new(1.0, 2.0));
-
-        c %= b;
-        assert_eq!(c, Vec2::new(1.0, 2.0));
+        b *= 2;
+        assert_eq!(b, (4, 12).into());
+        b /= 2;
+        assert_eq!(b, (2, 6).into());
+        b %= 3;
+        assert_eq!(b, (2, 0).into());
     }
 
     #[test]
-    fn float_ops() {
-        let a = Vec2::<()>::new(1.0, 2.0);
+    fn i16_ops() {
+        let a = Vec2::<i16>::new(2, 6);
 
-        assert_eq!(a * 2.0, Vec2::new(2.0, 4.0));
-        assert_eq!(a / 2.0, Vec2::new(0.5, 1.0));
-        assert_eq!(a % 2.0, Vec2::new(1.0, 0.0));
+        // implicit conversion
+        assert_eq!(a * 2, (4, 12).into());
+        assert_eq!(a / 2, (1, 3).into());
+        assert_eq!(a % 3, (2, 0).into());
+
+        // explicit conversion
+        assert_eq!(a * Vec2::new(2, 2), (4, 12).into());
+        assert_eq!(a / Vec2::new(2, 2), (1, 3).into());
+        assert_eq!(a % Vec2::splat(3), (2, 0).into());
+
+        let mut b = a;
+
+        b *= 2;
+        assert_eq!(b, (4, 12).into());
+        b /= 2;
+        assert_eq!(b, (2, 6).into());
+        b %= 3;
+        assert_eq!(b, (2, 0).into());
+    }
+
+    #[test]
+    fn f32_ops() {
+        let a = Vec2::<f32>::new(1.0, 2.0);
+
+        // implicit conversion
+        assert_eq!(a * 2.0, (2.0, 4.0).into());
+        assert_eq!(a / 2.0, (0.5, 1.0).into());
+        assert_eq!(a % 2.0, (1.0, 0.0).into());
+
+        // explicit conversion
+        assert_eq!(a * Vec2::new(2.0, 2.0), (2.0, 4.0).into());
+        assert_eq!(a / Vec2::new(2.0, 2.0), (0.5, 1.0).into());
+        assert_eq!(a % Vec2::new(2.0, 2.0), (1.0, 0.0).into());
 
         let mut b = a;
 
         b *= 2.0;
-        assert_eq!(b, Vec2::new(2.0, 4.0));
+        assert_eq!(b, (2.0, 4.0).into());
         b /= 2.0;
-        assert_eq!(b, Vec2::new(1.0, 2.0));
+        assert_eq!(b, (1.0, 2.0).into());
         b %= 2.0;
-        assert_eq!(b, Vec2::new(1.0, 0.0));
-    }
-
-    #[test]
-    fn transform_ops() {
-        struct A;
-        struct B;
-
-        let a = Vec2::<A>::new(1.0, 2.0);
-
-        let t = Translate::<A, B>::new(1.0, 2.0);
-        assert_eq!(a + t, Vec2::<B>::new(2.0, 4.0));
-        assert_eq!((a + t) - t, Vec2::<A>::new(1.0, 2.0));
-
-        let s = Scale::<A, B>::new(2.0, 3.0);
-        assert_eq!(a * s, Vec2::<B>::new(2.0, 6.0));
-        assert_eq!((a * s) / s, Vec2::<A>::new(1.0, 2.0));
+        assert_eq!(b, (1.0, 0.0).into());
     }
 }

@@ -3,13 +3,14 @@ use std::env;
 const RESOURCE_DIR: &str = "./res/";
 
 fn main() {
-    println!("cargo:rerun-if-changed={}", RESOURCE_DIR);
+    println!("cargo:rerun-if-changed={RESOURCE_DIR}");
 
     let out_dir = env::var("OUT_DIR").unwrap();
 
     compile_dx12_shaders(&out_dir);
 }
 
+#[derive(Clone, Copy)]
 enum Kind {
     Vertex,
     Pixel,
@@ -42,7 +43,7 @@ fn compile_dx12_shader(main: &str, kind: Kind, src: &str, src_dir: &str, out: &s
     };
 
     check_output(
-        std::process::Command::new("./vendor/dxc/bin/x64/dxc.exe")
+        &std::process::Command::new("./vendor/dxc/bin/x64/dxc.exe")
             .args(["-T", model]) // shader model
             .args(["-E", main]) // entry point
             .args(["-Fo", &format!("{out_dir}/{out}.cso")]) // output
@@ -57,7 +58,7 @@ fn compile_dx12_shader(main: &str, kind: Kind, src: &str, src_dir: &str, out: &s
     );
 }
 
-fn check_output(output: std::process::Output) {
+fn check_output(output: &std::process::Output) {
     if output.status.code() != Some(0) {
         println!("cargo:warn {}", String::from_utf8_lossy(&output.stderr));
     }

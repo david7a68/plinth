@@ -6,7 +6,8 @@ use crate::{
 };
 
 #[cfg(target_os = "windows")]
-use crate::platform;
+use crate::platform::win32 as platform;
+
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Axis {
@@ -39,42 +40,16 @@ pub enum WindowError {
     TooManyWindows,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum Input {
-    MouseButton(MouseButton, ButtonState, WindowPoint),
-    PointerMove(WindowPoint),
-    PointerLeave,
-    Scroll(Axis, f32),
-}
+pub struct LogicalPixel;
 
-#[derive(Clone, Copy, Debug)]
-pub enum WindowEvent {
-    CloseRequest,
-    Visible(bool),
-    BeginResize,
-    Resize(WindowSize),
-    EndResize,
-}
+pub struct PhysicalPixel;
 
-#[derive(Clone, Copy, Debug, Default)]
-pub struct WindowSize {
-    pub width: u16,
-    pub height: u16,
-    pub dpi: u16,
-}
-
-#[derive(Clone, Copy, Debug, Default)]
-pub struct WindowPoint {
-    pub x: i16,
-    pub y: i16,
-}
-
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct WindowSpec {
     pub title: String,
-    pub size: Size<Window>,
-    pub min_size: Option<Size<Window>>,
-    pub max_size: Option<Size<Window>>,
+    pub size: Size<u16, PhysicalPixel>,
+    pub min_size: Option<Size<u16, PhysicalPixel>>,
+    pub max_size: Option<Size<u16, PhysicalPixel>>,
     pub resizable: bool,
     pub visible: bool,
 }
@@ -83,7 +58,7 @@ impl Default for WindowSpec {
     fn default() -> Self {
         Self {
             title: String::new(),
-            size: Size::new(800.0, 600.0),
+            size: Size::new(800, 600),
             min_size: None,
             max_size: None,
             resizable: true,
@@ -93,7 +68,7 @@ impl Default for WindowSpec {
 }
 
 pub struct Window {
-    inner: platform::WindowImpl,
+    pub(crate) inner: platform::WindowImpl,
 }
 
 impl Window {
@@ -101,6 +76,7 @@ impl Window {
         Self { inner }
     }
 
+    #[must_use]
     pub fn app(&self) -> &AppContext {
         self.inner.app()
     }
@@ -114,20 +90,24 @@ impl Window {
         self.inner.request_redraw(request);
     }
 
+    #[must_use]
     pub fn refresh_rate(&self) -> RefreshRate {
         self.inner.refresh_rate()
     }
 
-    pub fn size(&self) -> Size<Window> {
+    #[must_use]
+    pub fn size(&self) -> Size<u16, PhysicalPixel> {
         self.inner.size()
     }
 
-    /// The HiDPI scale factor.
-    pub fn scale(&self) -> Scale<Window, Window> {
+    /// The `HiDPI` scale factor.
+    #[must_use]
+    pub fn scale(&self) -> Scale<f32, PhysicalPixel, LogicalPixel> {
         self.inner.scale()
     }
 
-    pub fn pointer_location(&self) -> Option<Point<Window>> {
+    #[must_use]
+    pub fn pointer_location(&self) -> Option<Point<i16, PhysicalPixel>> {
         self.inner.pointer_location()
     }
 
@@ -136,24 +116,36 @@ impl Window {
     }
 }
 
-pub trait WindowEventHandler: Send {
-    fn on_event(&mut self, event: WindowEvent);
+pub trait EventHandler: 'static {
+    fn on_close_request(&mut self);
 
-    fn on_input(&mut self, input: Input);
+    #[allow(unused_variables)]
+    fn on_visible(&mut self, is_visible: bool) {}
 
-    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameInfo);
-}
+    fn on_begin_resize(&mut self) {}
 
-impl<W: WindowEventHandler> WindowEventHandler for Box<W> {
-    fn on_event(&mut self, event: WindowEvent) {
-        self.as_mut().on_event(event);
+    #[allow(unused_variables)]
+    fn on_resize(
+        &mut self,
+        size: Size<u16, PhysicalPixel>,
+        scale: Scale<f32, PhysicalPixel, LogicalPixel>,
+    ) {
     }
 
-    fn on_input(&mut self, input: Input) {
-        self.as_mut().on_input(input);
-    }
+    fn on_end_resize(&mut self) {}
 
-    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, timing: &FrameInfo) {
-        self.as_mut().on_repaint(canvas, timing);
-    }
+    fn on_mouse_button(
+        &mut self,
+        button: MouseButton,
+        state: ButtonState,
+        location: Point<i16, PhysicalPixel>,
+    );
+
+    fn on_pointer_move(&mut self, location: Point<i16, PhysicalPixel>);
+
+    fn on_pointer_leave(&mut self) {}
+
+    fn on_scroll(&mut self, axis: Axis, delta: f32);
+
+    fn on_repaint(&mut self, canvas: &mut dyn Canvas, timing: &FrameInfo);
 }

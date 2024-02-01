@@ -1,8 +1,8 @@
 use plinth::{
     frame::{FramesPerSecond, RedrawRequest},
     graphics::{Canvas, Color, FrameInfo, GraphicsConfig, RoundRect},
-    math::Rect,
-    Application, Window, WindowEvent, WindowEventHandler, WindowSpec,
+    math::{Point, Rect},
+    Application, Axis, EventHandler, PhysicalPixel, Window, WindowSpec,
 };
 
 #[cfg(feature = "profile")]
@@ -19,24 +19,43 @@ impl DemoWindow {
     }
 }
 
-impl WindowEventHandler for DemoWindow {
-    fn on_event(&mut self, event: plinth::WindowEvent) {
-        match event {
-            WindowEvent::CloseRequest => self.window.close(),
-            _ => {}
-        }
+impl EventHandler for DemoWindow {
+    fn on_close_request(&mut self) {
+        self.window.close();
     }
 
-    fn on_input(&mut self, _input: plinth::Input) {
+    fn on_repaint(&mut self, canvas: &mut dyn Canvas, _timing: &FrameInfo) {
+        canvas.clear(Color::BLACK);
+        canvas.draw_rect(
+            RoundRect::builder(Rect::new(50.0, 100.0, 40.0, 70.0))
+                .color(Color::BLUE)
+                .build(),
+        );
+        canvas.draw_rect(
+            RoundRect::builder(Rect::new(100.0, 100.0, 40.0, 70.0))
+                .color(Color::RED)
+                .build(),
+        );
+
+        std::thread::sleep(std::time::Duration::from_millis(4));
+    }
+
+    fn on_mouse_button(
+        &mut self,
+        _button: plinth::MouseButton,
+        _state: plinth::ButtonState,
+        _location: Point<i16, PhysicalPixel>,
+    ) {
         // no-op
     }
 
-    fn on_repaint(&mut self, canvas: &mut Canvas<Window>, _timing: &FrameInfo) {
-        canvas.clear(Color::BLACK);
-        canvas.draw_rect(RoundRect::builder(Rect::new(50.0, 100.0, 40.0, 70.0)).color(Color::BLUE));
-        canvas.draw_rect(RoundRect::builder(Rect::new(100.0, 100.0, 40.0, 70.0)).color(Color::RED));
+    fn on_pointer_move(&mut self, _location: Point<i16, PhysicalPixel>) {
+        // no-op
+    }
 
-        std::thread::sleep(std::time::Duration::from_millis(4));
+    fn on_scroll(&mut self, _axis: Axis, delta: f32) {
+        let _ = delta;
+        // no-op
     }
 }
 
@@ -60,10 +79,8 @@ fn main() {
     });
 
     let spec = WindowSpec::default();
-    app.spawn_window(spec.clone(), |window| Box::new(DemoWindow::new(window)))
-        .unwrap();
-    app.spawn_window(spec.clone(), |window| Box::new(DemoWindow::new(window)))
-        .unwrap();
+    app.spawn_window(spec.clone(), DemoWindow::new).unwrap();
+    app.spawn_window(spec.clone(), DemoWindow::new).unwrap();
     // app.spawn_window(spec, |window| Box::new(DemoWindow::new(window)))
     //     .unwrap();
     app.run();

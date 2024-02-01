@@ -9,13 +9,13 @@ impl Add<u16> for FrameId {
     type Output = Self;
 
     fn add(self, rhs: u16) -> Self::Output {
-        Self(self.0 + rhs as u64)
+        Self(self.0 + u64::from(rhs))
     }
 }
 
 impl AddAssign<u16> for FrameId {
     fn add_assign(&mut self, rhs: u16) {
-        self.0 += rhs as u64;
+        self.0 += u64::from(rhs);
     }
 }
 
@@ -23,13 +23,13 @@ impl Add<u32> for FrameId {
     type Output = Self;
 
     fn add(self, rhs: u32) -> Self::Output {
-        Self(self.0 + rhs as u64)
+        Self(self.0 + u64::from(rhs))
     }
 }
 
 impl AddAssign<u32> for FrameId {
     fn add_assign(&mut self, rhs: u32) {
-        self.0 += rhs as u64;
+        self.0 += u64::from(rhs);
     }
 }
 
@@ -80,18 +80,22 @@ pub struct FramesPerSecond(pub f64);
 impl FramesPerSecond {
     pub const ZERO: Self = Self(0.0);
 
+    #[must_use]
     pub fn from_frame_time(frame_time: Duration) -> Self {
         Self(1.0 / frame_time.0)
     }
 
+    #[must_use]
     pub fn round(self) -> Self {
         Self(self.0.round())
     }
 
+    #[must_use]
     pub fn frame_time(self) -> Duration {
         Duration(1.0) / self.0
     }
 
+    #[must_use]
     pub fn max(self, rhs: Self) -> Self {
         Self(self.0.max(rhs.0))
     }
@@ -145,8 +149,9 @@ pub struct SecondsPerFrame(pub Duration);
 impl SecondsPerFrame {
     pub const ZERO: Self = Self(Duration::ZERO);
 
+    #[must_use]
     pub fn as_frames_per_second(&self) -> FramesPerSecond {
-        FramesPerSecond(1.0 / self.0 .0)
+        FramesPerSecond(Duration(1.0) / self.0)
     }
 }
 

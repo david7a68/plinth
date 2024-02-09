@@ -4,7 +4,7 @@ use std::sync::{
 };
 
 use windows::{
-    core::{ComInterface, PCSTR},
+    core::{Interface, PCSTR},
     Win32::Graphics::{
         Direct3D::D3D_FEATURE_LEVEL_12_0,
         Direct3D12::{
@@ -86,7 +86,7 @@ impl Device {
                     info_queue.RegisterMessageCallback(
                         Some(dx12_debug_callback),
                         D3D12_MESSAGE_CALLBACK_FLAG_NONE,
-                        std::ptr::null(),
+                        std::ptr::null_mut(),
                         &mut cookie,
                     )
                 }

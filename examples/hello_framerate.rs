@@ -1,7 +1,7 @@
 use plinth::{
     frame::{FramesPerSecond, RedrawRequest, SecondsPerFrame},
+    geometry::{Point, Size},
     graphics::{Canvas, Color, FrameInfo, GraphicsConfig},
-    math::{Point, Size},
     time::Instant,
     Application, Axis, EventHandler, PhysicalPixel, Window, WindowSpec,
 };

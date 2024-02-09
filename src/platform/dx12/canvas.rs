@@ -1,7 +1,7 @@
 use crate::{
+    geometry::Rect,
     graphics::{Color, RoundRect},
     limits::enforce_draw_list_max_commands_u32,
-    math::Rect,
     LogicalPixel,
 };
 

@@ -1,8 +1,21 @@
+// 2 levels of windowing abstraction, one used by the platform layer to
+// interpose between the platform and the application to bind graphics state,
+// and one made available to the user. It should be possible to configure the
+// library to expose the platform layer directly to the user to implement custom
+// backends (e.g. if no windowing system is available for the target platform).
+
+// the problem is with the application context, which is currently tied directly
+// to the platform. This is not quite right, since an applicaton should be able
+// to have non-platform specific state. This is not true in the current design.
+
+// todo: separate Application and Platform (and their associated contexts). This
+// may requre a dyn trait.
+
 use crate::{
     application::AppContext,
     frame::{RedrawRequest, RefreshRate},
+    geometry::{Point, Scale, Size},
     graphics::{Canvas, FrameInfo},
-    math::{Point, Scale, Size},
 };
 
 #[cfg(target_os = "windows")]

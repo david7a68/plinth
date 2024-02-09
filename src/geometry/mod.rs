@@ -13,3 +13,5 @@ pub use rect::Rect;
 pub use scale::Scale;
 pub use size::Size;
 pub use vec::Vec2;
+
+pub struct Pixel;

@@ -29,6 +29,18 @@ impl<T: Default, Src, Dst> Default for Scale<T, Src, Dst> {
     }
 }
 
+impl<T: Clone, Src, Dst> From<T> for Scale<T, Src, Dst> {
+    fn from(value: T) -> Self {
+        Self::new(value.clone(), value)
+    }
+}
+
+impl<T: Clone, Src, Dst> From<(T, T)> for Scale<T, Src, Dst> {
+    fn from((x, y): (T, T)) -> Self {
+        Self::new(x, y)
+    }
+}
+
 impl<T: std::fmt::Debug, Src, Dst> std::fmt::Debug for Scale<T, Src, Dst> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Point")

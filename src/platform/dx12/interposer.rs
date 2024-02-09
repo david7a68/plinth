@@ -1,7 +1,7 @@
 use std::{mem::ManuallyDrop, sync::Arc};
 
 use windows::{
-    core::ComInterface,
+    core::Interface,
     Win32::{
         Foundation::{HANDLE, HWND, RECT},
         Graphics::{
@@ -34,10 +34,10 @@ use windows::{
 
 use crate::{
     frame::{FrameId, FramesPerSecond, RedrawRequest},
+    geometry::{Point, Rect, Scale, Size},
     graphics::{backend::SubmitId, FrameInfo},
     limits::MAX_WINDOW_DIMENSION,
-    math::{Point, Rect, Scale, Size},
-    platform::{dx12::canvas::DrawCommand, win32},
+    platform::{dx12::canvas::DrawCommand, win32, PlatformEventHandler},
     time::Instant,
     Axis, ButtonState, EventHandler, LogicalPixel, MouseButton, PhysicalPixel,
 };
@@ -189,7 +189,7 @@ impl<W: EventHandler> Interposer<W> {
     }
 }
 
-impl<W: EventHandler> win32::Interposer for Interposer<W> {
+impl<W: EventHandler> EventHandler for Interposer<W> {
     #[tracing::instrument(skip(self))]
     fn on_close_request(&mut self) {
         self.user_handler.on_close_request();
@@ -248,8 +248,14 @@ impl<W: EventHandler> win32::Interposer for Interposer<W> {
         self.user_handler.on_scroll(axis, delta);
     }
 
+    fn on_repaint(&mut self, canvas: &mut dyn crate::graphics::Canvas, timing: &FrameInfo) {
+        unimplemented!()
+    }
+}
+
+impl<W: EventHandler> PlatformEventHandler for Interposer<W> {
     #[tracing::instrument(skip(self))]
-    fn on_os_paint(&mut self) {
+    fn on_os_repaint(&mut self) {
         // todo: how to handle multiple repaint events in a single frame (when
         // animating and resizing at the same time)? -dz
 
@@ -342,26 +348,12 @@ impl<W: EventHandler> win32::Interposer for Interposer<W> {
     }
 
     #[tracing::instrument(skip(self))]
-    fn on_composition_rate(&mut self, _frame_id: FrameId, rate: FramesPerSecond) {
+    fn on_composition_rate_change(&mut self, _frame_id: FrameId, rate: FramesPerSecond) {
         self.composition_rate = rate;
     }
 
-    #[tracing::instrument(skip(self))]
-    fn on_redraw_request(&mut self, request: RedrawRequest) {
-        let send = |r| self.app.vsync_sender.send(r).unwrap();
-
-        match request {
-            RedrawRequest::Idle => send(win32::VSyncRequest::Idle(self.hwnd)),
-            RedrawRequest::Once => unsafe {
-                RedrawWindow(self.hwnd, None, None, RDW_INTERNALPAINT);
-            },
-            RedrawRequest::AtFrame(frame_id) => {
-                send(win32::VSyncRequest::AtFrame(self.hwnd, frame_id));
-            }
-            RedrawRequest::AtFrameRate(rate) => {
-                send(win32::VSyncRequest::AtFrameRate(self.hwnd, rate));
-            }
-        }
+    fn on_client_repaint(&mut self) {
+        todo!()
     }
 }
 

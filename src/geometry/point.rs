@@ -77,6 +77,14 @@ impl<T, U> std::ops::IndexMut<usize> for Point<T, U> {
     }
 }
 
+impl<T: PartialEq, U> PartialEq for Point<T, U> {
+    fn eq(&self, other: &Self) -> bool {
+        self.x == other.x && self.y == other.y
+    }
+}
+
+impl<T: Eq, U> Eq for Point<T, U> {}
+
 macro_rules! impl_from {
     ($($t:ty),+) => {
         $(

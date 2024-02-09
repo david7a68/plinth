@@ -1,4 +1,4 @@
-use crate::math::Rect;
+use crate::geometry::Rect;
 
 use super::Color;
 

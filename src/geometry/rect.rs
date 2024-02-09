@@ -85,8 +85,8 @@ macro_rules! impl_rect {
                 }
 
                 #[must_use]
-                pub fn size(&self) -> crate::math::Size<$type, U> {
-                    crate::math::Size::new(self.width, self.height)
+                pub fn size(&self) -> crate::geometry::Size<$type, U> {
+                    crate::geometry::Size::new(self.width, self.height)
                 }
 
                 #[must_use]

@@ -1,4 +1,4 @@
-use crate::math::Size;
+use crate::geometry::Size;
 
 use super::backend::{SubmitId, TextureId};
 

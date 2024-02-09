@@ -35,9 +35,12 @@ use windows::{
 use crate::{
     application::AppContext,
     frame::{FrameId, FramesPerSecond, RedrawRequest, RefreshRate},
-    limits::MAX_TITLE_LENGTH,
-    math::{Point, Scale, Size},
-    platform::win32::application::AppMessage,
+    geometry::{Point, Scale, Size},
+    limits::MAX_WINDOW_TITLE_LENGTH,
+    platform::{
+        win32::{application::AppMessage, VSyncRequest},
+        PlatformEventHandler,
+    },
     window::Window,
     Axis, ButtonState, EventHandler, LogicalPixel, MouseButton, PhysicalPixel, WindowSpec,
 };
@@ -146,35 +149,9 @@ pub(super) fn extract_redraw_request(wparam: WPARAM, lparam: LPARAM) -> RedrawRe
     }
 }
 
-// todo: not happy with this duplication of EventHandler's methods -dz
-pub trait Interposer: 'static {
-    fn on_close_request(&mut self);
-    fn on_visible(&mut self, visible: bool);
-    fn on_begin_resize(&mut self);
-    fn on_resize(
-        &mut self,
-        size: Size<u16, PhysicalPixel>,
-        scale: Scale<f32, PhysicalPixel, LogicalPixel>,
-    );
-    fn on_end_resize(&mut self);
-    fn on_mouse_button(
-        &mut self,
-        button: MouseButton,
-        state: ButtonState,
-        location: Point<i16, PhysicalPixel>,
-    );
-    fn on_pointer_move(&mut self, location: Point<i16, PhysicalPixel>);
-    fn on_pointer_leave(&mut self);
-    fn on_scroll(&mut self, axis: Axis, delta: f32);
-
-    fn on_os_paint(&mut self);
-    fn on_vsync(&mut self, frame_id: FrameId, rate: Option<FramesPerSecond>);
-    fn on_composition_rate(&mut self, frame_id: FrameId, rate: FramesPerSecond);
-    fn on_redraw_request(&mut self, request: RedrawRequest);
-}
-
 struct EventLoop {
-    interposer: Cell<*const RefCell<dyn Interposer>>,
+    app: *const AppContextImpl,
+    interposer: Cell<*const RefCell<dyn PlatformEventHandler>>,
     size: Cell<(u16, u16)>,
     pointer_in_window: Cell<bool>,
     is_in_size_move: Cell<bool>,
@@ -188,7 +165,7 @@ pub fn spawn_window_thread<W, I, C, F>(
     interposer_constructor: C,
 ) where
     W: EventHandler,
-    I: Interposer,
+    I: PlatformEventHandler,
     F: FnOnce(Window) -> W + Send + 'static,
     C: FnOnce(AppContextImpl, W, HWND) -> I + Send + 'static,
 {
@@ -208,6 +185,7 @@ pub fn spawn_window_thread<W, I, C, F>(
         let interposer = RefCell::new(interposer_constructor(app.clone(), user_handler, hwnd));
 
         let event_loop = EventLoop {
+            app: addr_of!(app),
             interposer: Cell::new(addr_of!(interposer)),
             size: Cell::new((0, 0)),
             pointer_in_window: Cell::new(false),
@@ -292,9 +270,9 @@ fn create_window(wndclass: PCWSTR, spec: &WindowSpec) -> HWND {
         let mut title = spec
             .title
             .encode_utf16()
-            .collect::<ArrayVec<_, { MAX_TITLE_LENGTH + 1 }>>();
+            .collect::<ArrayVec<_, { MAX_WINDOW_TITLE_LENGTH + 1 }>>();
 
-        assert!(title.len() <= MAX_TITLE_LENGTH);
+        assert!(title.len() <= MAX_WINDOW_TITLE_LENGTH);
         title.push(0);
         title
     };
@@ -417,7 +395,20 @@ fn wndproc(state: &EventLoop, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
         }
         UM_REDRAW_REQUEST => {
             let request = extract_redraw_request(wparam, lparam);
-            handler().on_redraw_request(request);
+            let send = |r| unsafe { &*state.app }.vsync_sender.send(r).unwrap();
+
+            match request {
+                RedrawRequest::Idle => send(VSyncRequest::Idle(hwnd)),
+                RedrawRequest::Once => unsafe {
+                    RedrawWindow(hwnd, None, None, RDW_INTERNALPAINT);
+                },
+                RedrawRequest::AtFrame(frame_id) => {
+                    send(VSyncRequest::AtFrame(hwnd, frame_id));
+                }
+                RedrawRequest::AtFrameRate(rate) => {
+                    send(VSyncRequest::AtFrameRate(hwnd, rate));
+                }
+            }
             LRESULT(0)
         }
         UM_VSYNC => {
@@ -430,7 +421,7 @@ fn wndproc(state: &EventLoop, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
         }
         UM_COMPOSITION_RATE => {
             let (frame_id, rate) = decode_reply_device_update(wparam, lparam);
-            handler().on_composition_rate(frame_id, rate);
+            handler().on_composition_rate_change(frame_id, rate);
             LRESULT(0)
         }
         WM_PAINT => {
@@ -438,7 +429,7 @@ fn wndproc(state: &EventLoop, hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPAR
             let _hdc = unsafe { BeginPaint(hwnd, &mut ps) };
             unsafe { EndPaint(hwnd, &ps) };
 
-            handler().on_os_paint();
+            handler().on_os_repaint();
             LRESULT(0)
         }
         WM_MOUSEMOVE => {

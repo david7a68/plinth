@@ -18,6 +18,26 @@ impl<T, U> Size<T, U> {
     pub fn retype<U2>(self) -> Size<T, U2> {
         Size::new(self.width, self.height)
     }
+
+    pub fn min(self, rhs: Self) -> Self
+    where
+        T: Ord,
+    {
+        Self::new(
+            std::cmp::min(self.width, rhs.width),
+            std::cmp::min(self.height, rhs.height),
+        )
+    }
+
+    pub fn max(self, rhs: Self) -> Self
+    where
+        T: Ord,
+    {
+        Self::new(
+            std::cmp::max(self.width, rhs.width),
+            std::cmp::max(self.height, rhs.height),
+        )
+    }
 }
 
 impl<T: Clone, U> Clone for Size<T, U> {

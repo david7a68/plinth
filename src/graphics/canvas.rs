@@ -1,4 +1,4 @@
-use crate::{math::Rect, LogicalPixel};
+use crate::{geometry::Rect, LogicalPixel};
 
 use super::{Color, RoundRect};
 

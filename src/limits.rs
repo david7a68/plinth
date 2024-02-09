@@ -1,9 +1,11 @@
-use crate::{math::Size, Window};
+use crate::{geometry::Size, Window};
 
 /// Maximum number of windows that can be open at once.
-pub const MAX_WINDOWS: usize = 16;
+pub const MAX_WINDOWS: usize = 8;
 
-pub const MAX_TITLE_LENGTH: usize = 255;
+pub const MAX_WINDOW_TITLE_LENGTH: usize = 255;
+
+pub const MIN_WINDOW_DIMENSION: i16 = 100;
 
 pub const MAX_WINDOW_DIMENSION: u16 = u16::MAX;
 pub const MAX_WINDOW_DIMENSIONS: Size<u16, Window> = Size::new(u16::MAX as _, u16::MAX as _);

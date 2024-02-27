@@ -63,17 +63,16 @@ mod api {
 }
 
 const UM_WAKE: u32 = WM_APP;
-const UM_DESTROY: u32 = WM_APP + 1;
+const UM_DEFER_DESTROY: u32 = WM_APP + 1;
 const UM_DEFER_SHOW: u32 = WM_APP + 2;
-
 /// Message used to request a repaint. This is used instead of directly calling
 /// `InvalidateRect` so as to consolidate repaint logic to the event loop. This
 /// is safe to do since the event loop will not generate WM_PAINT events until
 /// the message queue is empty.
 ///
 /// This is slightly less efficient since we need to round-trip into the message
-/// queue, but the simplicity was deemed worth it. -dz (2024-02-24)
-const UM_REPAINT: u32 = WM_APP + 3;
+/// queue, but the simplicity was deemed worth it.
+const UM_DEFER_PAINT: u32 = WM_APP + 3;
 
 const WND_CLASS_NAME: PCWSTR = w!("plinth_wc");
 
@@ -107,7 +106,7 @@ impl<Data> Window<'_, Data> {
     }
 
     pub fn destroy(&mut self) {
-        unsafe { PostMessageW(self.hwnd, UM_DESTROY, None, None) }.unwrap();
+        unsafe { PostMessageW(self.hwnd, UM_DEFER_DESTROY, None, None) }.unwrap();
     }
 
     pub fn data(&self) -> &Data {
@@ -200,7 +199,7 @@ impl<Data> Window<'_, Data> {
     }
 
     pub fn request_repaint(&mut self) {
-        unsafe { PostMessageW(self.hwnd, UM_REPAINT, None, None) }.unwrap();
+        unsafe { PostMessageW(self.hwnd, UM_DEFER_PAINT, None, None) }.unwrap();
     }
 }
 
@@ -252,14 +251,14 @@ impl<WindowData> ActiveEventLoop<WindowData> {
             .map(|p| (p.x as i32, p.y as i32))
             .unwrap_or((CW_USEDEFAULT, CW_USEDEFAULT));
 
-        let mut opt = Some(constructor); // :move-ctor:
-        let wrap_ctor = RefCell::new(move |window: &api::Window<()>| opt.take().unwrap()(window)); // :move-ctor:
+        let mut opt = Some(constructor);
+        let wrap_ctor = RefCell::new(move |window: &api::Window<()>| opt.take().unwrap()(window));
 
         let create_struct = RefCell::new(CreateStruct {
             wndproc_state: self.opaque_state,
             constructor: &wrap_ctor,
             error: Ok(()),
-            title: Some(attributes.title), // :move-title:
+            title: Some(attributes.title),
             min_size,
             max_size,
             is_visible: attributes.is_visible,
@@ -431,24 +430,37 @@ struct WndProcState<WindowData, H: EventHandler<WindowData>> {
 
 impl<WindowData, H: EventHandler<WindowData>> WndProcState<WindowData, H> {
     fn as_active_event_loop(&self) -> api::ActiveEventLoop<WindowData> {
-        let event_loop = ActiveEventLoop {
-            wndclass: self.wndclass,
-            opaque_state: self as *const WndProcState<_, _> as *const (),
-            _phantom: PhantomData::<*const WindowData>,
-        };
+        api::ActiveEventLoop {
+            event_loop: ActiveEventLoop {
+                wndclass: self.wndclass,
+                opaque_state: self as *const WndProcState<_, _> as *const (),
+                _phantom: PhantomData::<*const WindowData>,
+            },
+        }
+    }
 
-        api::ActiveEventLoop { event_loop }
+    fn get_context(&self, hwnd: HWND) -> Option<HandlerContext<WindowData, H>> {
+        let index = self.hwnds.iter().position(|cell| cell.get() == hwnd)?;
+        Some(self.get_context_by_index(index))
+    }
+
+    fn get_context_by_index(&self, index: usize) -> HandlerContext<WindowData, H> {
+        HandlerContext {
+            hwnd: &self.hwnds[index],
+            data: &self.window_data[index],
+            state: &self.window_states[index],
+            event_handler: &self.event_handler,
+            event_loop: self.as_active_event_loop(),
+        }
     }
 }
 
 struct CreateStruct<WindowData> {
     wndproc_state: *const (),
-    /// :move-ctor: Wraps a `FnOnce`. Will panic if called more than once.
     #[allow(clippy::type_complexity)]
     constructor: *const RefCell<dyn FnMut(&api::Window<()>) -> WindowData>,
     /// Place to stash any errors that may occur during window creation.
     error: Result<(), api::WindowError>,
-    /// :move-title: Used to 'move' the title from `create_window` to `WM_CREATE`.
     title: Option<Cow<'static, str>>,
     min_size: PhysicalSize,
     max_size: PhysicalSize,
@@ -456,31 +468,328 @@ struct CreateStruct<WindowData> {
     is_resizable: bool,
 }
 
-fn mouse_coords(lparam: LPARAM) -> PhysicalPosition {
-    let x = (lparam.0 & 0xffff) as i16;
-    let y = ((lparam.0 >> 16) & 0xffff) as i16;
-    (x, y).into()
+struct HandlerContext<'a, WindowData, H: EventHandler<WindowData>> {
+    hwnd: &'a Cell<HWND>,
+    data: &'a RefCell<MaybeUninit<WindowData>>,
+    state: &'a RefCell<MaybeUninit<WindowState>>,
+    event_handler: &'a RefCell<H>,
+    event_loop: api::ActiveEventLoop<WindowData>,
 }
 
-fn mouse_modifier_keys(wparam: WPARAM) -> ModifierKeys {
-    const MK_CONTROL: usize = 0x0008;
-    const MK_SHIFT: usize = 0x0004;
+impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData, H> {
+    fn init(&mut self, hwnd: HWND, create_struct: &mut CreateStruct<WindowData>) {
+        self.hwnd.set(hwnd);
 
-    let mut modifiers = ModifierKeys::empty();
+        unsafe { SetLastError(WIN32_ERROR(0)) };
+        unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, create_struct.wndproc_state as _) };
+        unsafe { GetLastError() }.expect("SetWindowLongPtrW(GWLP_USERDATA) failed.");
 
-    if wparam.0 & MK_CONTROL != 0 {
-        modifiers |= ModifierKeys::CTRL;
+        self.state.borrow_mut().write({
+            let dpi = unsafe { GetDpiForWindow(hwnd) };
+            assert!(dpi > 0, "GetDpiForWindow failed.");
+
+            let scale = dpi as f32 / USER_DEFAULT_SCREEN_DPI as f32;
+
+            let mut default_rect = RECT::default();
+            unsafe { GetClientRect(hwnd, &mut default_rect) }.expect("GetClientRect failed.");
+
+            WindowState {
+                title: unsafe { create_struct.title.take().unwrap_unchecked() },
+                size: PhysicalSize::new(
+                    (default_rect.right - default_rect.left) as _,
+                    (default_rect.bottom - default_rect.top) as _,
+                ),
+                max_size: PhysicalSize::new(
+                    i16::try_from((create_struct.max_size.width as f32 * scale) as u32)
+                        .unwrap_or(i16::MAX),
+                    i16::try_from((create_struct.max_size.height as f32 * scale) as u32)
+                        .unwrap_or(i16::MAX),
+                ),
+                min_size: PhysicalSize::new(
+                    i16::try_from((create_struct.min_size.width as f32 * scale) as u32).unwrap(),
+                    i16::try_from((create_struct.min_size.height as f32 * scale) as u32).unwrap(),
+                ),
+                position: PhysicalPosition::new(default_rect.left as _, default_rect.top as _),
+                dpi: u16::try_from(dpi).unwrap(),
+                has_focus: false,
+                is_visible: create_struct.is_visible,
+                has_pointer: false,
+                is_resizable: create_struct.is_resizable,
+                is_resizing: false,
+                in_drag_resize: false,
+                paint_reason: None,
+            }
+        });
+
+        self.data.borrow_mut().write({
+            let state = self.state.borrow();
+            let window = api::Window {
+                window: Window {
+                    hwnd,
+                    state: unsafe { state.assume_init_ref() },
+                    data: &mut (),
+                    _phantom: PhantomData,
+                },
+            };
+
+            unsafe { (*create_struct.constructor).borrow_mut()(&window) }
+        });
     }
 
-    if wparam.0 & MK_SHIFT != 0 {
-        modifiers |= ModifierKeys::SHIFT;
+    fn wake(&mut self) {
+        self.event(|handler, event_loop, window| handler.wake_requested(event_loop, window));
     }
 
-    if unsafe { GetKeyState(i32::from(VK_MENU.0)) } < 0 {
-        modifiers |= ModifierKeys::ALT;
+    fn close(&mut self) {
+        self.event(|handler, event_loop, window| handler.close_requested(event_loop, window));
     }
 
-    modifiers
+    fn destroy_defer(&mut self) {
+        unsafe { DestroyWindow(self.hwnd.get()) }.unwrap();
+    }
+
+    fn destroy(&mut self) {
+        unsafe { SetWindowLongPtrW(self.hwnd.get(), GWLP_USERDATA, 0) };
+
+        self.hwnd.set(HWND::default());
+
+        // SAFETY: Clearing the hwnd marks the data as uninitialized. It will
+        // not be read until it is reinitialized for a new window.
+        let window_data = unsafe { self.data.borrow_mut().assume_init_read() };
+
+        self.event_handler
+            .borrow_mut()
+            .destroyed(&self.event_loop, window_data);
+    }
+
+    fn show_defer(&mut self, show: SHOW_WINDOW_CMD) {
+        unsafe { ShowWindow(self.hwnd.get(), show) };
+    }
+
+    fn show(&mut self, is_visible: bool) {
+        self.with_state(|window| window.is_visible = is_visible);
+
+        if is_visible {
+            self.event(|handler, event_loop, window| handler.shown(event_loop, window));
+        } else {
+            self.event(|handler, event_loop, window| handler.hidden(event_loop, window));
+        }
+    }
+
+    fn enter_size_move(&mut self) {
+        self.with_state(|window| window.is_resizing = true);
+    }
+
+    fn exit_size_move(&mut self) {
+        let resize_ended: bool = self.with_state(|window| {
+            window.in_drag_resize = false;
+            std::mem::take(&mut window.is_resizing)
+        });
+
+        if resize_ended {
+            self.event(|handler, event_loop, window| handler.drag_resize_ended(event_loop, window));
+        }
+    }
+
+    fn dpi_changed(&mut self, dpi: u16, rect: &RECT) {
+        let size = PhysicalSize::new(
+            i16::try_from(rect.right - rect.left).unwrap(),
+            i16::try_from(rect.bottom - rect.top).unwrap(),
+        );
+
+        self.with_state(|window| {
+            window.dpi = dpi;
+            window.size = size; // update size to suppress resize event in WM_WINDOWPOSCHANGED
+            window.paint_reason = Some(PaintReason::Commanded);
+        });
+
+        unsafe {
+            SetWindowPos(
+                self.hwnd.get(),
+                None,
+                rect.left,
+                rect.top,
+                rect.right,
+                rect.bottom,
+                SET_WINDOW_POS_FLAGS::default(),
+            )
+        }
+        .expect("SetWindowPos failed.");
+
+        let scale = DpiScale::from(dpi as f32 / USER_DEFAULT_SCREEN_DPI as f32);
+
+        self.event(|handler, event_loop, window| {
+            handler.dpi_changed(event_loop, window, scale, size)
+        });
+    }
+
+    fn get_min_max_info(&mut self, mmi: &mut MINMAXINFO) {
+        let (min, max, dpi) =
+            self.with_state(|window| (window.min_size, window.max_size, window.dpi as u32));
+
+        let os_min_x = unsafe { GetSystemMetricsForDpi(SM_CXMINTRACK, dpi) };
+        let os_min_y = unsafe { GetSystemMetricsForDpi(SM_CYMINTRACK, dpi) };
+        let os_max_x = unsafe { GetSystemMetricsForDpi(SM_CXMAXTRACK, dpi) };
+        let os_max_y = unsafe { GetSystemMetricsForDpi(SM_CYMAXTRACK, dpi) };
+
+        mmi.ptMinTrackSize.x = i32::from(min.width).max(os_min_x);
+        mmi.ptMinTrackSize.y = i32::from(min.height).max(os_min_y);
+        mmi.ptMaxTrackSize.x = i32::from(max.width).min(os_max_x);
+        mmi.ptMaxTrackSize.y = i32::from(max.height).min(os_max_y);
+    }
+
+    fn pos_changed(&mut self, pos: &WINDOWPOS) {
+        let (x, y, width, height) = (
+            i16::try_from(pos.x).unwrap(),
+            i16::try_from(pos.y).unwrap(),
+            i16::try_from(pos.cx).unwrap(),
+            i16::try_from(pos.cy).unwrap(),
+        );
+
+        let (resized, moved) = self.with_state(|window| {
+            (
+                {
+                    let resized = width != window.size.width || height != window.size.height;
+                    let is_start = resized && window.in_drag_resize;
+
+                    window.size = PhysicalSize::new(width, height);
+                    window.is_resizing = is_start;
+                    window.paint_reason = resized
+                        .then_some(PaintReason::Commanded) // override if resized
+                        .or(window.paint_reason); // else keep the current reason
+
+                    resized.then_some((is_start, window.size))
+                },
+                {
+                    let moved = x != window.position.x || y != window.position.y;
+
+                    window.position = PhysicalPosition::new(x, y); // doesn't matter if it's the same
+
+                    moved.then_some(window.position)
+                },
+            )
+        });
+
+        if let Some((start, size)) = resized {
+            if start {
+                self.event(|handler, event_loop, window| {
+                    handler.drag_resize_started(event_loop, window)
+                });
+            }
+
+            self.event(|handler, event_loop, window| handler.resized(event_loop, window, size));
+        }
+
+        if let Some(pos) = moved {
+            self.event(|handler, event_loop, window| handler.moved(event_loop, window, pos))
+        }
+    }
+
+    fn defer_paint(&mut self) {
+        self.with_state(|window| {
+            window.paint_reason = if let Some(reason) = window.paint_reason {
+                Some(reason.max(PaintReason::Requested))
+            } else {
+                Some(PaintReason::Requested)
+            }
+        });
+
+        unsafe { InvalidateRect(self.hwnd.get(), None, false) }
+            .ok()
+            .expect("InvalidateRect failed.");
+    }
+
+    fn paint(&mut self) {
+        let mut ps = PAINTSTRUCT::default();
+
+        let is_invalid = unsafe { BeginPaint(self.hwnd.get(), &mut ps) }.is_invalid();
+        assert!(!is_invalid, "BeginPaint failed.");
+
+        unsafe { EndPaint(self.hwnd.get(), &ps) };
+
+        let reason = self
+            .with_state(|window| window.paint_reason.take())
+            .unwrap_or(PaintReason::Commanded); // assume no reason means it's from the OS
+
+        self.event(|handler, event_loop, window| handler.needs_repaint(event_loop, window, reason));
+    }
+
+    fn mouse_move(&mut self, position: PhysicalPosition) {
+        let entered = self.with_state(|window| !std::mem::replace(&mut window.has_pointer, true));
+
+        if entered {
+            self.event(|handler, event_loop, window| {
+                handler.pointer_entered(event_loop, window, position)
+            });
+
+            unsafe {
+                TrackMouseEvent(&mut TRACKMOUSEEVENT {
+                    cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                    dwFlags: TME_LEAVE,
+                    hwndTrack: self.hwnd.get(),
+                    dwHoverTime: 0,
+                })
+            }
+            .unwrap()
+        }
+
+        self.event(|handler, event_loop, window| {
+            handler.pointer_moved(event_loop, window, position)
+        });
+    }
+
+    fn mouse_leave(&mut self) {
+        self.with_state(|window| window.has_pointer = false);
+        self.event(|handler, event_loop, window| handler.pointer_left(event_loop, window));
+    }
+
+    fn wm_mouse_wheel(&mut self, axis: ScrollAxis, delta: f32, mods: ModifierKeys) {
+        self.event(|handler, event_loop, window| {
+            handler.mouse_scrolled(event_loop, window, delta, axis, mods)
+        });
+    }
+
+    fn mouse_button(
+        &mut self,
+        button: MouseButton,
+        state: ButtonState,
+        position: PhysicalPosition,
+        mods: ModifierKeys,
+    ) {
+        self.event(|handler, event_loop, window| {
+            handler.mouse_button(event_loop, window, button, state, position, mods)
+        });
+    }
+
+    #[inline]
+    fn with_state<T>(&mut self, f: impl FnOnce(&mut WindowState) -> T) -> T {
+        assert_ne!(self.hwnd.get(), HWND::default(), "Window not initialized.");
+
+        let mut state = self.state.borrow_mut();
+        let state = unsafe { state.assume_init_mut() };
+        f(state)
+    }
+
+    #[inline]
+    fn event(
+        &mut self,
+        f: impl FnOnce(&mut H, &api::ActiveEventLoop<WindowData>, &mut api::Window<WindowData>),
+    ) {
+        assert_ne!(self.hwnd.get(), HWND::default(), "Window not initialized.");
+
+        let (state, mut data) = (self.state.borrow(), self.data.borrow_mut());
+        let mut handler = self.event_handler.borrow_mut();
+        let mut window = api::Window {
+            window: Window {
+                hwnd: self.hwnd.get(),
+                state: unsafe { state.assume_init_ref() },
+                data: unsafe { data.assume_init_mut() },
+                _phantom: PhantomData,
+            },
+        };
+
+        f(&mut *handler, &self.event_loop, &mut window);
+    }
 }
 
 /// Add a message to the queue to show or hide a window. Necessary because
@@ -501,6 +810,33 @@ unsafe extern "system" fn unsafe_wndproc<WindowData, H: EventHandler<WindowData>
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    fn mouse_coords(lparam: LPARAM) -> PhysicalPosition {
+        let x = (lparam.0 & 0xffff) as i16;
+        let y = ((lparam.0 >> 16) & 0xffff) as i16;
+        (x, y).into()
+    }
+
+    fn mouse_modifiers(wparam: WPARAM) -> ModifierKeys {
+        const MK_CONTROL: usize = 0x0008;
+        const MK_SHIFT: usize = 0x0004;
+
+        let mut modifiers = ModifierKeys::empty();
+
+        if wparam.0 & MK_CONTROL != 0 {
+            modifiers |= ModifierKeys::CTRL;
+        }
+
+        if wparam.0 & MK_SHIFT != 0 {
+            modifiers |= ModifierKeys::SHIFT;
+        }
+
+        if unsafe { GetKeyState(i32::from(VK_MENU.0)) } < 0 {
+            modifiers |= ModifierKeys::ALT;
+        }
+
+        modifiers
+    }
+
     if msg == WM_CREATE {
         // This block MUST NOT borrow the regular `WndProcState::event_handler`
         // because windows can be created while inside the event handler.
@@ -510,454 +846,101 @@ unsafe extern "system" fn unsafe_wndproc<WindowData, H: EventHandler<WindowData>
         //
         // -dz 2024-02-25
 
-        let csw = &*(lparam.0 as *const CREATESTRUCTW);
-        let cs = &*(csw.lpCreateParams as *const RefCell<CreateStruct<WindowData>>);
-        let mut cs = cs.borrow_mut();
-        let proc_state = &*(cs.wndproc_state as *const WndProcState<WindowData, H>);
+        let mut cs = {
+            let cs = &*(lparam.0 as *const CREATESTRUCTW);
+            let cs = &*(cs.lpCreateParams as *const RefCell<CreateStruct<WindowData>>);
+            cs.borrow_mut()
+        };
 
-        let Some((i, hwnd_slot)) = proc_state
-            .hwnds
-            .iter()
-            .enumerate()
-            .find(|(_, hwnd)| hwnd.get() == HWND::default())
-        else {
+        let state = &*(cs.wndproc_state as *const WndProcState<WindowData, H>);
+
+        let slot_index = state.hwnds.iter().position(|h| h.get() == HWND(0));
+        let Some(slot_index) = slot_index else {
             cs.error = Err(api::WindowError::TooManyWindows);
             return LRESULT(-1);
         };
 
-        hwnd_slot.set(hwnd);
-
-        unsafe {
-            SetLastError(WIN32_ERROR(0));
-            SetWindowLongPtrW(hwnd, GWLP_USERDATA, cs.wndproc_state as _);
-            GetLastError().expect("SetWindowLongPtrW(GWLP_USERDATA) failed.");
-        };
-
-        let dpi = unsafe { GetDpiForWindow(hwnd) };
-        assert!(dpi > 0, "GetDpiForWindow failed.");
-
-        let scale = dpi as f32 / USER_DEFAULT_SCREEN_DPI as f32;
-
-        let mut default_rect = RECT::default();
-        unsafe { GetClientRect(hwnd, &mut default_rect) }.expect("GetClientRect failed.");
-
-        let state = WindowState {
-            title: unsafe { cs.title.take().unwrap_unchecked() }, // :move-title:
-            size: PhysicalSize::new(
-                (default_rect.right - default_rect.left) as _,
-                (default_rect.bottom - default_rect.top) as _,
-            ),
-            max_size: PhysicalSize::new(
-                i16::try_from((cs.max_size.width as f32 * scale) as u32).unwrap_or(i16::MAX),
-                i16::try_from((cs.max_size.height as f32 * scale) as u32).unwrap_or(i16::MAX),
-            ),
-            min_size: PhysicalSize::new(
-                i16::try_from((cs.min_size.width as f32 * scale) as u32).unwrap(),
-                i16::try_from((cs.min_size.height as f32 * scale) as u32).unwrap(),
-            ),
-            position: PhysicalPosition::new(default_rect.left as _, default_rect.top as _),
-            dpi: u16::try_from(dpi).unwrap(),
-            has_focus: false,
-            is_visible: cs.is_visible,
-            has_pointer: false,
-            is_resizable: cs.is_resizable,
-            is_resizing: false,
-            in_drag_resize: false,
-            paint_reason: None,
-        };
-
-        let state_slot = &proc_state.window_states[i];
-
-        state_slot.borrow_mut().write(state);
-
-        proc_state.window_data[i].borrow_mut().write({
-            let state_slot = state_slot.borrow();
-
-            let window = api::Window {
-                window: Window {
-                    hwnd,
-                    state: unsafe { state_slot.assume_init_ref() },
-                    data: &mut (),
-                    _phantom: PhantomData,
-                },
-            };
-
-            (*cs.constructor).borrow_mut()(&window) // :move-ctor:
-        });
+        state.get_context_by_index(slot_index).init(hwnd, &mut cs);
 
         LRESULT(0)
     } else {
-        let state = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *const ();
+        let state = {
+            let state = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *const ();
 
-        if state.is_null() {
-            unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
-        } else {
-            let state = unsafe { &*(state as *const WndProcState<WindowData, H>) };
-            let i = state.hwnds.iter().position(|h| h.get() == hwnd);
-
-            // This shouldn't be necessary, but just in case.
-            match i {
-                Some(i) => wndproc(state, i, hwnd, msg, wparam, lparam),
-                None => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
-            }
-        }
-    }
-}
-
-fn wndproc<WindowData, H: EventHandler<WindowData>>(
-    state: &WndProcState<WindowData, H>,
-    slot: usize,
-    hwnd: HWND,
-    msg: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
-    let event_loop = state.as_active_event_loop();
-
-    macro_rules! with_state {
-        ($expr:expr) => {{
-            /// Function used to infer the types of the closure's parameters.
-            #[inline(always)]
-            fn passthrough<T, F: FnMut(&mut WindowState) -> T>(func: F) -> F {
-                func
+            if state.is_null() {
+                return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
             }
 
-            let mut window_state = state.window_states[slot].borrow_mut();
-            let window_state = unsafe { window_state.assume_init_mut() };
+            unsafe { &*(state as *const WndProcState<WindowData, H>) }
+        };
 
-            passthrough($expr)(window_state)
-        }};
-    }
+        let Some(mut context) = state.get_context(hwnd) else {
+            return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
+        };
 
-    macro_rules! event {
-        ($expr:expr) => {{
-            /// Function used to infer the types of the closure's parameters.
-            #[inline(always)]
-            fn passthrough<
-                WindowData,
-                H: EventHandler<WindowData>,
-                F: FnMut(&mut H, &api::ActiveEventLoop<WindowData>, &mut api::Window<WindowData>),
-            >(
-                func: F,
-            ) -> F {
-                func
-            }
+        match msg {
+            UM_WAKE => context.wake(),
+            WM_CLOSE => context.close(),
+            UM_DEFER_DESTROY => context.destroy_defer(),
+            WM_DESTROY => {
+                context.destroy();
 
-            let window_state = state.window_states[slot].borrow();
-            let mut window_data = state.window_data[slot].borrow_mut();
-
-            let mut window = api::Window {
-                window: Window {
-                    hwnd,
-                    state: unsafe { window_state.assume_init_ref() },
-                    data: unsafe { window_data.assume_init_mut() },
-                    _phantom: PhantomData,
-                },
-            };
-
-            let mut handler = state.event_handler.borrow_mut();
-            passthrough::<WindowData, H, _>($expr)(&mut *handler, &event_loop, &mut window);
-        }};
-    }
-
-    match msg {
-        UM_WAKE => {
-            event!(|handler, event_loop, window| handler.window_wake_requested(event_loop, window));
-
-            LRESULT(0)
-        }
-        WM_CLOSE => {
-            event!(|handler, event_loop, window| handler.window_close_requested(event_loop, window));
-
-            LRESULT(0)
-        }
-        UM_DESTROY => {
-            unsafe { DestroyWindow(hwnd) }.unwrap();
-
-            LRESULT(0)
-        }
-        WM_DESTROY => {
-            // SAFETY:
-            //
-            // The window state is initialized in the WM_CREATE message.
-            // WM_DESTROY is the last message received by a window (save for
-            // WM_NCDESTROY, which we're not handling).
-            let window_data = unsafe { state.window_data[slot].borrow_mut().assume_init_read() };
-
-            state
-                .event_handler
-                .borrow_mut()
-                .window_destroyed(&event_loop, window_data);
-
-            state.hwnds[slot].set(HWND::default());
-
-            let count = state
-                .hwnds
-                .iter()
-                .filter(|h| h.get() != HWND::default())
-                .count();
-
-            if count == 0 {
-                unsafe { PostQuitMessage(0) };
-            }
-
-            LRESULT(0)
-        }
-        UM_DEFER_SHOW => {
-            let show = from_defer_show(lparam);
-            unsafe { ShowWindow(hwnd, show) };
-
-            LRESULT(0)
-        }
-        WM_SHOWWINDOW => {
-            let is_visible = wparam.0 != 0;
-
-            with_state!(|window| window.is_visible = is_visible);
-
-            if is_visible {
-                let window_state = state.window_states[slot].borrow();
-                let mut window_data = state.window_data[slot].borrow_mut();
-
-                let mut window = api::Window {
-                    window: Window {
-                        hwnd,
-                        state: unsafe { window_state.assume_init_ref() },
-                        data: unsafe { window_data.assume_init_mut() },
-                        _phantom: PhantomData,
-                    },
-                };
-
-                let mut handler = state.event_handler.borrow_mut();
-
-                handler.window_shown(&event_loop, &mut window);
-                // event!(|handler, event_loop, window| handler.window_shown(event_loop, window));
-            } else {
-                event!(|handler, event_loop, window| handler.window_hidden(event_loop, window));
-            }
-
-            LRESULT(0)
-        }
-        WM_ENTERSIZEMOVE => {
-            with_state!(|window| {
-                window.is_resizing = true;
-            });
-
-            LRESULT(0)
-        }
-        WM_EXITSIZEMOVE => {
-            let resize_ended = with_state!(|window| {
-                window.in_drag_resize = false;
-                std::mem::take(&mut window.is_resizing)
-            });
-
-            if resize_ended {
-                event!(|handler, event_loop, window| handler
-                    .window_drag_resize_ended(event_loop, window));
-            }
-
-            LRESULT(0)
-        }
-        WM_DPICHANGED => {
-            let dpi = wparam.0 as u16;
-            let rect = unsafe { &*(lparam.0 as *const RECT) };
-            let size = PhysicalSize::new(
-                i16::try_from(rect.right - rect.left).unwrap(),
-                i16::try_from(rect.bottom - rect.top).unwrap(),
-            );
-
-            with_state!(|window| {
-                window.dpi = dpi;
-                window.size = size; // update size to suppress resize event in WM_WINDOWPOSCHANGED
-                window.paint_reason = Some(PaintReason::Commanded);
-            });
-
-            unsafe {
-                SetWindowPos(
-                    hwnd,
-                    None,
-                    rect.left,
-                    rect.top,
-                    rect.right,
-                    rect.bottom,
-                    SET_WINDOW_POS_FLAGS::default(),
-                )
-            }
-            .unwrap();
-
-            let scale = DpiScale::from(dpi as f32 / USER_DEFAULT_SCREEN_DPI as f32);
-            event!(|handler, event_loop, window| handler
-                .window_dpi_changed(event_loop, window, scale, size));
-
-            LRESULT(0)
-        }
-        WM_GETMINMAXINFO => {
-            let minmaxinfo = unsafe { &mut *(lparam.0 as *mut MINMAXINFO) };
-
-            let (min, max, dpi) =
-                with_state!(|window| { (window.min_size, window.max_size, window.dpi as u32) });
-
-            let os_min_x = unsafe { GetSystemMetricsForDpi(SM_CXMINTRACK, dpi) };
-            let os_min_y = unsafe { GetSystemMetricsForDpi(SM_CYMINTRACK, dpi) };
-            let os_max_x = unsafe { GetSystemMetricsForDpi(SM_CXMAXTRACK, dpi) };
-            let os_max_y = unsafe { GetSystemMetricsForDpi(SM_CYMAXTRACK, dpi) };
-
-            minmaxinfo.ptMinTrackSize.x = i32::from(min.width).max(os_min_x);
-            minmaxinfo.ptMinTrackSize.y = i32::from(min.height).max(os_min_y);
-            minmaxinfo.ptMaxTrackSize.x = i32::from(max.width).min(os_max_x);
-            minmaxinfo.ptMaxTrackSize.y = i32::from(max.height).min(os_max_y);
-
-            LRESULT(0)
-        }
-        WM_WINDOWPOSCHANGED => {
-            let (x, y, width, height) = unsafe {
-                let window_pos = &*(lparam.0 as *const WINDOWPOS);
-                (
-                    i16::try_from(window_pos.x).unwrap(),
-                    i16::try_from(window_pos.y).unwrap(),
-                    i16::try_from(window_pos.cx).unwrap(),
-                    i16::try_from(window_pos.cy).unwrap(),
-                )
-            };
-
-            let (resized, moved) = with_state!(|window| (
-                {
-                    let resized = width != window.size.width || height != window.size.height;
-                    let is_start = resized && window.in_drag_resize;
-
-                    window.size = PhysicalSize::new(width, height);
-                    window.is_resizing = is_start;
-                    window.paint_reason = resized
-                        .then_some(PaintReason::Commanded) // override if resized
-                        .or(window.paint_reason); // else keep the current reason
-
-                    resized.then_some((is_start, window.size))
-                },
-                {
-                    let moved = x != window.position.x || y != window.position.y;
-
-                    window.position = PhysicalPosition::new(x, y); // doesn't matter if it's the same
-
-                    moved.then_some(window.position)
-                }
-            ));
-
-            if let Some((start, size)) = resized {
-                if start {
-                    event!(|handler, event_loop, window| handler
-                        .window_drag_resize_started(event_loop, window));
+                let mut count = 0;
+                for h in &state.hwnds {
+                    count += (h.get() == HWND::default()) as u32; // branchless count
                 }
 
-                event!(
-                    |handler, event_loop, window| handler.window_resized(event_loop, window, size)
-                );
-            }
-
-            if let Some(pos) = moved {
-                event!(|handler, event_loop, window| handler.window_moved(event_loop, window, pos))
-            }
-
-            LRESULT(0)
-        }
-        UM_REPAINT => {
-            with_state!(|window| {
-                window.paint_reason = window
-                    .paint_reason
-                    .map(|reason| reason.max(PaintReason::Requested))
-                    .or(Some(PaintReason::Requested));
-            });
-
-            unsafe { InvalidateRect(hwnd, None, false) };
-
-            LRESULT(0)
-        }
-        WM_PAINT => {
-            let mut ps = PAINTSTRUCT::default();
-
-            unsafe { BeginPaint(hwnd, &mut ps) };
-            unsafe { EndPaint(hwnd, &ps) };
-
-            let reason = with_state!(|window| { window.paint_reason.take() })
-                .unwrap_or(PaintReason::Commanded); // assume no reason means it's from the OS
-
-            event!(|handler, event_loop, window| handler
-                .window_needs_repaint(event_loop, window, reason));
-
-            LRESULT(0)
-        }
-        WM_MOUSEMOVE => {
-            let (entered, position) = with_state!(|window| {
-                let entered = !window.has_pointer;
-                window.has_pointer = true;
-                (entered, mouse_coords(lparam))
-            });
-
-            if entered {
-                event!(|handler, event_loop, window| handler
-                    .input_pointer_entered(event_loop, window, position));
-
-                unsafe {
-                    TrackMouseEvent(&mut TRACKMOUSEEVENT {
-                        cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
-                        dwFlags: TME_LEAVE,
-                        hwndTrack: hwnd,
-                        dwHoverTime: 0,
-                    })
+                if count == 0 {
+                    unsafe { PostQuitMessage(0) };
                 }
-                .unwrap()
             }
+            UM_DEFER_SHOW => context.show_defer(from_defer_show(lparam)),
+            WM_SHOWWINDOW => context.show(wparam.0 != 0),
+            WM_ENTERSIZEMOVE => context.enter_size_move(),
+            WM_EXITSIZEMOVE => context.exit_size_move(),
+            WM_DPICHANGED => {
+                let rect = unsafe { &*(lparam.0 as *const RECT) };
+                context.dpi_changed(u16::try_from(wparam.0).unwrap(), rect);
+            }
+            WM_GETMINMAXINFO => {
+                context.get_min_max_info(unsafe { &mut *(lparam.0 as *mut MINMAXINFO) })
+            }
+            WM_WINDOWPOSCHANGED => context.pos_changed(unsafe { &*(lparam.0 as *const WINDOWPOS) }),
+            UM_DEFER_PAINT => context.defer_paint(),
+            WM_PAINT => context.paint(),
+            WM_MOUSEMOVE => context.mouse_move(mouse_coords(lparam)),
+            WM_MOUSELEAVE => context.mouse_leave(),
+            WM_MOUSEWHEEL | WM_MOUSEHWHEEL => {
+                const AXES: [ScrollAxis; 2] = [ScrollAxis::Vertical, ScrollAxis::Horizontal];
 
-            event!(|handler, event_loop, window| handler
-                .input_pointer_move(event_loop, window, position));
+                #[allow(clippy::cast_possible_wrap)]
+                let delta = f32::from((wparam.0 >> 16) as i16) / 120.0;
+                let axis = AXES[(msg == WM_MOUSEHWHEEL) as usize];
+                let mods = mouse_modifiers(wparam);
+                context.wm_mouse_wheel(axis, delta, mods);
+            }
+            WM_LBUTTONDOWN..=WM_MBUTTONDBLCLK => {
+                const STATES: [(MouseButton, ButtonState); 9] = [
+                    (MouseButton::Left, ButtonState::Pressed),
+                    (MouseButton::Left, ButtonState::Released),
+                    (MouseButton::Left, ButtonState::DoubleTapped),
+                    (MouseButton::Right, ButtonState::Pressed),
+                    (MouseButton::Right, ButtonState::Released),
+                    (MouseButton::Right, ButtonState::DoubleTapped),
+                    (MouseButton::Middle, ButtonState::Pressed),
+                    (MouseButton::Middle, ButtonState::Released),
+                    (MouseButton::Middle, ButtonState::DoubleTapped),
+                ];
 
-            LRESULT(0)
-        }
-        WM_MOUSELEAVE => {
-            with_state!(|window| window.has_pointer = false);
+                let (button, state) = STATES[(msg - WM_LBUTTONDOWN) as usize];
+                let point = mouse_coords(lparam);
+                let mods = mouse_modifiers(wparam);
+                context.mouse_button(button, state, point, mods);
+            }
+            // TODO: keyboard input
+            _ => return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+        };
 
-            event!(|handler, event_loop, window| handler.input_pointer_leave(event_loop, window));
-
-            LRESULT(0)
-        }
-        WM_MOUSEWHEEL | WM_MOUSEHWHEEL => {
-            const AXES: [ScrollAxis; 2] = [ScrollAxis::Vertical, ScrollAxis::Horizontal];
-
-            #[allow(clippy::cast_possible_wrap)]
-            let delta = f32::from((wparam.0 >> 16) as i16) / 120.0;
-            let axis = AXES[(msg == WM_MOUSEHWHEEL) as usize];
-
-            event!(|handler, event_loop, window| handler.input_scroll(
-                event_loop,
-                window,
-                delta,
-                axis,
-                mouse_modifier_keys(wparam)
-            ));
-
-            LRESULT(0)
-        }
-        WM_LBUTTONDOWN..=WM_MBUTTONDBLCLK => {
-            const STATES: [(MouseButton, ButtonState); 9] = [
-                (MouseButton::Left, ButtonState::Pressed),
-                (MouseButton::Left, ButtonState::Released),
-                (MouseButton::Left, ButtonState::DoubleTapped),
-                (MouseButton::Right, ButtonState::Pressed),
-                (MouseButton::Right, ButtonState::Released),
-                (MouseButton::Right, ButtonState::DoubleTapped),
-                (MouseButton::Middle, ButtonState::Pressed),
-                (MouseButton::Middle, ButtonState::Released),
-                (MouseButton::Middle, ButtonState::DoubleTapped),
-            ];
-
-            let position = mouse_coords(lparam);
-            let modifiers = mouse_modifier_keys(wparam);
-            let (button, state) = STATES[(msg - WM_LBUTTONDOWN) as usize];
-
-            event!(|handler, event_loop, window| handler
-                .input_mouse_button(event_loop, window, button, state, position, modifiers));
-
-            LRESULT(0)
-        }
-        // TODO: keyboard input
-        _ => unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) },
+        LRESULT(0)
     }
 }

@@ -50,35 +50,35 @@ pub trait EventHandler<WindowData> {
     ) {
     }
 
-    fn window_activated(
+    fn activated(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         window: &mut Window<WindowData>,
     ) {
     }
 
-    fn window_deactivated(
+    fn deactivated(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         window: &mut Window<WindowData>,
     ) {
     }
 
-    fn window_drag_resize_started(
+    fn drag_resize_started(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         window: &mut Window<WindowData>,
     ) {
     }
 
-    fn window_drag_resize_ended(
+    fn drag_resize_ended(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         window: &mut Window<WindowData>,
     ) {
     }
 
-    fn window_resized(
+    fn resized(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         window: &mut Window<WindowData>,
@@ -86,7 +86,7 @@ pub trait EventHandler<WindowData> {
     ) {
     }
 
-    fn window_dpi_changed(
+    fn dpi_changed(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         window: &mut Window<WindowData>,
@@ -95,7 +95,7 @@ pub trait EventHandler<WindowData> {
     ) {
     }
 
-    fn window_close_requested(
+    fn close_requested(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         window: &mut Window<WindowData>,
@@ -103,42 +103,38 @@ pub trait EventHandler<WindowData> {
         window.destroy();
     }
 
-    fn window_shown(
+    fn shown(&mut self, event_loop: &ActiveEventLoop<WindowData>, window: &mut Window<WindowData>) {
+    }
+
+    fn hidden(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         window: &mut Window<WindowData>,
     ) {
     }
 
-    fn window_hidden(
+    fn maximized(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         window: &mut Window<WindowData>,
     ) {
     }
 
-    fn window_maximized(
+    fn minimized(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         window: &mut Window<WindowData>,
     ) {
     }
 
-    fn window_minimized(
+    fn restored(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         window: &mut Window<WindowData>,
     ) {
     }
 
-    fn window_restored(
-        &mut self,
-        event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
-    ) {
-    }
-
-    fn window_moved(
+    fn moved(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         window: &mut Window<WindowData>,
@@ -146,14 +142,14 @@ pub trait EventHandler<WindowData> {
     ) {
     }
 
-    fn window_wake_requested(
+    fn wake_requested(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         window: &mut Window<WindowData>,
     ) {
     }
 
-    fn window_needs_repaint(
+    fn needs_repaint(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         window: &mut Window<WindowData>,
@@ -161,13 +157,10 @@ pub trait EventHandler<WindowData> {
     ) {
     }
 
-    fn window_destroyed(
-        &mut self,
-        event_loop: &ActiveEventLoop<WindowData>,
-        window_data: WindowData,
-    );
+    fn destroyed(&mut self, event_loop: &ActiveEventLoop<WindowData>, window_data: WindowData);
 
-    fn input_key(
+    fn key(
+        // TODO: better name in the past tense
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         window: &mut Window<WindowData>,
@@ -177,7 +170,8 @@ pub trait EventHandler<WindowData> {
     ) {
     }
 
-    fn input_mouse_button(
+    fn mouse_button(
+        // TODO: better name in the past tense
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         window: &mut Window<WindowData>,
@@ -188,36 +182,36 @@ pub trait EventHandler<WindowData> {
     ) {
     }
 
-    fn input_pointer_move(
-        &mut self,
-        event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
-        position: PhysicalPosition,
-    ) {
-    }
-
-    fn input_pointer_entered(
-        &mut self,
-        event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
-        position: PhysicalPosition,
-    ) {
-    }
-
-    fn input_pointer_leave(
-        &mut self,
-        event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
-    ) {
-    }
-
-    fn input_scroll(
+    fn mouse_scrolled(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         window: &mut Window<WindowData>,
         delta: f32,
         axis: ScrollAxis,
         modifiers: ModifierKeys,
+    ) {
+    }
+
+    fn pointer_moved(
+        &mut self,
+        event_loop: &ActiveEventLoop<WindowData>,
+        window: &mut Window<WindowData>,
+        position: PhysicalPosition,
+    ) {
+    }
+
+    fn pointer_entered(
+        &mut self,
+        event_loop: &ActiveEventLoop<WindowData>,
+        window: &mut Window<WindowData>,
+        position: PhysicalPosition,
+    ) {
+    }
+
+    fn pointer_left(
+        &mut self,
+        event_loop: &ActiveEventLoop<WindowData>,
+        window: &mut Window<WindowData>,
     ) {
     }
 }

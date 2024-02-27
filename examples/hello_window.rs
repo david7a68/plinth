@@ -62,31 +62,23 @@ impl EventHandler<()> for App {
         println!("Power preference changed: {:?}", power_preference);
     }
 
-    fn window_activated(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
+    fn activated(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
         println!("Window activated");
     }
 
-    fn window_deactivated(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
+    fn deactivated(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
         println!("Window deactivated");
     }
 
-    fn window_drag_resize_started(
-        &mut self,
-        event_loop: &ActiveEventLoop<()>,
-        window: &mut Window<()>,
-    ) {
+    fn drag_resize_started(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
         println!("Window drag resize started");
     }
 
-    fn window_drag_resize_ended(
-        &mut self,
-        event_loop: &ActiveEventLoop<()>,
-        window: &mut Window<()>,
-    ) {
+    fn drag_resize_ended(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
         println!("Window drag resize ended");
     }
 
-    fn window_resized(
+    fn resized(
         &mut self,
         event_loop: &ActiveEventLoop<()>,
         window: &mut Window<()>,
@@ -95,7 +87,7 @@ impl EventHandler<()> for App {
         println!("Window resized: {:?}", size);
     }
 
-    fn window_dpi_changed(
+    fn dpi_changed(
         &mut self,
         event_loop: &ActiveEventLoop<()>,
         window: &mut Window<()>,
@@ -106,36 +98,32 @@ impl EventHandler<()> for App {
         println!("Window size: {:?}", size);
     }
 
-    fn window_close_requested(
-        &mut self,
-        _event_loop: &ActiveEventLoop<()>,
-        window: &mut Window<()>,
-    ) {
+    fn close_requested(&mut self, _event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
         println!("Window close request");
         window.destroy();
     }
 
-    fn window_shown(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
+    fn shown(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
         println!("Window shown");
     }
 
-    fn window_hidden(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
+    fn hidden(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
         println!("Window hidden");
     }
 
-    fn window_maximized(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
+    fn maximized(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
         println!("Window maximized");
     }
 
-    fn window_minimized(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
+    fn minimized(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
         println!("Window minimized");
     }
 
-    fn window_restored(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
+    fn restored(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
         println!("Window restored");
     }
 
-    fn window_moved(
+    fn moved(
         &mut self,
         event_loop: &ActiveEventLoop<()>,
         window: &mut Window<()>,
@@ -144,11 +132,11 @@ impl EventHandler<()> for App {
         println!("Window moved: {:?}", position);
     }
 
-    fn window_wake_requested(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
+    fn wake_requested(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
         println!("Window wake requested");
     }
 
-    fn window_needs_repaint(
+    fn needs_repaint(
         &mut self,
         event_loop: &ActiveEventLoop<()>,
         window: &mut Window<()>,
@@ -157,11 +145,11 @@ impl EventHandler<()> for App {
         println!("Window needs repaint: {:?}", reason);
     }
 
-    fn window_destroyed(&mut self, _event_loop: &ActiveEventLoop<()>, _window_data: ()) {
+    fn destroyed(&mut self, _event_loop: &ActiveEventLoop<()>, _window_data: ()) {
         println!("Window destroyed");
     }
 
-    fn input_key(
+    fn key(
         &mut self,
         event_loop: &ActiveEventLoop<()>,
         window: &mut Window<()>,
@@ -172,7 +160,7 @@ impl EventHandler<()> for App {
         println!("Key input: {:?} {:?} {:?}", code, state, modifiers);
     }
 
-    fn input_mouse_button(
+    fn mouse_button(
         &mut self,
         event_loop: &ActiveEventLoop<()>,
         window: &mut Window<()>,
@@ -187,7 +175,7 @@ impl EventHandler<()> for App {
         );
     }
 
-    fn input_pointer_move(
+    fn pointer_moved(
         &mut self,
         event_loop: &ActiveEventLoop<()>,
         window: &mut Window<()>,
@@ -196,7 +184,7 @@ impl EventHandler<()> for App {
         println!("Mouse moved: {:?}", position);
     }
 
-    fn input_pointer_entered(
+    fn pointer_entered(
         &mut self,
         event_loop: &ActiveEventLoop<()>,
         window: &mut Window<()>,
@@ -205,11 +193,11 @@ impl EventHandler<()> for App {
         println!("Mouse entered: {:?}", position);
     }
 
-    fn input_pointer_leave(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
+    fn pointer_left(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
         println!("Mouse left");
     }
 
-    fn input_scroll(
+    fn mouse_scrolled(
         &mut self,
         event_loop: &ActiveEventLoop<()>,
         window: &mut Window<()>,

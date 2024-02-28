@@ -1,6 +1,6 @@
 use std::ops::{Add, AddAssign, Div, Mul};
 
-use crate::time::{Duration, Instant};
+use crate::system::time::{Duration, Instant};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct FrameId(pub u64);

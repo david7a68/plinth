@@ -31,7 +31,7 @@ use windows::{
 
 use crate::graphics::{
     backend::{SubmitId, TextureId},
-    GraphicsConfig, PixelBufferRef,
+    GraphicsConfig,
 };
 
 use super::shaders::RectShader;
@@ -44,7 +44,7 @@ pub struct Device {
 }
 
 impl Device {
-    pub fn new(config: &GraphicsConfig) -> Arc<Self> {
+    pub fn new(config: &GraphicsConfig) -> Self {
         let dxgi: IDXGIFactory2 = {
             let mut dxgi_flags = 0;
 
@@ -98,12 +98,12 @@ impl Device {
 
         let rect_shader = RectShader::new(&device);
 
-        Arc::new(Self {
+        Self {
             dxgi,
             handle: device,
             queue,
             rect_shader,
-        })
+        }
     }
 
     pub fn wait(&self, submit_id: SubmitId) {
@@ -118,31 +118,31 @@ impl Device {
         self.queue.submit(&command_list.cast().unwrap())
     }
 
-    pub fn upload_texture(&self, pixels: &PixelBufferRef) -> (TextureId, SubmitId) {
-        // behavior here depends on the size of the texture that we want to
-        // upload. if it's small enough, use a texture atlas, otherwise use a
-        // dedicated allocation.
-        //
-        // uploading happens with fixed-size buffers, which may require multiple
-        // submissions. Wait for all but the last one to complete before
-        // returning. Upload buffer size can be defined at runtime, but must be
-        // at least 65536 * 4 bytes (a 256x256 pixel square). This is a single
-        // row of the largest texture size we support at 4 bytes per pixel. The
-        // larger the upload buffer size, the fewer submissions we need to make
-        // and the faster the upload will be in exchange for memory consumption.
-        //
-        // note: the buffer size restriction is kind of arbitrary. The actual
-        // smallest limit is 256 bytes according to the DX spec.
-        //
-        // Submission strategies:
-        // - upload all at once on the graphics queue (atlas update)
-        // - upload in chunks on a low-priority graphics queue (???)
-        // - upload in chunks on the copy queue (large textures only)
-        //
-        // -dz
+    // pub fn upload_texture(&self, pixels: &PixelBufferRef) -> (TextureId, SubmitId) {
+    // behavior here depends on the size of the texture that we want to
+    // upload. if it's small enough, use a texture atlas, otherwise use a
+    // dedicated allocation.
+    //
+    // uploading happens with fixed-size buffers, which may require multiple
+    // submissions. Wait for all but the last one to complete before
+    // returning. Upload buffer size can be defined at runtime, but must be
+    // at least 65536 * 4 bytes (a 256x256 pixel square). This is a single
+    // row of the largest texture size we support at 4 bytes per pixel. The
+    // larger the upload buffer size, the fewer submissions we need to make
+    // and the faster the upload will be in exchange for memory consumption.
+    //
+    // note: the buffer size restriction is kind of arbitrary. The actual
+    // smallest limit is 256 bytes according to the DX spec.
+    //
+    // Submission strategies:
+    // - upload all at once on the graphics queue (atlas update)
+    // - upload in chunks on a low-priority graphics queue (???)
+    // - upload in chunks on the copy queue (large textures only)
+    //
+    // -dz
 
-        todo!()
-    }
+    //     todo!()
+    // }
 
     pub fn alloc_buffer(&self, size: u64) -> ID3D12Resource {
         let heap_desc = D3D12_HEAP_PROPERTIES {

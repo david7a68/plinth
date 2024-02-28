@@ -34,12 +34,9 @@ use windows::{
     },
 };
 
-use crate::{
-    geometry::Size,
-    limits::{MAX_WINDOWS, MAX_WINDOW_TITLE_LENGTH},
-};
+use crate::limits::{MAX_WINDOWS, MAX_WINDOW_TITLE_LENGTH};
 
-use super::{event_loop::EventHandler, window::WindowAttributes};
+use super::{dpi::WindowSize, event_loop::EventHandler, window::WindowAttributes};
 
 mod api {
     pub use crate::system::event_loop::{ActiveEventLoop, EventLoopError};
@@ -81,7 +78,7 @@ impl<WindowData> ActiveEventLoop<WindowData> {
         let style_ex = WS_EX_NOREDIRECTIONBITMAP;
 
         let min_size = attributes.min_size.unwrap_or_default();
-        let max_size = attributes.max_size.unwrap_or(Size::new(i16::MAX, i16::MAX));
+        let max_size = attributes.max_size.unwrap_or(WindowSize::MAX);
 
         let (width, height) = attributes
             .size

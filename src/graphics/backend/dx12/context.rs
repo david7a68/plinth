@@ -1,4 +1,4 @@
-use std::{mem::ManuallyDrop, sync::Arc};
+use std::mem::ManuallyDrop;
 
 use windows::{
     core::Interface,
@@ -33,27 +33,23 @@ use windows::{
 };
 
 use crate::{
-    frame::{FrameId, FramesPerSecond, RedrawRequest},
-    geometry::{Point, Rect, Scale, Size},
+    frame::{FrameId, FramesPerSecond},
+    geometry::{image, pixel},
     graphics::{backend::SubmitId, FrameInfo},
     limits::MAX_WINDOW_DIMENSION,
-    platform::{dx12::canvas::DrawCommand, win32, PlatformEventHandler},
-    time::Instant,
-    Axis, ButtonState, EventHandler, LogicalPixel, MouseButton, PhysicalPixel,
+    system::{
+        dpi::{DpiScale, WindowSize},
+        time::Instant,
+    },
 };
 
 use super::{
-    canvas::{Canvas, DrawList},
+    canvas::{Canvas, DrawCommand, DrawList},
     device::Device,
+    Graphics,
 };
 
-pub struct Interposer<W: EventHandler> {
-    hwnd: HWND,
-
-    app: win32::AppContextImpl,
-    device: Arc<Device>,
-    user_handler: W,
-
+pub struct Context {
     swapchain: IDXGISwapChain3,
     #[allow(dead_code)]
     target: IDCompositionTarget,
@@ -64,7 +60,8 @@ pub struct Interposer<W: EventHandler> {
     swapchain_rtv_heap: ID3D12DescriptorHeap,
     swapchain_rtv: D3D12_CPU_DESCRIPTOR_HANDLE,
 
-    size: Size<u16, PhysicalPixel>,
+    size: WindowSize,
+    scale: DpiScale,
 
     draw_list: DrawList,
     frames_in_flight: [Frame; 2],
@@ -79,17 +76,15 @@ pub struct Interposer<W: EventHandler> {
 
     /// A resize event. Deferred until repaint to consolidate graphics work and
     /// in case multiple resize events are received in a single frame.
-    deferred_resize: Option<(Size<u16, PhysicalPixel>, Option<f32>)>,
+    deferred_resize: Option<(WindowSize, DpiScale, Option<f32>)>,
 }
 
-impl<W: EventHandler> Interposer<W> {
-    #[tracing::instrument(skip(app, user_handler))]
-    pub fn new(app: win32::AppContextImpl, user_handler: W, hwnd: HWND) -> Self {
-        let (device, swapchain, target, visual) = {
-            let device = app.inner.dx12.clone();
-
-            let target = unsafe { app.inner.compositor.CreateTargetForHwnd(hwnd, true) }.unwrap();
-            let visual = unsafe { app.inner.compositor.CreateVisual() }.unwrap();
+impl Context {
+    #[tracing::instrument(skip(graphics))]
+    pub fn new(graphics: &Graphics, hwnd: HWND) -> Self {
+        let (swapchain, target, visual) = {
+            let target = unsafe { graphics.compositor.CreateTargetForHwnd(hwnd, true) }.unwrap();
+            let visual = unsafe { graphics.compositor.CreateVisual() }.unwrap();
             unsafe { target.SetRoot(&visual) }.unwrap();
 
             let (width, height) = {
@@ -115,7 +110,8 @@ impl<W: EventHandler> Interposer<W> {
                 Flags: DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT.0 as _,
             };
 
-            let swapchain = device
+            let swapchain = graphics
+                .device
                 .create_swapchain(&swapchain_desc)
                 .cast::<IDXGISwapChain3>()
                 .unwrap_or_else(|e| {
@@ -138,9 +134,9 @@ impl<W: EventHandler> Interposer<W> {
             }
 
             unsafe { visual.SetContent(&swapchain) }.unwrap();
-            unsafe { app.inner.compositor.Commit() }.unwrap();
+            unsafe { graphics.compositor.Commit() }.unwrap();
 
-            (device, swapchain, target, visual)
+            (swapchain, target, visual)
         };
 
         let swapchain_rtv_heap: ID3D12DescriptorHeap = {
@@ -151,7 +147,7 @@ impl<W: EventHandler> Interposer<W> {
                 NodeMask: 0,
             };
 
-            unsafe { device.handle.CreateDescriptorHeap(&heap_desc) }.unwrap_or_else(|e| {
+            unsafe { graphics.device.handle.CreateDescriptorHeap(&heap_desc) }.unwrap_or_else(|e| {
                 tracing::error!("Failed to create descriptor heap: {:?}", e);
                 panic!()
             })
@@ -161,19 +157,16 @@ impl<W: EventHandler> Interposer<W> {
 
         let latency_event = unsafe { swapchain.GetFrameLatencyWaitableObject() };
 
-        let frames_in_flight = [Frame::new(&device), Frame::new(&device)];
+        let frames_in_flight = [Frame::new(&graphics.device), Frame::new(&graphics.device)];
         let draw_list = DrawList::new();
 
         Self {
-            hwnd,
-            user_handler,
-            app,
             swapchain,
             target,
             visual,
             swapchain_ready: latency_event,
-            size: Size::default(),
-            device,
+            size: WindowSize::default(),
+            scale: DpiScale::default(),
             swapchain_rtv_heap,
             swapchain_rtv,
             draw_list,
@@ -187,96 +180,30 @@ impl<W: EventHandler> Interposer<W> {
             deferred_resize: None,
         }
     }
-}
 
-impl<W: EventHandler> EventHandler for Interposer<W> {
-    #[tracing::instrument(skip(self))]
-    fn on_close_request(&mut self) {
-        self.user_handler.on_close_request();
+    pub fn resize(&mut self, size: WindowSize, dpi: DpiScale) {
+        self.deferred_resize = Some((size, dpi, None));
     }
 
-    #[tracing::instrument(skip(self))]
-    fn on_visible(&mut self, visible: bool) {
-        self.is_visible = visible;
-        self.user_handler.on_visible(visible);
-    }
-
-    #[tracing::instrument(skip(self))]
-    fn on_begin_resize(&mut self) {
-        self.is_drag_resizing = true;
-        self.user_handler.on_begin_resize();
-    }
-
-    #[tracing::instrument(skip(self))]
-    fn on_resize(
-        &mut self,
-        size: Size<u16, PhysicalPixel>,
-        scale: Scale<f32, PhysicalPixel, LogicalPixel>,
-    ) {
-        self.deferred_resize = Some((size, None));
-        self.user_handler.on_resize(size, scale);
-    }
-
-    #[tracing::instrument(skip(self))]
-    fn on_end_resize(&mut self) {
-        self.is_drag_resizing = false;
-        self.user_handler.on_end_resize();
-    }
-
-    #[tracing::instrument(skip(self))]
-    fn on_mouse_button(
-        &mut self,
-        button: MouseButton,
-        state: ButtonState,
-        location: Point<i16, PhysicalPixel>,
-    ) {
-        self.user_handler.on_mouse_button(button, state, location);
-    }
-
-    #[tracing::instrument(skip(self))]
-    fn on_pointer_move(&mut self, location: Point<i16, PhysicalPixel>) {
-        self.user_handler.on_pointer_move(location);
-    }
-
-    #[tracing::instrument(skip(self))]
-    fn on_pointer_leave(&mut self) {
-        self.user_handler.on_pointer_leave();
-    }
-
-    #[tracing::instrument(skip(self))]
-    fn on_scroll(&mut self, axis: Axis, delta: f32) {
-        self.user_handler.on_scroll(axis, delta);
-    }
-
-    fn on_repaint(&mut self, canvas: &mut dyn crate::graphics::Canvas, timing: &FrameInfo) {
-        unimplemented!()
-    }
-}
-
-impl<W: EventHandler> PlatformEventHandler for Interposer<W> {
-    #[tracing::instrument(skip(self))]
-    fn on_os_repaint(&mut self) {
+    pub fn paint(&mut self, device: &Device, mut callback: impl FnMut(&mut Canvas, &FrameInfo)) {
         // todo: how to handle multiple repaint events in a single frame (when
         // animating and resizing at the same time)? -dz
 
         unsafe { WaitForSingleObjectEx(self.swapchain_ready, u32::MAX, true) };
 
-        if let Some((size, flex)) = self.deferred_resize.take() {
-            resize_swapchain(&self.swapchain, size.width, size.height, flex, || {
-                self.device.wait_for_idle();
+        if let Some((size, dpi, flex)) = self.deferred_resize.take() {
+            resize_swapchain(&self.swapchain, size, flex, || {
+                device.wait_for_idle();
             });
 
             tracing::info!("window: resized to {:?}", size);
 
             self.size = size;
+            self.scale = dpi;
         }
 
         let mut canvas = {
-            let rect = {
-                let size = self.size;
-                Rect::new(0, 0, size.width, size.height)
-            };
-
+            let rect = self.size.into_rect().into();
             Canvas::new(&mut self.draw_list, rect)
         };
 
@@ -310,7 +237,7 @@ impl<W: EventHandler> PlatformEventHandler for Interposer<W> {
             }
         };
 
-        self.user_handler.on_repaint(&mut canvas, &timings);
+        callback(&mut canvas, &timings);
 
         let image: ID3D12Resource = {
             let index = unsafe { self.swapchain.GetCurrentBackBufferIndex() };
@@ -320,18 +247,13 @@ impl<W: EventHandler> PlatformEventHandler for Interposer<W> {
         let frame = &mut self.frames_in_flight[(self.frame_counter % 2) as usize];
 
         unsafe {
-            self.device
+            device
                 .handle
                 .CreateRenderTargetView(&image, None, self.swapchain_rtv);
         };
 
-        let submit_id = upload_draw_list(
-            &self.device,
-            canvas.finish(),
-            frame,
-            &image,
-            self.swapchain_rtv,
-        );
+        let submit_id =
+            upload_draw_list(device, canvas.finish(), frame, &image, self.swapchain_rtv);
 
         unsafe { self.swapchain.Present(1, 0) }.unwrap();
 
@@ -340,20 +262,6 @@ impl<W: EventHandler> PlatformEventHandler for Interposer<W> {
 
         #[cfg(feature = "profile")]
         tracing_tracy::client::frame_mark();
-    }
-
-    #[tracing::instrument(skip(self))]
-    fn on_vsync(&mut self, _frame_id: FrameId, rate: Option<FramesPerSecond>) {
-        self.target_frame_rate = rate;
-    }
-
-    #[tracing::instrument(skip(self))]
-    fn on_composition_rate_change(&mut self, _frame_id: FrameId, rate: FramesPerSecond) {
-        self.composition_rate = rate;
-    }
-
-    fn on_client_repaint(&mut self) {
-        todo!()
     }
 }
 
@@ -436,20 +344,22 @@ pub fn image_barrier(
 #[tracing::instrument(skip(swapchain, idle))]
 pub fn resize_swapchain(
     swapchain: &IDXGISwapChain3,
-    width: u16,
-    height: u16,
+    size: WindowSize,
     flex: Option<f32>,
     idle: impl Fn(),
 ) {
+    let width = u32::try_from(size.width).unwrap();
+    let height = u32::try_from(size.height).unwrap();
+
     if let Some(flex) = flex {
         let mut desc = DXGI_SWAP_CHAIN_DESC1::default();
         unsafe { swapchain.GetDesc1(&mut desc) }.unwrap();
 
-        if u32::from(width) > desc.Width || u32::from(height) > desc.Height {
+        if width > desc.Width || height > desc.Height {
             #[allow(clippy::cast_sign_loss)]
-            let w = ((f32::from(width)) * flex).min(f32::from(MAX_WINDOW_DIMENSION)) as u32;
+            let w = ((width as f32) * flex).min(f32::from(MAX_WINDOW_DIMENSION)) as u32;
             #[allow(clippy::cast_sign_loss)]
-            let h = ((f32::from(height)) * flex).min(f32::from(MAX_WINDOW_DIMENSION)) as u32;
+            let h = ((height as f32) * flex).min(f32::from(MAX_WINDOW_DIMENSION)) as u32;
 
             idle();
             unsafe {
@@ -464,14 +374,14 @@ pub fn resize_swapchain(
             .unwrap();
         }
 
-        unsafe { swapchain.SetSourceSize(u32::from(width), u32::from(height)) }.unwrap();
+        unsafe { swapchain.SetSourceSize(width, height) }.unwrap();
     } else {
         idle();
         unsafe {
             swapchain.ResizeBuffers(
                 0,
-                u32::from(width),
-                u32::from(height),
+                width,
+                height,
                 DXGI_FORMAT_UNKNOWN,
                 DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT.0 as _,
             )
@@ -523,14 +433,14 @@ fn upload_draw_list(
         }
     }
 
-    let viewport_rect = {
+    let viewpowrt: image::Box = {
         assert!(content.commands[0].0 == DrawCommand::Begin);
-        content.areas[0]
+        content.areas[0].into()
     };
 
     let viewport_scale = [
-        1.0 / f32::from(viewport_rect.right()),
-        1.0 / f32::from(viewport_rect.bottom()),
+        1.0 / f32::from(viewpowrt.right),
+        1.0 / f32::from(viewpowrt.bottom),
     ];
 
     let mut rect_idx = 0;
@@ -560,17 +470,17 @@ fn upload_draw_list(
                 frame.command_list.RSSetViewports(&[D3D12_VIEWPORT {
                     TopLeftX: 0.0,
                     TopLeftY: 0.0,
-                    Width: viewport_rect.right().into(),
-                    Height: viewport_rect.bottom().into(),
+                    Width: f32::from(viewpowrt.right),
+                    Height: f32::from(viewpowrt.bottom),
                     MinDepth: 0.0,
                     MaxDepth: 1.0,
                 }]);
 
                 frame.command_list.RSSetScissorRects(&[RECT {
-                    left: i32::from(viewport_rect.left()),
-                    top: i32::from(viewport_rect.top()),
-                    right: i32::from(viewport_rect.right()),
-                    bottom: i32::from(viewport_rect.bottom()),
+                    left: i32::from(viewpowrt.left),
+                    top: i32::from(viewpowrt.top),
+                    right: i32::from(viewpowrt.right),
+                    bottom: i32::from(viewpowrt.bottom),
                 }]);
             },
             DrawCommand::End => unsafe {
@@ -599,7 +509,7 @@ fn upload_draw_list(
                     &frame.command_list,
                     frame.buffer.as_ref().unwrap(),
                     viewport_scale,
-                    viewport_rect.height.into(),
+                    (viewpowrt.bottom.checked_sub(viewpowrt.top)).unwrap() as f32,
                 );
 
                 unsafe { frame.command_list.DrawInstanced(4, num_rects, 0, rect_idx) };

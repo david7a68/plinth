@@ -1,11 +1,9 @@
 use super::{
+    dpi::{DpiScale, WindowPoint, WindowSize},
     input::{ButtonState, KeyCode, ModifierKeys, MouseButton, ScrollAxis},
     platform_impl,
     power::{MonitorState, PowerPreference, PowerSource},
-    window::{
-        DpiScale, PaintReason, PhysicalPosition, PhysicalSize, Window, WindowAttributes,
-        WindowError,
-    },
+    window::{PaintReason, Window, WindowAttributes, WindowError},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -21,141 +19,98 @@ pub enum EventLoopError {
 pub trait EventHandler<WindowData> {
     fn start(&mut self, event_loop: &ActiveEventLoop<WindowData>);
 
-    fn suspend(&mut self, event_loop: &ActiveEventLoop<WindowData>) {}
+    fn suspend(&mut self, event_loop: &ActiveEventLoop<WindowData>);
 
-    fn resume(&mut self, event_loop: &ActiveEventLoop<WindowData>) {}
+    fn resume(&mut self, event_loop: &ActiveEventLoop<WindowData>);
 
     fn stop(&mut self);
 
-    fn low_memory(&mut self, event_loop: &ActiveEventLoop<WindowData>) {}
+    fn low_memory(&mut self, event_loop: &ActiveEventLoop<WindowData>);
 
     fn power_source_changed(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         power_source: PowerSource,
-    ) {
-    }
+    );
 
     fn monitor_state_changed(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         monitor: MonitorState,
-    ) {
-    }
+    );
 
     fn power_preference_changed(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         power_preference: PowerPreference,
-    ) {
-    }
+    );
 
-    fn activated(
-        &mut self,
-        event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
-    ) {
-    }
+    fn activated(&mut self, event_loop: &ActiveEventLoop<WindowData>, window: Window<WindowData>);
 
-    fn deactivated(
-        &mut self,
-        event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
-    ) {
-    }
+    fn deactivated(&mut self, event_loop: &ActiveEventLoop<WindowData>, window: Window<WindowData>);
 
     fn drag_resize_started(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
-    ) {
-    }
+        window: Window<WindowData>,
+    );
 
     fn drag_resize_ended(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
-    ) {
-    }
+        window: Window<WindowData>,
+    );
 
     fn resized(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
-        size: PhysicalSize,
-    ) {
-    }
+        window: Window<WindowData>,
+        size: WindowSize,
+    );
 
     fn dpi_changed(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
+        window: Window<WindowData>,
         dpi: DpiScale,
-        size: PhysicalSize,
-    ) {
-    }
+        size: WindowSize,
+    );
 
     fn close_requested(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
-    ) {
-        window.destroy();
-    }
+        window: Window<WindowData>,
+    );
 
-    fn shown(&mut self, event_loop: &ActiveEventLoop<WindowData>, window: &mut Window<WindowData>) {
-    }
+    fn shown(&mut self, event_loop: &ActiveEventLoop<WindowData>, window: Window<WindowData>);
 
-    fn hidden(
-        &mut self,
-        event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
-    ) {
-    }
+    fn hidden(&mut self, event_loop: &ActiveEventLoop<WindowData>, window: Window<WindowData>);
 
-    fn maximized(
-        &mut self,
-        event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
-    ) {
-    }
+    fn maximized(&mut self, event_loop: &ActiveEventLoop<WindowData>, window: Window<WindowData>);
 
-    fn minimized(
-        &mut self,
-        event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
-    ) {
-    }
+    fn minimized(&mut self, event_loop: &ActiveEventLoop<WindowData>, window: Window<WindowData>);
 
-    fn restored(
-        &mut self,
-        event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
-    ) {
-    }
+    fn restored(&mut self, event_loop: &ActiveEventLoop<WindowData>, window: Window<WindowData>);
 
     fn moved(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
-        position: PhysicalPosition,
-    ) {
-    }
+        window: Window<WindowData>,
+        position: WindowPoint,
+    );
 
     fn wake_requested(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
-    ) {
-    }
+        window: Window<WindowData>,
+    );
 
     fn needs_repaint(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
+        window: Window<WindowData>,
         reason: PaintReason,
-    ) {
-    }
+    );
 
     fn destroyed(&mut self, event_loop: &ActiveEventLoop<WindowData>, window_data: WindowData);
 
@@ -163,57 +118,51 @@ pub trait EventHandler<WindowData> {
         // TODO: better name in the past tense
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
+        window: Window<WindowData>,
         code: KeyCode,
         state: ButtonState,
         modifiers: ModifierKeys,
-    ) {
-    }
+    );
 
     fn mouse_button(
         // TODO: better name in the past tense
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
+        window: Window<WindowData>,
         button: MouseButton,
         state: ButtonState,
-        position: PhysicalPosition,
+        position: WindowPoint,
         modifiers: ModifierKeys,
-    ) {
-    }
+    );
 
     fn mouse_scrolled(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
+        window: Window<WindowData>,
         delta: f32,
         axis: ScrollAxis,
         modifiers: ModifierKeys,
-    ) {
-    }
+    );
 
     fn pointer_moved(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
-        position: PhysicalPosition,
-    ) {
-    }
+        window: Window<WindowData>,
+        position: WindowPoint,
+    );
 
     fn pointer_entered(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
-        position: PhysicalPosition,
-    ) {
-    }
+        window: Window<WindowData>,
+        position: WindowPoint,
+    );
 
     fn pointer_left(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
-        window: &mut Window<WindowData>,
-    ) {
-    }
+        window: Window<WindowData>,
+    );
 }
 
 /// An event loop for the platform's windowing system.

@@ -1,7 +1,8 @@
 use plinth::system::{
-    event_loop::{ActiveEventLoop, EventHandler, EventLoop},
-    input::{ModifierKeys, ScrollAxis},
-    window::{PhysicalPosition, PhysicalSize, Window, WindowAttributes},
+    dpi::{DpiScale, WindowPoint, WindowSize},
+    input::{ButtonState, KeyCode, ModifierKeys, MouseButton, ScrollAxis},
+    window::{Window, WindowAttributes},
+    ActiveEventLoop, EventHandler, EventLoop,
 };
 
 pub struct App {}
@@ -62,84 +63,79 @@ impl EventHandler<()> for App {
         println!("Power preference changed: {:?}", power_preference);
     }
 
-    fn activated(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
+    fn activated(&mut self, event_loop: &ActiveEventLoop<()>, window: Window<()>) {
         println!("Window activated");
     }
 
-    fn deactivated(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
+    fn deactivated(&mut self, event_loop: &ActiveEventLoop<()>, window: Window<()>) {
         println!("Window deactivated");
     }
 
-    fn drag_resize_started(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
+    fn drag_resize_started(&mut self, event_loop: &ActiveEventLoop<()>, window: Window<()>) {
         println!("Window drag resize started");
     }
 
-    fn drag_resize_ended(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
+    fn drag_resize_ended(&mut self, event_loop: &ActiveEventLoop<()>, window: Window<()>) {
         println!("Window drag resize ended");
     }
 
-    fn resized(
-        &mut self,
-        event_loop: &ActiveEventLoop<()>,
-        window: &mut Window<()>,
-        size: PhysicalSize,
-    ) {
+    fn resized(&mut self, event_loop: &ActiveEventLoop<()>, window: Window<()>, size: WindowSize) {
         println!("Window resized: {:?}", size);
     }
 
     fn dpi_changed(
         &mut self,
         event_loop: &ActiveEventLoop<()>,
-        window: &mut Window<()>,
-        dpi: plinth::system::window::DpiScale,
-        size: plinth::system::window::PhysicalSize,
+        window: Window<()>,
+        dpi: DpiScale,
+        size: WindowSize,
     ) {
         println!("Window DPI changed: {:?}", dpi);
         println!("Window size: {:?}", size);
     }
 
-    fn close_requested(&mut self, _event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
+    fn close_requested(&mut self, _event_loop: &ActiveEventLoop<()>, mut window: Window<()>) {
         println!("Window close request");
         window.destroy();
     }
 
-    fn shown(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
+    fn shown(&mut self, event_loop: &ActiveEventLoop<()>, window: Window<()>) {
         println!("Window shown");
     }
 
-    fn hidden(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
+    fn hidden(&mut self, event_loop: &ActiveEventLoop<()>, window: Window<()>) {
         println!("Window hidden");
     }
 
-    fn maximized(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
+    fn maximized(&mut self, event_loop: &ActiveEventLoop<()>, window: Window<()>) {
         println!("Window maximized");
     }
 
-    fn minimized(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
+    fn minimized(&mut self, event_loop: &ActiveEventLoop<()>, window: Window<()>) {
         println!("Window minimized");
     }
 
-    fn restored(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
+    fn restored(&mut self, event_loop: &ActiveEventLoop<()>, window: Window<()>) {
         println!("Window restored");
     }
 
     fn moved(
         &mut self,
         event_loop: &ActiveEventLoop<()>,
-        window: &mut Window<()>,
-        position: PhysicalPosition,
+        window: Window<()>,
+        position: WindowPoint,
     ) {
         println!("Window moved: {:?}", position);
     }
 
-    fn wake_requested(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
+    fn wake_requested(&mut self, event_loop: &ActiveEventLoop<()>, window: Window<()>) {
         println!("Window wake requested");
     }
 
     fn needs_repaint(
         &mut self,
         event_loop: &ActiveEventLoop<()>,
-        window: &mut Window<()>,
+        window: Window<()>,
         reason: plinth::system::window::PaintReason,
     ) {
         println!("Window needs repaint: {:?}", reason);
@@ -152,10 +148,10 @@ impl EventHandler<()> for App {
     fn key(
         &mut self,
         event_loop: &ActiveEventLoop<()>,
-        window: &mut Window<()>,
-        code: plinth::system::input::KeyCode,
-        state: plinth::system::input::ButtonState,
-        modifiers: plinth::system::input::ModifierKeys,
+        window: Window<()>,
+        code: KeyCode,
+        state: ButtonState,
+        modifiers: ModifierKeys,
     ) {
         println!("Key input: {:?} {:?} {:?}", code, state, modifiers);
     }
@@ -163,11 +159,11 @@ impl EventHandler<()> for App {
     fn mouse_button(
         &mut self,
         event_loop: &ActiveEventLoop<()>,
-        window: &mut Window<()>,
-        button: plinth::system::input::MouseButton,
-        state: plinth::system::input::ButtonState,
-        position: plinth::system::window::PhysicalPosition,
-        modifiers: plinth::system::input::ModifierKeys,
+        window: Window<()>,
+        button: MouseButton,
+        state: ButtonState,
+        position: WindowPoint,
+        modifiers: ModifierKeys,
     ) {
         println!(
             "Mouse button input: {:?} {:?} {:?} {:?}",
@@ -178,8 +174,8 @@ impl EventHandler<()> for App {
     fn pointer_moved(
         &mut self,
         event_loop: &ActiveEventLoop<()>,
-        window: &mut Window<()>,
-        position: PhysicalPosition,
+        window: Window<()>,
+        position: WindowPoint,
     ) {
         println!("Mouse moved: {:?}", position);
     }
@@ -187,20 +183,20 @@ impl EventHandler<()> for App {
     fn pointer_entered(
         &mut self,
         event_loop: &ActiveEventLoop<()>,
-        window: &mut Window<()>,
-        position: PhysicalPosition,
+        window: Window<()>,
+        position: WindowPoint,
     ) {
         println!("Mouse entered: {:?}", position);
     }
 
-    fn pointer_left(&mut self, event_loop: &ActiveEventLoop<()>, window: &mut Window<()>) {
+    fn pointer_left(&mut self, event_loop: &ActiveEventLoop<()>, window: Window<()>) {
         println!("Mouse left");
     }
 
     fn mouse_scrolled(
         &mut self,
         event_loop: &ActiveEventLoop<()>,
-        window: &mut Window<()>,
+        window: Window<()>,
         delta: f32,
         axis: ScrollAxis,
         modifiers: ModifierKeys,

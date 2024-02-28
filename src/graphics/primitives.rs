@@ -1,15 +1,15 @@
-use crate::geometry::Rect;
+use crate::geometry::pixel::Rect;
 
 use super::Color;
 
 pub struct RoundRect {
-    pub rect: Rect<f32>,
+    pub rect: Rect,
     pub color: Color,
 }
 
 impl RoundRect {
     #[must_use]
-    pub fn builder(rect: Rect<f32>) -> RoundRectBuilder {
+    pub fn builder(rect: Rect) -> RoundRectBuilder {
         RoundRectBuilder::new(rect)
     }
 }
@@ -21,13 +21,13 @@ impl From<RoundRectBuilder> for RoundRect {
 }
 
 pub struct RoundRectBuilder {
-    rect: Rect<f32>,
+    rect: Rect,
     color: Color,
 }
 
 impl RoundRectBuilder {
     #[must_use]
-    pub fn new(rect: Rect<f32>) -> Self {
+    pub fn new(rect: Rect) -> Self {
         Self {
             rect,
             color: Color::BLACK,

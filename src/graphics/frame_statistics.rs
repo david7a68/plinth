@@ -1,4 +1,4 @@
-use crate::{frame::FramesPerSecond, time::Instant};
+use crate::{frame::FramesPerSecond, system::time::Instant};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FrameInfo {

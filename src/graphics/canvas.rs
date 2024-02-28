@@ -1,10 +1,10 @@
-use crate::{geometry::Rect, LogicalPixel};
+use crate::geometry::image;
 
 use super::{Color, RoundRect};
 
 pub trait Canvas {
     #[must_use]
-    fn region(&self) -> Rect<u16, LogicalPixel>;
+    fn region(&self) -> image::Rect;
 
     fn clear(&mut self, color: Color);
 

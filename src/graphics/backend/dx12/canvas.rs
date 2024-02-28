@@ -1,8 +1,7 @@
 use crate::{
-    geometry::Rect,
+    geometry::image,
     graphics::{Color, RoundRect},
     limits::enforce_draw_list_max_commands_u32,
-    LogicalPixel,
 };
 
 #[repr(C)]
@@ -33,7 +32,7 @@ pub enum DrawCommand {
 #[repr(align(16))]
 pub struct DrawList {
     pub(super) rects: Vec<RRect>,
-    pub(super) areas: Vec<Rect<u16>>,
+    pub(super) areas: Vec<image::Rect>,
     pub(super) clears: Vec<Color>,
     pub(super) commands: Vec<(DrawCommand, u32)>,
 
@@ -62,16 +61,16 @@ impl DrawList {
 
 pub struct Canvas<'a> {
     draw_list: &'a mut DrawList,
-    region: Rect<u16, LogicalPixel>,
+    region: image::Rect,
 }
 
 impl<'a> Canvas<'a> {
-    pub fn new(draw_list: &'a mut DrawList, region: Rect<u16, LogicalPixel>) -> Self {
+    pub fn new(draw_list: &'a mut DrawList, region: image::Rect) -> Self {
         draw_list.rects.clear();
         draw_list.areas.clear();
         draw_list.clears.clear();
         draw_list.commands.clear();
-        draw_list.areas.push(region.retype());
+        draw_list.areas.push(region);
         draw_list.commands.push((DrawCommand::Begin, 0));
         draw_list.n_rects = 0;
 
@@ -87,7 +86,7 @@ impl<'a> Canvas<'a> {
 }
 
 impl<'a> crate::graphics::Canvas for Canvas<'a> {
-    fn region(&self) -> Rect<u16, LogicalPixel> {
+    fn region(&self) -> image::Rect {
         self.region
     }
 
@@ -109,20 +108,20 @@ impl<'a> crate::graphics::Canvas for Canvas<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::graphics::Canvas as _;
+    use crate::{geometry::pixel, graphics::Canvas as _};
 
     #[test]
     fn draw_list() {
         let mut list = DrawList::new();
-        let mut canvas = Canvas::new(&mut list, Rect::new(0, 0, 100, 100));
+        let mut canvas = Canvas::new(&mut list, image::Rect::new(0, 0, 100, 100));
 
         canvas.clear(Color::WHITE);
         canvas.draw_rect(RoundRect {
-            rect: Rect::<f32>::ZERO,
+            rect: pixel::Rect::ZERO,
             color: Color::BLACK,
         });
         canvas.draw_rect(RoundRect {
-            rect: Rect::<f32>::ZERO,
+            rect: pixel::Rect::ZERO,
             color: Color::BLACK,
         });
 

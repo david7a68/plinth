@@ -30,9 +30,10 @@ use windows::{
 use crate::{
     frame::FramesPerSecond,
     system::{
+        dpi::{DpiScale, WindowPoint, WindowSize},
         event_loop::EventHandler,
         input::{ButtonState, ModifierKeys, MouseButton, ScrollAxis},
-        window::{DpiScale, PaintReason, PhysicalPosition, PhysicalSize, RefreshRateRequest},
+        window::{PaintReason, RefreshRateRequest},
     },
 };
 
@@ -65,7 +66,7 @@ pub struct Window<'a, Data> {
     _phantom: std::marker::PhantomData<&'a ()>,
 }
 
-impl<Data> Window<'_, Data> {
+impl<'a, Data> Window<'a, Data> {
     pub fn waker(&self) -> api::WindowWaker {
         api::WindowWaker {
             waker: WindowWaker { target: self.hwnd },
@@ -84,6 +85,20 @@ impl<Data> Window<'_, Data> {
         self.data
     }
 
+    pub fn map<Data2>(
+        self,
+        f: impl FnOnce(&'a mut Data) -> &'a mut Data2,
+    ) -> api::Window<'a, Data2> {
+        api::Window {
+            window: Window {
+                hwnd: self.hwnd,
+                state: self.state,
+                data: f(self.data),
+                _phantom: PhantomData,
+            },
+        }
+    }
+
     pub fn title(&self) -> &str {
         &self.state.title
     }
@@ -93,37 +108,37 @@ impl<Data> Window<'_, Data> {
         todo!()
     }
 
-    pub fn size(&self) -> PhysicalSize {
+    pub fn size(&self) -> WindowSize {
         self.state.size
     }
 
     #[allow(unused_variables)]
-    pub fn set_size(&mut self, size: PhysicalSize) {
+    pub fn set_size(&mut self, size: WindowSize) {
         todo!()
     }
 
-    pub fn min_size(&self) -> PhysicalSize {
+    pub fn min_size(&self) -> WindowSize {
         self.state.min_size
     }
 
-    pub fn set_min_size(&mut self, min_size: PhysicalSize) {
+    pub fn set_min_size(&mut self, min_size: WindowSize) {
         todo!()
     }
 
-    pub fn max_size(&self) -> PhysicalSize {
+    pub fn max_size(&self) -> WindowSize {
         self.state.max_size
     }
 
-    pub fn set_max_size(&mut self, max_size: PhysicalSize) {
+    pub fn set_max_size(&mut self, max_size: WindowSize) {
         todo!()
     }
 
-    pub fn position(&self) -> PhysicalPosition {
+    pub fn position(&self) -> WindowPoint {
         self.state.position
     }
 
     #[allow(unused_variables)]
-    pub fn set_position(&mut self, position: PhysicalPosition) {
+    pub fn set_position(&mut self, position: WindowPoint) {
         todo!()
     }
 
@@ -144,8 +159,8 @@ impl<Data> Window<'_, Data> {
     }
 
     pub fn dpi_scale(&self) -> DpiScale {
-        let scale = self.state.dpi as f32 / USER_DEFAULT_SCREEN_DPI as f32;
-        DpiScale::new(scale, scale)
+        let factor = self.state.dpi as f32 / USER_DEFAULT_SCREEN_DPI as f32;
+        DpiScale { factor }
     }
 
     pub fn has_focus(&self) -> bool {
@@ -182,10 +197,10 @@ impl WindowWaker {
 
 pub(crate) struct WindowState {
     pub title: Cow<'static, str>,
-    pub size: PhysicalSize,
-    pub min_size: PhysicalSize,
-    pub max_size: PhysicalSize,
-    pub position: PhysicalPosition,
+    pub size: WindowSize,
+    pub min_size: WindowSize,
+    pub max_size: WindowSize,
+    pub position: WindowPoint,
     pub dpi: u16,
     pub has_focus: bool,
     pub is_visible: bool,
@@ -219,28 +234,26 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
             let dpi = unsafe { GetDpiForWindow(hwnd) };
             assert!(dpi > 0, "GetDpiForWindow failed.");
 
-            let scale = dpi as f32 / USER_DEFAULT_SCREEN_DPI as f32;
+            let scale = {
+                let factor = dpi as f32 / USER_DEFAULT_SCREEN_DPI as f32;
+                DpiScale { factor }
+            };
 
             let mut default_rect = RECT::default();
             unsafe { GetClientRect(hwnd, &mut default_rect) }.expect("GetClientRect failed.");
 
             WindowState {
                 title: unsafe { create_struct.title.take().unwrap_unchecked() },
-                size: PhysicalSize::new(
-                    (default_rect.right - default_rect.left) as _,
-                    (default_rect.bottom - default_rect.top) as _,
-                ),
-                max_size: PhysicalSize::new(
-                    i16::try_from((create_struct.max_size.width as f32 * scale) as u32)
-                        .unwrap_or(i16::MAX),
-                    i16::try_from((create_struct.max_size.height as f32 * scale) as u32)
-                        .unwrap_or(i16::MAX),
-                ),
-                min_size: PhysicalSize::new(
-                    i16::try_from((create_struct.min_size.width as f32 * scale) as u32).unwrap(),
-                    i16::try_from((create_struct.min_size.height as f32 * scale) as u32).unwrap(),
-                ),
-                position: PhysicalPosition::new(default_rect.left as _, default_rect.top as _),
+                size: WindowSize {
+                    width: (default_rect.right - default_rect.left) as _,
+                    height: (default_rect.bottom - default_rect.top) as _,
+                },
+                max_size: create_struct.max_size,
+                min_size: create_struct.min_size,
+                position: WindowPoint {
+                    x: default_rect.left,
+                    y: default_rect.top,
+                },
                 dpi: u16::try_from(dpi).unwrap(),
                 has_focus: false,
                 is_visible: create_struct.is_visible,
@@ -323,10 +336,10 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
     }
 
     pub fn dpi_changed(&mut self, dpi: u16, rect: &RECT) {
-        let size = PhysicalSize::new(
-            i16::try_from(rect.right - rect.left).unwrap(),
-            i16::try_from(rect.bottom - rect.top).unwrap(),
-        );
+        let size = WindowSize {
+            width: rect.right - rect.left,
+            height: rect.bottom - rect.top,
+        };
 
         self.with_state(|window| {
             window.dpi = dpi;
@@ -347,7 +360,9 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
         }
         .expect("SetWindowPos failed.");
 
-        let scale = DpiScale::from(dpi as f32 / USER_DEFAULT_SCREEN_DPI as f32);
+        let scale = DpiScale {
+            factor: dpi as f32 / USER_DEFAULT_SCREEN_DPI as f32,
+        };
 
         self.event(|handler, event_loop, window| {
             handler.dpi_changed(event_loop, window, scale, size)
@@ -370,12 +385,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
     }
 
     pub fn pos_changed(&mut self, pos: &WINDOWPOS) {
-        let (x, y, width, height) = (
-            i16::try_from(pos.x).unwrap(),
-            i16::try_from(pos.y).unwrap(),
-            i16::try_from(pos.cx).unwrap(),
-            i16::try_from(pos.cy).unwrap(),
-        );
+        let (x, y, width, height) = (pos.x, pos.y, pos.cx, pos.cy);
 
         let (resized, moved) = self.with_state(|window| {
             (
@@ -383,7 +393,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
                     let resized = width != window.size.width || height != window.size.height;
                     let is_start = resized && window.in_drag_resize;
 
-                    window.size = PhysicalSize::new(width, height);
+                    window.size = WindowSize { width, height };
                     window.is_resizing = is_start;
                     window.paint_reason = resized
                         .then_some(PaintReason::Commanded) // override if resized
@@ -394,7 +404,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
                 {
                     let moved = x != window.position.x || y != window.position.y;
 
-                    window.position = PhysicalPosition::new(x, y); // doesn't matter if it's the same
+                    window.position = WindowPoint { x, y }; // doesn't matter if it's the same
 
                     moved.then_some(window.position)
                 },
@@ -445,7 +455,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
         self.event(|handler, event_loop, window| handler.needs_repaint(event_loop, window, reason));
     }
 
-    pub fn mouse_move(&mut self, position: PhysicalPosition) {
+    pub fn mouse_move(&mut self, position: WindowPoint) {
         let entered = self.with_state(|window| !std::mem::replace(&mut window.has_pointer, true));
 
         if entered {
@@ -484,7 +494,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
         &mut self,
         button: MouseButton,
         state: ButtonState,
-        position: PhysicalPosition,
+        position: WindowPoint,
         mods: ModifierKeys,
     ) {
         self.event(|handler, event_loop, window| {
@@ -504,7 +514,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
     #[inline]
     pub fn event(
         &mut self,
-        f: impl FnOnce(&mut H, &api::ActiveEventLoop<WindowData>, &mut api::Window<WindowData>),
+        f: impl FnOnce(&mut H, &api::ActiveEventLoop<WindowData>, api::Window<WindowData>),
     ) {
         assert_ne!(self.hwnd.get(), HWND::default(), "Window not initialized.");
 
@@ -519,7 +529,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
             },
         };
 
-        f(&mut *handler, &self.event_loop, &mut window);
+        f(&mut *handler, &self.event_loop, window);
     }
 }
 
@@ -531,8 +541,8 @@ pub struct CreateStruct<WindowData> {
     /// Place to stash any errors that may occur during window creation.
     pub error: Result<(), api::WindowError>,
     pub title: Option<Cow<'static, str>>,
-    pub min_size: PhysicalSize,
-    pub max_size: PhysicalSize,
+    pub min_size: WindowSize,
+    pub max_size: WindowSize,
     pub is_visible: bool,
     pub is_resizable: bool,
 }

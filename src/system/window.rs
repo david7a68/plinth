@@ -1,11 +1,12 @@
 use std::borrow::Cow;
 
-use crate::{
-    frame::FramesPerSecond,
-    geometry::{Pixel, Point, Scale, Size},
-};
+use crate::frame::FramesPerSecond;
 
-use super::{platform_impl, time::Instant};
+use super::{
+    dpi::{DpiScale, WindowPoint, WindowSize},
+    platform_impl,
+    time::Instant,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum WindowError {
@@ -35,19 +36,12 @@ pub enum PaintReason {
     Commanded,
 }
 
-pub struct PhysicalPixel;
-
-pub type PhysicalPosition = Point<i16, PhysicalPixel>;
-pub type PhysicalSize = Size<i16, PhysicalPixel>;
-
-pub type DpiScale = Scale<f32, PhysicalPixel, Pixel>;
-
 pub struct WindowAttributes {
     pub title: Cow<'static, str>,
-    pub size: Option<PhysicalSize>,
-    pub min_size: Option<PhysicalSize>,
-    pub max_size: Option<PhysicalSize>,
-    pub position: Option<PhysicalPosition>,
+    pub size: Option<WindowSize>,
+    pub min_size: Option<WindowSize>,
+    pub max_size: Option<WindowSize>,
+    pub position: Option<WindowPoint>,
     pub is_visible: bool,
     pub is_resizable: bool,
 }
@@ -58,22 +52,22 @@ impl WindowAttributes {
         self
     }
 
-    pub fn with_size(mut self, size: PhysicalSize) -> Self {
+    pub fn with_size(mut self, size: WindowSize) -> Self {
         self.size = Some(size);
         self
     }
 
-    pub fn with_min_size(mut self, min_size: PhysicalSize) -> Self {
+    pub fn with_min_size(mut self, min_size: WindowSize) -> Self {
         self.min_size = Some(min_size);
         self
     }
 
-    pub fn with_max_size(mut self, max_size: PhysicalSize) -> Self {
+    pub fn with_max_size(mut self, max_size: WindowSize) -> Self {
         self.max_size = Some(max_size);
         self
     }
 
-    pub fn with_position(mut self, position: PhysicalPosition) -> Self {
+    pub fn with_position(mut self, position: WindowPoint) -> Self {
         self.position = Some(position);
         self
     }
@@ -139,7 +133,7 @@ pub struct Window<'a, Data> {
     pub(crate) window: platform_impl::Window<'a, Data>,
 }
 
-impl<Data> Window<'_, Data> {
+impl<'a, Data> Window<'a, Data> {
     pub fn waker(&self) -> WindowWaker {
         self.window.waker()
     }
@@ -156,6 +150,10 @@ impl<Data> Window<'_, Data> {
         self.window.data_mut()
     }
 
+    pub fn map<Data2>(self, f: impl FnOnce(&'a mut Data) -> &'a mut Data2) -> Window<'a, Data2> {
+        self.window.map(f)
+    }
+
     pub fn title(&self) -> &str {
         self.window.title()
     }
@@ -164,35 +162,35 @@ impl<Data> Window<'_, Data> {
         self.window.set_title(title);
     }
 
-    pub fn size(&self) -> PhysicalSize {
+    pub fn size(&self) -> WindowSize {
         self.window.size()
     }
 
-    pub fn set_size(&mut self, size: PhysicalSize) {
+    pub fn set_size(&mut self, size: WindowSize) {
         self.window.set_size(size);
     }
 
-    pub fn min_size(&self) -> PhysicalSize {
+    pub fn min_size(&self) -> WindowSize {
         self.window.min_size()
     }
 
-    pub fn set_min_size(&mut self, min_size: PhysicalSize) {
+    pub fn set_min_size(&mut self, min_size: WindowSize) {
         self.window.set_min_size(min_size);
     }
 
-    pub fn max_size(&self) -> PhysicalSize {
+    pub fn max_size(&self) -> WindowSize {
         self.window.max_size()
     }
 
-    pub fn set_max_size(&mut self, max_size: PhysicalSize) {
+    pub fn set_max_size(&mut self, max_size: WindowSize) {
         self.window.set_max_size(max_size);
     }
 
-    pub fn position(&self) -> PhysicalPosition {
+    pub fn position(&self) -> WindowPoint {
         self.window.position()
     }
 
-    pub fn set_position(&mut self, position: PhysicalPosition) {
+    pub fn set_position(&mut self, position: WindowPoint) {
         self.window.set_position(position);
     }
 

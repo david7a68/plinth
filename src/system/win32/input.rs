@@ -10,8 +10,8 @@ use windows::Win32::{
 };
 
 use crate::system::{
+    dpi::WindowPoint,
     input::{ButtonState, ModifierKeys, MouseButton, ScrollAxis},
-    window::PhysicalPosition,
 };
 
 pub(crate) fn mouse_button(msg: u32) -> Option<(MouseButton, ButtonState)> {
@@ -37,10 +37,10 @@ pub(crate) fn wheel_axis(msg: u32) -> Option<ScrollAxis> {
     }
 }
 
-pub(crate) fn mouse_coords(lparam: LPARAM) -> PhysicalPosition {
-    let x = (lparam.0 & 0xffff) as i16;
-    let y = ((lparam.0 >> 16) & 0xffff) as i16;
-    (x, y).into()
+pub(crate) fn mouse_coords(lparam: LPARAM) -> WindowPoint {
+    let x = (lparam.0 & 0xffff) as i32;
+    let y = ((lparam.0 >> 16) & 0xffff) as i32;
+    WindowPoint { x, y }
 }
 
 pub(crate) fn mouse_modifiers(wparam: WPARAM) -> ModifierKeys {

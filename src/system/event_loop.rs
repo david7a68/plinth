@@ -178,7 +178,7 @@ impl<WindowData> ActiveEventLoop<WindowData> {
     pub fn create_window(
         &self,
         attributes: WindowAttributes,
-        constructor: impl FnOnce(&Window<()>) -> WindowData + 'static,
+        constructor: impl FnOnce(Window<()>) -> WindowData,
     ) -> Result<(), WindowError> {
         self.event_loop.create_window(attributes, constructor)
     }

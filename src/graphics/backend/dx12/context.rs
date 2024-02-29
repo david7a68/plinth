@@ -15,7 +15,7 @@ use windows::{
                 D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET,
                 D3D12_RESOURCE_TRANSITION_BARRIER, D3D12_VIEWPORT,
             },
-            DirectComposition::{IDCompositionTarget, IDCompositionVisual},
+            DirectComposition::{IDCompositionDevice, IDCompositionTarget, IDCompositionVisual},
             Dxgi::{
                 Common::{
                     DXGI_ALPHA_MODE_IGNORE, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_UNKNOWN,
@@ -25,7 +25,6 @@ use windows::{
                 DXGI_SWAP_CHAIN_DESC1, DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT,
                 DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL, DXGI_USAGE_RENDER_TARGET_OUTPUT,
             },
-            Gdi::{RedrawWindow, RDW_INTERNALPAINT},
         },
         System::Threading::WaitForSingleObjectEx,
         UI::WindowsAndMessaging::GetClientRect,
@@ -33,8 +32,8 @@ use windows::{
 };
 
 use crate::{
-    frame::{FrameId, FramesPerSecond},
-    geometry::{image, pixel},
+    frame::FramesPerSecond,
+    geometry::image,
     graphics::{backend::SubmitId, FrameInfo},
     limits::MAX_WINDOW_DIMENSION,
     system::{
@@ -46,7 +45,6 @@ use crate::{
 use super::{
     canvas::{Canvas, DrawCommand, DrawList},
     device::Device,
-    Graphics,
 };
 
 pub struct Context {
@@ -80,11 +78,11 @@ pub struct Context {
 }
 
 impl Context {
-    #[tracing::instrument(skip(graphics))]
-    pub fn new(graphics: &Graphics, hwnd: HWND) -> Self {
+    #[tracing::instrument(skip(device, compositor))]
+    pub fn new(device: &Device, compositor: &IDCompositionDevice, hwnd: HWND) -> Self {
         let (swapchain, target, visual) = {
-            let target = unsafe { graphics.compositor.CreateTargetForHwnd(hwnd, true) }.unwrap();
-            let visual = unsafe { graphics.compositor.CreateVisual() }.unwrap();
+            let target = unsafe { compositor.CreateTargetForHwnd(hwnd, true) }.unwrap();
+            let visual = unsafe { compositor.CreateVisual() }.unwrap();
             unsafe { target.SetRoot(&visual) }.unwrap();
 
             let (width, height) = {
@@ -110,8 +108,7 @@ impl Context {
                 Flags: DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT.0 as _,
             };
 
-            let swapchain = graphics
-                .device
+            let swapchain = device
                 .create_swapchain(&swapchain_desc)
                 .cast::<IDXGISwapChain3>()
                 .unwrap_or_else(|e| {
@@ -134,7 +131,7 @@ impl Context {
             }
 
             unsafe { visual.SetContent(&swapchain) }.unwrap();
-            unsafe { graphics.compositor.Commit() }.unwrap();
+            unsafe { compositor.Commit() }.unwrap();
 
             (swapchain, target, visual)
         };
@@ -147,7 +144,7 @@ impl Context {
                 NodeMask: 0,
             };
 
-            unsafe { graphics.device.handle.CreateDescriptorHeap(&heap_desc) }.unwrap_or_else(|e| {
+            unsafe { device.handle.CreateDescriptorHeap(&heap_desc) }.unwrap_or_else(|e| {
                 tracing::error!("Failed to create descriptor heap: {:?}", e);
                 panic!()
             })
@@ -157,7 +154,7 @@ impl Context {
 
         let latency_event = unsafe { swapchain.GetFrameLatencyWaitableObject() };
 
-        let frames_in_flight = [Frame::new(&graphics.device), Frame::new(&graphics.device)];
+        let frames_in_flight = [Frame::new(device), Frame::new(device)];
         let draw_list = DrawList::new();
 
         Self {

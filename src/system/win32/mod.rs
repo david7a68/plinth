@@ -5,6 +5,7 @@ mod window;
 pub use window::*;
 
 use std::{
+    borrow::Cow,
     cell::{Cell, RefCell},
     marker::PhantomData,
     mem::MaybeUninit,
@@ -59,10 +60,10 @@ pub struct ActiveEventLoop<WindowData> {
 }
 
 impl<WindowData> ActiveEventLoop<WindowData> {
-    pub fn create_window(
+    pub fn create_window<F: FnOnce(api::Window<()>) -> WindowData>(
         &self,
         attributes: WindowAttributes,
-        constructor: impl FnOnce(&api::Window<()>) -> WindowData + 'static,
+        constructor: F,
     ) -> Result<(), api::WindowError> {
         if attributes.title.as_ref().len() > MAX_WINDOW_TITLE_LENGTH {
             return Err(api::WindowError::TitleTooLong);
@@ -91,7 +92,7 @@ impl<WindowData> ActiveEventLoop<WindowData> {
             .unwrap_or((CW_USEDEFAULT, CW_USEDEFAULT));
 
         let mut opt = Some(constructor);
-        let wrap_ctor = RefCell::new(move |window: &api::Window<()>| opt.take().unwrap()(window));
+        let wrap_ctor = RefCell::new(|window: api::Window<()>| opt.take().unwrap()(window));
 
         let create_struct = RefCell::new(CreateStruct {
             wndproc_state: self.opaque_state,

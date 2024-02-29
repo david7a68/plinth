@@ -59,132 +59,6 @@ pub enum WindowError {
     CreateFailed(windows::core::Error),
 }
 
-pub struct Window<'a, Data> {
-    hwnd: HWND,
-    state: &'a WindowState,
-    data: &'a mut Data,
-    _phantom: std::marker::PhantomData<&'a ()>,
-}
-
-impl<'a, Data> Window<'a, Data> {
-    pub fn waker(&self) -> api::WindowWaker {
-        api::WindowWaker {
-            waker: WindowWaker { target: self.hwnd },
-        }
-    }
-
-    pub fn destroy(&mut self) {
-        unsafe { PostMessageW(self.hwnd, UM_DEFER_DESTROY, None, None) }.unwrap();
-    }
-
-    pub fn data(&self) -> &Data {
-        self.data
-    }
-
-    pub fn data_mut(&mut self) -> &mut Data {
-        self.data
-    }
-
-    pub fn map<Data2>(
-        self,
-        f: impl FnOnce(&'a mut Data) -> &'a mut Data2,
-    ) -> api::Window<'a, Data2> {
-        api::Window {
-            window: Window {
-                hwnd: self.hwnd,
-                state: self.state,
-                data: f(self.data),
-                _phantom: PhantomData,
-            },
-        }
-    }
-
-    pub fn title(&self) -> &str {
-        &self.state.title
-    }
-
-    #[allow(unused_variables)]
-    pub fn set_title(&mut self, title: &str) {
-        todo!()
-    }
-
-    pub fn size(&self) -> WindowSize {
-        self.state.size
-    }
-
-    #[allow(unused_variables)]
-    pub fn set_size(&mut self, size: WindowSize) {
-        todo!()
-    }
-
-    pub fn min_size(&self) -> WindowSize {
-        self.state.min_size
-    }
-
-    pub fn set_min_size(&mut self, min_size: WindowSize) {
-        todo!()
-    }
-
-    pub fn max_size(&self) -> WindowSize {
-        self.state.max_size
-    }
-
-    pub fn set_max_size(&mut self, max_size: WindowSize) {
-        todo!()
-    }
-
-    pub fn position(&self) -> WindowPoint {
-        self.state.position
-    }
-
-    #[allow(unused_variables)]
-    pub fn set_position(&mut self, position: WindowPoint) {
-        todo!()
-    }
-
-    pub fn is_visible(&self) -> bool {
-        self.state.is_visible
-    }
-
-    pub fn show(&mut self) {
-        post_defer_show(self.hwnd, SW_NORMAL);
-    }
-
-    pub fn hide(&mut self) {
-        post_defer_show(self.hwnd, SW_HIDE);
-    }
-
-    pub fn is_resizable(&self) -> bool {
-        self.state.is_resizable
-    }
-
-    pub fn dpi_scale(&self) -> DpiScale {
-        let factor = self.state.dpi as f32 / USER_DEFAULT_SCREEN_DPI as f32;
-        DpiScale { factor }
-    }
-
-    pub fn has_focus(&self) -> bool {
-        self.state.has_focus
-    }
-
-    pub fn has_pointer(&self) -> bool {
-        self.state.has_pointer
-    }
-
-    pub fn frame_rate(&self) -> FramesPerSecond {
-        todo!()
-    }
-
-    #[allow(unused_variables)]
-    pub fn request_refresh_rate(&mut self, rate: RefreshRateRequest, after_next_present: bool) {
-        todo!()
-    }
-
-    pub fn request_repaint(&mut self) {
-        unsafe { PostMessageW(self.hwnd, UM_DEFER_PAINT, None, None) }.unwrap();
-    }
-}
-
 pub struct WindowWaker {
     target: HWND,
 }
@@ -193,6 +67,20 @@ impl WindowWaker {
     pub fn wake(&self) {
         let _ = unsafe { PostMessageW(self.target, UM_WAKE, None, None) };
     }
+}
+
+pub(crate) type WindowConstructor<'a, WindowData> = dyn FnMut(api::Window<()>) -> WindowData + 'a;
+
+pub struct CreateStruct<'a, WindowData> {
+    pub wndproc_state: *const (),
+    pub constructor: *const RefCell<WindowConstructor<'a, WindowData>>,
+    /// Place to stash any errors that may occur during window creation.
+    pub error: Result<(), api::WindowError>,
+    pub title: Option<Cow<'static, str>>,
+    pub min_size: WindowSize,
+    pub max_size: WindowSize,
+    pub is_visible: bool,
+    pub is_resizable: bool,
 }
 
 pub(crate) struct WindowState {
@@ -234,11 +122,6 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
             let dpi = unsafe { GetDpiForWindow(hwnd) };
             assert!(dpi > 0, "GetDpiForWindow failed.");
 
-            let scale = {
-                let factor = dpi as f32 / USER_DEFAULT_SCREEN_DPI as f32;
-                DpiScale { factor }
-            };
-
             let mut default_rect = RECT::default();
             unsafe { GetClientRect(hwnd, &mut default_rect) }.expect("GetClientRect failed.");
 
@@ -276,7 +159,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
                 },
             };
 
-            unsafe { (*create_struct.constructor).borrow_mut()(&window) }
+            unsafe { (*create_struct.constructor).borrow_mut()(window) }
         });
     }
 
@@ -378,10 +261,10 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
         let os_max_x = unsafe { GetSystemMetricsForDpi(SM_CXMAXTRACK, dpi) };
         let os_max_y = unsafe { GetSystemMetricsForDpi(SM_CYMAXTRACK, dpi) };
 
-        mmi.ptMinTrackSize.x = i32::from(min.width).max(os_min_x);
-        mmi.ptMinTrackSize.y = i32::from(min.height).max(os_min_y);
-        mmi.ptMaxTrackSize.x = i32::from(max.width).min(os_max_x);
-        mmi.ptMaxTrackSize.y = i32::from(max.height).min(os_max_y);
+        mmi.ptMinTrackSize.x = min.width.max(os_min_x);
+        mmi.ptMinTrackSize.y = min.height.max(os_min_y);
+        mmi.ptMaxTrackSize.x = max.width.min(os_max_x);
+        mmi.ptMaxTrackSize.y = max.height.min(os_max_y);
     }
 
     pub fn pos_changed(&mut self, pos: &WINDOWPOS) {
@@ -520,7 +403,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
 
         let (state, mut data) = (self.state.borrow(), self.data.borrow_mut());
         let mut handler = self.event_handler.borrow_mut();
-        let mut window = api::Window {
+        let window = api::Window {
             window: Window {
                 hwnd: self.hwnd.get(),
                 state: unsafe { state.assume_init_ref() },
@@ -533,18 +416,151 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
     }
 }
 
-pub(crate) type WindowConstructor<WindowData> = dyn FnMut(&api::Window<()>) -> WindowData;
+pub struct Window<'a, Data> {
+    hwnd: HWND,
+    state: &'a WindowState,
+    data: &'a mut Data,
+    _phantom: std::marker::PhantomData<&'a ()>,
+}
 
-pub struct CreateStruct<WindowData> {
-    pub wndproc_state: *const (),
-    pub constructor: *const RefCell<WindowConstructor<WindowData>>,
-    /// Place to stash any errors that may occur during window creation.
-    pub error: Result<(), api::WindowError>,
-    pub title: Option<Cow<'static, str>>,
-    pub min_size: WindowSize,
-    pub max_size: WindowSize,
-    pub is_visible: bool,
-    pub is_resizable: bool,
+impl<'a, Data> Window<'a, Data> {
+    pub fn waker(&self) -> api::WindowWaker {
+        api::WindowWaker {
+            waker: WindowWaker { target: self.hwnd },
+        }
+    }
+
+    pub fn destroy(&mut self) {
+        unsafe { PostMessageW(self.hwnd, UM_DEFER_DESTROY, None, None) }.unwrap();
+    }
+
+    pub fn hwnd(&self) -> HWND {
+        self.hwnd
+    }
+
+    pub fn data(&self) -> &Data {
+        self.data
+    }
+
+    pub fn data_mut(&mut self) -> &mut Data {
+        self.data
+    }
+
+    pub fn map<Data2>(
+        self,
+        f: impl FnOnce(&'a mut Data) -> &'a mut Data2,
+    ) -> api::Window<'a, Data2> {
+        api::Window {
+            window: Window {
+                hwnd: self.hwnd,
+                state: self.state,
+                data: f(self.data),
+                _phantom: PhantomData,
+            },
+        }
+    }
+
+    pub fn title(&self) -> &str {
+        &self.state.title
+    }
+
+    #[allow(unused_variables)]
+    pub fn set_title(&mut self, title: &str) {
+        todo!()
+    }
+
+    pub fn size(&self) -> WindowSize {
+        self.state.size
+    }
+
+    #[allow(unused_variables)]
+    pub fn set_size(&mut self, size: WindowSize) {
+        todo!()
+    }
+
+    pub fn min_size(&self) -> WindowSize {
+        self.state.min_size
+    }
+
+    pub fn set_min_size(&mut self, min_size: WindowSize) {
+        todo!()
+    }
+
+    pub fn max_size(&self) -> WindowSize {
+        self.state.max_size
+    }
+
+    pub fn set_max_size(&mut self, max_size: WindowSize) {
+        todo!()
+    }
+
+    pub fn position(&self) -> WindowPoint {
+        self.state.position
+    }
+
+    #[allow(unused_variables)]
+    pub fn set_position(&mut self, position: WindowPoint) {
+        todo!()
+    }
+
+    pub fn is_visible(&self) -> bool {
+        self.state.is_visible
+    }
+
+    pub fn show(&mut self) {
+        post_defer_show(self.hwnd, SW_NORMAL);
+    }
+
+    pub fn hide(&mut self) {
+        post_defer_show(self.hwnd, SW_HIDE);
+    }
+
+    pub fn is_resizable(&self) -> bool {
+        self.state.is_resizable
+    }
+
+    pub fn dpi_scale(&self) -> DpiScale {
+        let factor = self.state.dpi as f32 / USER_DEFAULT_SCREEN_DPI as f32;
+        DpiScale { factor }
+    }
+
+    pub fn has_focus(&self) -> bool {
+        self.state.has_focus
+    }
+
+    pub fn has_pointer(&self) -> bool {
+        self.state.has_pointer
+    }
+
+    pub fn frame_rate(&self) -> FramesPerSecond {
+        todo!()
+    }
+
+    #[allow(unused_variables)]
+    pub fn request_refresh_rate(&mut self, rate: RefreshRateRequest, after_next_present: bool) {
+        todo!()
+    }
+
+    pub fn request_repaint(&mut self) {
+        unsafe { PostMessageW(self.hwnd, UM_DEFER_PAINT, None, None) }.unwrap();
+    }
+}
+
+impl<'a, Meta, User> Window<'a, (Meta, User)> {
+    pub fn split(self) -> (&'a mut Meta, api::Window<'a, User>) {
+        let (meta, user) = self.data;
+        (
+            meta,
+            api::Window {
+                window: Window {
+                    hwnd: self.hwnd,
+                    state: self.state,
+                    data: user,
+                    _phantom: PhantomData,
+                },
+            },
+        )
+    }
 }
 
 pub(crate) fn register_wndclass(

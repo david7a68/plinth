@@ -83,14 +83,12 @@ impl<'a> Canvas<'a> {
 
         self.draw_list
     }
-}
 
-impl<'a> crate::graphics::Canvas for Canvas<'a> {
-    fn region(&self) -> image::Rect {
+    pub fn region(&self) -> image::Rect {
         self.region
     }
 
-    fn clear(&mut self, color: Color) {
+    pub fn clear(&mut self, color: Color) {
         self.draw_list.flush_command(DrawCommand::DrawRects);
         self.draw_list.commands.push((
             DrawCommand::Clear,
@@ -99,7 +97,7 @@ impl<'a> crate::graphics::Canvas for Canvas<'a> {
         self.draw_list.clears.push(color);
     }
 
-    fn draw_rect(&mut self, rect: RoundRect) {
+    pub fn draw_rect(&mut self, rect: RoundRect) {
         self.draw_list.flush_command(DrawCommand::DrawRects);
         self.draw_list.rects.push(rect.into());
     }
@@ -108,7 +106,7 @@ impl<'a> crate::graphics::Canvas for Canvas<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{geometry::pixel, graphics::Canvas as _};
+    use crate::geometry::pixel;
 
     #[test]
     fn draw_list() {

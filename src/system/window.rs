@@ -129,11 +129,11 @@ pub struct RefreshRateRequest {
     pub preferred: FramesPerSecond,
 }
 
-pub struct Window<'a, Data> {
-    pub(crate) window: platform_impl::Window<'a, Data>,
+pub struct Window<'a, User> {
+    pub(crate) window: platform_impl::Window<'a, User>,
 }
 
-impl<'a, Data> Window<'a, Data> {
+impl<'a, User> Window<'a, User> {
     pub fn waker(&self) -> WindowWaker {
         self.window.waker()
     }
@@ -142,15 +142,20 @@ impl<'a, Data> Window<'a, Data> {
         self.window.destroy();
     }
 
-    pub fn data(&self) -> &Data {
+    #[cfg(target_os = "windows")]
+    pub fn hwnd(&self) -> windows::Win32::Foundation::HWND {
+        self.window.hwnd()
+    }
+
+    pub fn user(&self) -> &User {
         self.window.data()
     }
 
-    pub fn data_mut(&mut self) -> &mut Data {
+    pub fn user_mut(&mut self) -> &mut User {
         self.window.data_mut()
     }
 
-    pub fn map<Data2>(self, f: impl FnOnce(&'a mut Data) -> &'a mut Data2) -> Window<'a, Data2> {
+    pub fn map<Data2>(self, f: impl FnOnce(&'a mut User) -> &'a mut Data2) -> Window<'a, Data2> {
         self.window.map(f)
     }
 
@@ -232,5 +237,11 @@ impl<'a, Data> Window<'a, Data> {
 
     pub fn request_repaint(&mut self) {
         self.window.request_repaint();
+    }
+}
+
+impl<'a, Meta, User> Window<'a, (Meta, User)> {
+    pub fn split(self) -> (&'a mut Meta, Window<'a, User>) {
+        self.window.split()
     }
 }

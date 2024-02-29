@@ -1,7 +1,7 @@
 use plinth::{
     frame::{FramesPerSecond, RedrawRequest},
     geometry::{Point, Rect},
-    graphics::{Canvas, Color, FrameInfo, GraphicsConfig, RoundRect},
+    graphics::{CanvasImpl, Color, FrameInfo, GraphicsConfig, RoundRect},
     Application, Axis, EventHandler, PhysicalPixel, Window, WindowSpec,
 };
 
@@ -24,7 +24,7 @@ impl EventHandler for DemoWindow {
         self.window.close();
     }
 
-    fn on_repaint(&mut self, canvas: &mut dyn Canvas, _timing: &FrameInfo) {
+    fn on_repaint(&mut self, canvas: &mut dyn CanvasImpl, _timing: &FrameInfo) {
         canvas.clear(Color::BLACK);
         canvas.draw_rect(
             RoundRect::builder(Rect::new(50.0, 100.0, 40.0, 70.0))

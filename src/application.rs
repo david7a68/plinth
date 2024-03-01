@@ -1,14 +1,13 @@
 use std::marker::PhantomData;
 
 use crate::{
+    geometry::window::{DpiScale, WindowPoint, WindowSize},
     graphics::{Canvas, FrameInfo, Graphics, GraphicsConfig, WindowContext},
     system::{
-        dpi::{DpiScale, WindowPoint, WindowSize},
+        event_loop::{ActiveEventLoop, EventHandler as SysEventHandler, EventLoop, EventLoopError},
         input::{ButtonState, KeyCode, ModifierKeys, MouseButton, ScrollAxis},
         power::{MonitorState, PowerPreference, PowerSource},
-        time::Instant,
         window::{PaintReason, Window, WindowAttributes, WindowError},
-        ActiveEventLoop, EventHandler as SysEventHandler, EventLoop, EventLoopError,
     },
 };
 
@@ -80,45 +79,50 @@ impl<'a, UserWindowData> AppContext<'a, UserWindowData> {
     }
 }
 
+#[allow(unused_variables)]
 pub trait EventHandler<WindowData> {
     fn start(&mut self, app: &AppContext<WindowData>);
 
-    fn suspend(&mut self, app: &AppContext<WindowData>);
+    fn suspend(&mut self, app: &AppContext<WindowData>) {}
 
-    fn resume(&mut self, app: &AppContext<WindowData>);
+    fn resume(&mut self, app: &AppContext<WindowData>) {}
 
     fn stop(&mut self);
 
-    fn low_memory(&mut self, app: &AppContext<WindowData>);
+    fn low_memory(&mut self, app: &AppContext<WindowData>) {}
 
-    fn power_source_changed(&mut self, app: &AppContext<WindowData>, power_source: PowerSource);
+    fn power_source_changed(&mut self, app: &AppContext<WindowData>, power_source: PowerSource) {}
 
-    fn monitor_state_changed(&mut self, app: &AppContext<WindowData>, monitor: MonitorState);
+    fn monitor_state_changed(&mut self, app: &AppContext<WindowData>, monitor: MonitorState) {}
 
     fn power_preference_changed(
         &mut self,
         app: &AppContext<WindowData>,
         power_preference: PowerPreference,
-    );
+    ) {
+    }
 
-    fn activated(&mut self, app: &AppContext<WindowData>, window: &mut Window<WindowData>);
+    fn activated(&mut self, app: &AppContext<WindowData>, window: &mut Window<WindowData>) {}
 
-    fn deactivated(&mut self, app: &AppContext<WindowData>, window: &mut Window<WindowData>);
+    fn deactivated(&mut self, app: &AppContext<WindowData>, window: &mut Window<WindowData>) {}
 
     fn drag_resize_started(
         &mut self,
         app: &AppContext<WindowData>,
         window: &mut Window<WindowData>,
-    );
+    ) {
+    }
 
-    fn drag_resize_ended(&mut self, app: &AppContext<WindowData>, window: &mut Window<WindowData>);
+    fn drag_resize_ended(&mut self, app: &AppContext<WindowData>, window: &mut Window<WindowData>) {
+    }
 
     fn resized(
         &mut self,
         app: &AppContext<WindowData>,
         window: &mut Window<WindowData>,
         size: WindowSize,
-    );
+    ) {
+    }
 
     fn dpi_changed(
         &mut self,
@@ -126,28 +130,31 @@ pub trait EventHandler<WindowData> {
         window: &mut Window<WindowData>,
         dpi: DpiScale,
         size: WindowSize,
-    );
+    ) {
+    }
 
+    #[allow(unused_variables)]
     fn close_requested(&mut self, app: &AppContext<WindowData>, window: &mut Window<WindowData>) {
         window.destroy();
     }
 
-    fn shown(&mut self, app: &AppContext<WindowData>, window: &mut Window<WindowData>);
+    fn shown(&mut self, app: &AppContext<WindowData>, window: &mut Window<WindowData>) {}
 
-    fn hidden(&mut self, app: &AppContext<WindowData>, window: &mut Window<WindowData>);
+    fn hidden(&mut self, app: &AppContext<WindowData>, window: &mut Window<WindowData>) {}
 
-    fn maximized(&mut self, app: &AppContext<WindowData>, window: &mut Window<WindowData>);
+    fn maximized(&mut self, app: &AppContext<WindowData>, window: &mut Window<WindowData>) {}
 
-    fn minimized(&mut self, app: &AppContext<WindowData>, window: &mut Window<WindowData>);
+    fn minimized(&mut self, app: &AppContext<WindowData>, window: &mut Window<WindowData>) {}
 
-    fn restored(&mut self, app: &AppContext<WindowData>, window: &mut Window<WindowData>);
+    fn restored(&mut self, app: &AppContext<WindowData>, window: &mut Window<WindowData>) {}
 
     fn moved(
         &mut self,
         app: &AppContext<WindowData>,
         window: &mut Window<WindowData>,
         position: WindowPoint,
-    );
+    ) {
+    }
 
     fn wake_requested(&mut self, app: &AppContext<WindowData>, window: &mut Window<WindowData>);
 
@@ -156,7 +163,7 @@ pub trait EventHandler<WindowData> {
         app: &AppContext<WindowData>,
         window: &mut Window<WindowData>,
         canvas: &mut Canvas,
-        frame: &FrameInfo,
+        timing: &FrameInfo,
     );
 
     fn destroyed(&mut self, app: &AppContext<WindowData>, window_data: WindowData);
@@ -169,7 +176,8 @@ pub trait EventHandler<WindowData> {
         code: KeyCode,
         state: ButtonState,
         modifiers: ModifierKeys,
-    );
+    ) {
+    }
 
     fn mouse_button(
         // TODO: better name in the past tense
@@ -180,7 +188,8 @@ pub trait EventHandler<WindowData> {
         state: ButtonState,
         position: WindowPoint,
         modifiers: ModifierKeys,
-    );
+    ) {
+    }
 
     fn mouse_scrolled(
         &mut self,
@@ -189,27 +198,31 @@ pub trait EventHandler<WindowData> {
         delta: f32,
         axis: ScrollAxis,
         modifiers: ModifierKeys,
-    );
+    ) {
+    }
 
     fn pointer_moved(
         &mut self,
         app: &AppContext<WindowData>,
         window: &mut Window<WindowData>,
         position: WindowPoint,
-    );
+    ) {
+    }
 
     fn pointer_entered(
         &mut self,
         app: &AppContext<WindowData>,
         window: &mut Window<WindowData>,
         position: WindowPoint,
-    );
+    ) {
+    }
 
     fn pointer_left(
         &mut self,
         event_loop: &AppContext<WindowData>,
         window: &mut Window<WindowData>,
-    );
+    ) {
+    }
 }
 
 struct WindowState {
@@ -337,7 +350,9 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
         size: WindowSize,
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
-        let (_, mut wn) = window.split();
+        let (meta, mut wn) = window.split();
+
+        meta.context.change_dpi(dpi, size);
         self.outer.dpi_changed(&cx, &mut wn, dpi, size);
     }
 
@@ -431,15 +446,9 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
         let cx = AppContext::new(self.graphics, event_loop);
         let (meta, mut wn) = window.split();
 
-        let mut canvas = meta.context.begin_draw();
-
-        let info = FrameInfo {
-            target_frame_rate: None,
-            prev_present_time: Instant::ZERO,
-            next_present_time: Instant::ZERO,
-        };
-
-        self.outer.repaint(&cx, &mut wn, &mut canvas, &info);
+        meta.context.draw(|canvas, frame| {
+            self.outer.repaint(&cx, &mut wn, canvas, frame);
+        });
     }
 
     fn destroyed(

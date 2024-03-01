@@ -5,7 +5,13 @@ mod primitives;
 
 use windows::Win32::Foundation::HWND;
 
-use crate::{geometry::image, system::power::PowerPreference, WindowSize};
+use crate::{
+    geometry::{
+        image,
+        window::{DpiScale, WindowSize},
+    },
+    system::power::PowerPreference,
+};
 
 pub use self::color::*;
 pub use self::frame_statistics::*;
@@ -40,18 +46,31 @@ enum GraphicsImpl {
     Dx12(backend::dx12::Graphics),
 }
 
-pub struct Graphics {
-    device: GraphicsImpl,
+pub(crate) struct Graphics {
+    graphics: GraphicsImpl,
 }
 
 impl Graphics {
     pub fn new(config: &GraphicsConfig) -> Self {
-        todo!()
+        match config.backend {
+            Backend::Auto => {
+                #[cfg(target_os = "windows")]
+                {
+                    Self {
+                        graphics: GraphicsImpl::Dx12(backend::dx12::Graphics::new(config)),
+                    }
+                }
+            }
+            #[cfg(target_os = "windows")]
+            Backend::Dx12 => Self {
+                graphics: GraphicsImpl::Dx12(backend::dx12::Graphics::new(config)),
+            },
+        }
     }
 
     #[cfg(target_os = "windows")]
     pub fn create_window_context(&self, hwnd: HWND) -> WindowContext {
-        let context = match &self.device {
+        let context = match &self.graphics {
             GraphicsImpl::Dx12(graphics) => ContextImpl::Dx12(graphics.create_context(hwnd)),
         };
 
@@ -64,17 +83,40 @@ enum ContextImpl {
     Dx12(backend::dx12::Context),
 }
 
-pub struct WindowContext {
+pub(crate) struct WindowContext {
     context: ContextImpl,
 }
 
 impl WindowContext {
     pub fn resize(&mut self, size: WindowSize) {
-        todo!()
+        match &mut self.context {
+            #[cfg(target_os = "windows")]
+            ContextImpl::Dx12(context) => context.resize(size),
+        }
     }
 
-    pub fn begin_draw(&self) -> Canvas {
-        todo!()
+    pub fn change_dpi(&mut self, scale: DpiScale, size: WindowSize) {
+        match &mut self.context {
+            #[cfg(target_os = "windows")]
+            ContextImpl::Dx12(context) => context.change_dpi(size, scale),
+        }
+    }
+
+    pub fn draw(&mut self, mut callback: impl FnMut(&mut Canvas, &FrameInfo)) {
+        #[allow(clippy::infallible_destructuring_match /*, reason = "future backends coming"*/)]
+        let context = match &mut self.context {
+            #[cfg(target_os = "windows")]
+            ContextImpl::Dx12(context) => context,
+        };
+
+        let (canvas, timing) = context.begin_draw();
+        let mut canvas = Canvas {
+            canvas: CanvasImpl::Dx12(canvas),
+        };
+
+        callback(&mut canvas, &timing);
+
+        context.end_draw();
     }
 }
 

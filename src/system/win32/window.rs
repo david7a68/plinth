@@ -29,8 +29,8 @@ use windows::{
 
 use crate::{
     frame::FramesPerSecond,
+    geometry::window::{DpiScale, WindowPoint, WindowSize},
     system::{
-        dpi::{DpiScale, WindowPoint, WindowSize},
         event_loop::EventHandler,
         input::{ButtonState, ModifierKeys, MouseButton, ScrollAxis},
         window::{PaintReason, RefreshRateRequest},
@@ -444,20 +444,6 @@ impl<'a, Data> Window<'a, Data> {
 
     pub fn data_mut(&mut self) -> &mut Data {
         self.data
-    }
-
-    pub fn map<Data2>(
-        self,
-        f: impl FnOnce(&'a mut Data) -> &'a mut Data2,
-    ) -> api::Window<'a, Data2> {
-        api::Window {
-            window: Window {
-                hwnd: self.hwnd,
-                state: self.state,
-                data: f(self.data),
-                _phantom: PhantomData,
-            },
-        }
     }
 
     pub fn title(&self) -> &str {

@@ -2,11 +2,8 @@ use std::borrow::Cow;
 
 use crate::frame::FramesPerSecond;
 
-use super::{
-    dpi::{DpiScale, WindowPoint, WindowSize},
-    platform_impl,
-    time::Instant,
-};
+use super::{platform_impl, time::Instant};
+use crate::geometry::window::{DpiScale, WindowPoint, WindowSize};
 
 #[derive(Debug, thiserror::Error)]
 pub enum WindowError {
@@ -147,16 +144,12 @@ impl<'a, User> Window<'a, User> {
         self.window.hwnd()
     }
 
-    pub fn user(&self) -> &User {
+    pub fn data(&self) -> &User {
         self.window.data()
     }
 
-    pub fn user_mut(&mut self) -> &mut User {
+    pub fn data_mut(&mut self) -> &mut User {
         self.window.data_mut()
-    }
-
-    pub fn map<Data2>(self, f: impl FnOnce(&'a mut User) -> &'a mut Data2) -> Window<'a, Data2> {
-        self.window.map(f)
     }
 
     pub fn title(&self) -> &str {
@@ -241,7 +234,7 @@ impl<'a, User> Window<'a, User> {
 }
 
 impl<'a, Meta, User> Window<'a, (Meta, User)> {
-    pub fn split(self) -> (&'a mut Meta, Window<'a, User>) {
+    pub(crate) fn split(self) -> (&'a mut Meta, Window<'a, User>) {
         self.window.split()
     }
 }

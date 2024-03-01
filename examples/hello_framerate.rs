@@ -1,83 +1,16 @@
+const STARTING_REFRESH_RATE: FramesPerSecond = FramesPerSecond(60.0);
+
+// // consume 100ms per frame (10fps), the clock should correct accordingly
+// // const SLEEP_PER_FRAME: Duration = Duration::from_millis(100);
+
 use plinth::{
-    frame::{FramesPerSecond, RedrawRequest, SecondsPerFrame},
-    geometry::{Point, Size},
-    graphics::{CanvasImpl, Color, FrameInfo, GraphicsConfig},
-    time::Instant,
-    Application, Axis, EventHandler, PhysicalPixel, Window, WindowSpec,
+    time::{FramesPerSecond, Instant, SecondsPerFrame},
+    AppContext, Application, Canvas, Color, EventHandler, FrameInfo, GraphicsConfig, Window,
+    WindowAttributes,
 };
 
 #[cfg(feature = "profile")]
 use tracing_subscriber::layer::SubscriberExt;
-
-const STARTING_REFRESH_RATE: FramesPerSecond = FramesPerSecond(60.0);
-
-// consume 100ms per frame (10fps), the clock should correct accordingly
-// const SLEEP_PER_FRAME: Duration = Duration::from_millis(100);
-
-pub struct AppWindow {
-    window: Window,
-    refresh_rate: FramesPerSecond,
-    prev_draw_start_time: Instant,
-}
-
-impl AppWindow {
-    fn new(mut window: Window) -> Self {
-        window.request_redraw(RedrawRequest::AtFrameRate(STARTING_REFRESH_RATE));
-
-        Self {
-            window,
-            refresh_rate: STARTING_REFRESH_RATE,
-            prev_draw_start_time: Instant::now(),
-        }
-    }
-}
-
-impl EventHandler for AppWindow {
-    fn on_close_request(&mut self) {
-        self.window.close();
-    }
-
-    fn on_mouse_button(
-        &mut self,
-        _button: plinth::MouseButton,
-        _state: plinth::ButtonState,
-        _location: Point<i16, PhysicalPixel>,
-    ) {
-        // no-op
-    }
-
-    fn on_pointer_move(&mut self, _location: Point<i16, PhysicalPixel>) {
-        // no-op
-    }
-
-    fn on_scroll(&mut self, axis: Axis, delta: f32) {
-        if axis == Axis::Y {
-            self.refresh_rate = (self.refresh_rate + delta as _).max(FramesPerSecond::ZERO);
-            self.window
-                .request_redraw(RedrawRequest::AtFrameRate(self.refresh_rate));
-        }
-    }
-
-    fn on_repaint(&mut self, canvas: &mut dyn CanvasImpl, timing: &FrameInfo) {
-        let now = Instant::now();
-        let elapsed = now - self.prev_draw_start_time;
-        self.prev_draw_start_time = now;
-
-        canvas.clear(Color::BLUE);
-
-        let instantaneous_frame_rate = SecondsPerFrame(elapsed).as_frames_per_second();
-
-        tracing::info!(
-                "repaint:\n    prev present time: {:?}\n    present time: {:?}\n    frame budget: {:?}\n    target refresh rate: {:?}\n    provided refresh rate: {:?}\n    estimated refresh rate: {:?}",
-                timing.prev_present_time,
-                timing.next_present_time,
-                timing.next_present_time - timing.prev_present_time,
-                self.refresh_rate,
-                timing.target_frame_rate,
-                instantaneous_frame_rate,
-            );
-    }
-}
 
 pub fn main() {
     #[cfg(feature = "profile")]
@@ -89,20 +22,70 @@ pub fn main() {
     #[cfg(not(feature = "profile"))]
     tracing_subscriber::fmt::fmt().pretty().init();
 
-    let mut app = Application::new(&GraphicsConfig {
+    let graphics_config = GraphicsConfig {
         debug_mode: false,
         ..Default::default()
-    });
+    };
 
-    app.spawn_window(
-        WindowSpec {
-            title: "VSync Demo".to_owned(),
-            size: Size::new(640, 480),
-            ..Default::default()
-        },
-        AppWindow::new,
-    )
-    .unwrap();
+    Application::new(&graphics_config)
+        .unwrap()
+        .run(App {})
+        .unwrap();
+}
 
-    app.run();
+pub struct AppWindow {
+    refresh_rate: FramesPerSecond,
+    prev_draw_start_time: Instant,
+}
+
+pub struct App {}
+
+impl EventHandler<AppWindow> for App {
+    fn start(&mut self, app: &plinth::AppContext<AppWindow>) {
+        app.create_window(WindowAttributes::default(), |_| AppWindow {
+            refresh_rate: STARTING_REFRESH_RATE,
+            prev_draw_start_time: Instant::now(),
+        })
+        .unwrap();
+    }
+
+    fn stop(&mut self) {
+        // no-op
+    }
+
+    fn wake_requested(&mut self, _app: &AppContext<AppWindow>, _window: &mut Window<AppWindow>) {
+        // no-op
+    }
+
+    fn destroyed(&mut self, _app: &AppContext<AppWindow>, _window_data: AppWindow) {
+        // no-op
+    }
+
+    fn repaint(
+        &mut self,
+        _app: &AppContext<AppWindow>,
+        window: &mut Window<AppWindow>,
+        canvas: &mut Canvas,
+        timing: &FrameInfo,
+    ) {
+        let this = window.data_mut();
+
+        let now = Instant::now();
+        let elapsed = now - this.prev_draw_start_time;
+        this.prev_draw_start_time = now;
+
+        canvas.clear(Color::BLUE);
+
+        let instantaneous_frame_rate = SecondsPerFrame(elapsed).as_frames_per_second();
+
+        tracing::info!(
+                "repaint:\n    prev present time: {:?}\n    present time: {:?}\n    frame budget: {:?}\n    target refresh rate: {:?}\n    provided refresh rate: {:?}\n    estimated refresh rate: {:?}",
+                timing.prev_present_time,
+                timing.next_present_time,
+                timing.next_present_time - timing.prev_present_time,
+                this.refresh_rate,
+                timing.target_frame_rate,
+                instantaneous_frame_rate,
+            );
+    }
 }

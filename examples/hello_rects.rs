@@ -1,63 +1,7 @@
 use plinth::{
-    frame::{FramesPerSecond, RedrawRequest},
-    geometry::{Point, Rect},
-    graphics::{CanvasImpl, Color, FrameInfo, GraphicsConfig, RoundRect},
-    Application, Axis, EventHandler, PhysicalPixel, Window, WindowSpec,
+    geometry::pixel::Rect, AppContext, Application, Canvas, Color, EventHandler, FrameInfo,
+    GraphicsConfig, RoundRect, Window, WindowAttributes,
 };
-
-#[cfg(feature = "profile")]
-use tracing_subscriber::layer::SubscriberExt;
-
-struct DemoWindow {
-    window: Window,
-}
-
-impl DemoWindow {
-    fn new(mut window: Window) -> Self {
-        window.request_redraw(RedrawRequest::AtFrameRate(FramesPerSecond(60.0)));
-        Self { window }
-    }
-}
-
-impl EventHandler for DemoWindow {
-    fn on_close_request(&mut self) {
-        self.window.close();
-    }
-
-    fn on_repaint(&mut self, canvas: &mut dyn CanvasImpl, _timing: &FrameInfo) {
-        canvas.clear(Color::BLACK);
-        canvas.draw_rect(
-            RoundRect::builder(Rect::new(50.0, 100.0, 40.0, 70.0))
-                .color(Color::BLUE)
-                .build(),
-        );
-        canvas.draw_rect(
-            RoundRect::builder(Rect::new(100.0, 100.0, 40.0, 70.0))
-                .color(Color::RED)
-                .build(),
-        );
-
-        std::thread::sleep(std::time::Duration::from_millis(4));
-    }
-
-    fn on_mouse_button(
-        &mut self,
-        _button: plinth::MouseButton,
-        _state: plinth::ButtonState,
-        _location: Point<i16, PhysicalPixel>,
-    ) {
-        // no-op
-    }
-
-    fn on_pointer_move(&mut self, _location: Point<i16, PhysicalPixel>) {
-        // no-op
-    }
-
-    fn on_scroll(&mut self, _axis: Axis, delta: f32) {
-        let _ = delta;
-        // no-op
-    }
-}
 
 fn main() {
     #[cfg(feature = "profile")]
@@ -73,15 +17,53 @@ fn main() {
     #[cfg(not(feature = "profile"))]
     tracing_subscriber::fmt::fmt().pretty().init();
 
-    let mut app = Application::new(&GraphicsConfig {
+    let graphics_config = GraphicsConfig {
         debug_mode: false,
         ..Default::default()
-    });
+    };
 
-    let spec = WindowSpec::default();
-    app.spawn_window(spec.clone(), DemoWindow::new).unwrap();
-    app.spawn_window(spec.clone(), DemoWindow::new).unwrap();
-    // app.spawn_window(spec, |window| Box::new(DemoWindow::new(window)))
-    //     .unwrap();
-    app.run();
+    Application::new(&graphics_config)
+        .unwrap()
+        .run(App {})
+        .unwrap();
+}
+
+pub struct AppWindow {}
+
+pub struct App {}
+
+impl EventHandler<AppWindow> for App {
+    fn start(&mut self, app: &AppContext<AppWindow>) {
+        app.create_window(WindowAttributes::default(), |_| AppWindow {})
+            .unwrap();
+
+        app.create_window(WindowAttributes::default(), |_| AppWindow {})
+            .unwrap();
+    }
+
+    fn stop(&mut self) {
+        // no-op
+    }
+
+    fn wake_requested(&mut self, _app: &AppContext<AppWindow>, _window: &mut Window<AppWindow>) {
+        // no-op
+    }
+
+    fn destroyed(&mut self, _app: &AppContext<AppWindow>, _window_data: AppWindow) {
+        // no-op
+    }
+
+    fn repaint(
+        &mut self,
+        _app: &AppContext<AppWindow>,
+        _window: &mut Window<AppWindow>,
+        canvas: &mut Canvas,
+        _frame: &FrameInfo,
+    ) {
+        canvas.clear(Color::BLACK);
+        canvas
+            .draw_rect(RoundRect::new(Rect::new(50.0, 100.0, 40.0, 70.0)).with_color(Color::BLUE));
+        canvas
+            .draw_rect(RoundRect::new(Rect::new(100.0, 100.0, 40.0, 70.0)).with_color(Color::RED));
+    }
 }

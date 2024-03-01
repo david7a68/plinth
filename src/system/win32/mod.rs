@@ -5,7 +5,6 @@ mod window;
 pub use window::*;
 
 use std::{
-    borrow::Cow,
     cell::{Cell, RefCell},
     marker::PhantomData,
     mem::MaybeUninit,
@@ -35,9 +34,12 @@ use windows::{
     },
 };
 
-use crate::limits::{MAX_WINDOWS, MAX_WINDOW_TITLE_LENGTH};
+use crate::{
+    geometry::window::WindowSize,
+    limits::{MAX_WINDOWS, MAX_WINDOW_TITLE_LENGTH},
+};
 
-use super::{dpi::WindowSize, event_loop::EventHandler, window::WindowAttributes};
+use super::{event_loop::EventHandler, window::WindowAttributes};
 
 mod api {
     pub use crate::system::event_loop::{ActiveEventLoop, EventLoopError};
@@ -83,12 +85,12 @@ impl<WindowData> ActiveEventLoop<WindowData> {
 
         let (width, height) = attributes
             .size
-            .map(|s| (s.width as i32, s.height as i32))
+            .map(|s| (s.width, s.height))
             .unwrap_or((CW_USEDEFAULT, CW_USEDEFAULT));
 
         let (x, y) = attributes
             .position
-            .map(|p| (p.x as i32, p.y as i32))
+            .map(|p| (p.x, p.y))
             .unwrap_or((CW_USEDEFAULT, CW_USEDEFAULT));
 
         let mut opt = Some(constructor);

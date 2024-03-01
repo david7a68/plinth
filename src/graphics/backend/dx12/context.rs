@@ -1,4 +1,4 @@
-use std::mem::ManuallyDrop;
+use std::{mem::ManuallyDrop, sync::Arc};
 
 use windows::{
     core::Interface,
@@ -34,12 +34,10 @@ use windows::{
 use crate::{
     frame::FramesPerSecond,
     geometry::image,
+    geometry::window::{DpiScale, WindowSize},
     graphics::{backend::SubmitId, FrameInfo},
     limits::MAX_WINDOW_DIMENSION,
-    system::{
-        dpi::{DpiScale, WindowSize},
-        time::Instant,
-    },
+    system::time::Instant,
 };
 
 use super::{
@@ -48,6 +46,8 @@ use super::{
 };
 
 pub struct Context {
+    device: Arc<Device>,
+
     swapchain: IDXGISwapChain3,
     #[allow(dead_code)]
     target: IDCompositionTarget,
@@ -79,7 +79,7 @@ pub struct Context {
 
 impl Context {
     #[tracing::instrument(skip(device, compositor))]
-    pub fn new(device: &Device, compositor: &IDCompositionDevice, hwnd: HWND) -> Self {
+    pub fn new(device: Arc<Device>, compositor: &IDCompositionDevice, hwnd: HWND) -> Self {
         let (swapchain, target, visual) = {
             let target = unsafe { compositor.CreateTargetForHwnd(hwnd, true) }.unwrap();
             let visual = unsafe { compositor.CreateVisual() }.unwrap();
@@ -154,10 +154,11 @@ impl Context {
 
         let latency_event = unsafe { swapchain.GetFrameLatencyWaitableObject() };
 
-        let frames_in_flight = [Frame::new(device), Frame::new(device)];
+        let frames_in_flight = [Frame::new(&device), Frame::new(&device)];
         let draw_list = DrawList::new();
 
         Self {
+            device,
             swapchain,
             target,
             visual,
@@ -178,11 +179,15 @@ impl Context {
         }
     }
 
-    pub fn resize(&mut self, size: WindowSize, dpi: DpiScale) {
-        self.deferred_resize = Some((size, dpi, None));
+    pub fn resize(&mut self, size: WindowSize) {
+        self.deferred_resize = Some((size, self.scale, None));
     }
 
-    pub fn paint(&mut self, device: &Device, mut callback: impl FnMut(&mut Canvas, &FrameInfo)) {
+    pub fn change_dpi(&mut self, size: WindowSize, scale: DpiScale) {
+        self.deferred_resize = Some((size, scale, None));
+    }
+
+    pub fn begin_draw(&mut self) -> (Canvas, FrameInfo) {
         // todo: how to handle multiple repaint events in a single frame (when
         // animating and resizing at the same time)? -dz
 
@@ -190,7 +195,7 @@ impl Context {
 
         if let Some((size, dpi, flex)) = self.deferred_resize.take() {
             resize_swapchain(&self.swapchain, size, flex, || {
-                device.wait_for_idle();
+                self.device.wait_for_idle();
             });
 
             tracing::info!("window: resized to {:?}", size);
@@ -199,7 +204,7 @@ impl Context {
             self.scale = dpi;
         }
 
-        let mut canvas = {
+        let canvas = {
             let rect = self.size.into_rect().into();
             Canvas::new(&mut self.draw_list, rect)
         };
@@ -234,8 +239,10 @@ impl Context {
             }
         };
 
-        callback(&mut canvas, &timings);
+        (canvas, timings)
+    }
 
+    pub fn end_draw(&mut self) {
         let image: ID3D12Resource = {
             let index = unsafe { self.swapchain.GetCurrentBackBufferIndex() };
             unsafe { self.swapchain.GetBuffer(index) }.unwrap()
@@ -244,13 +251,20 @@ impl Context {
         let frame = &mut self.frames_in_flight[(self.frame_counter % 2) as usize];
 
         unsafe {
-            device
+            self.device
                 .handle
                 .CreateRenderTargetView(&image, None, self.swapchain_rtv);
         };
 
-        let submit_id =
-            upload_draw_list(device, canvas.finish(), frame, &image, self.swapchain_rtv);
+        self.draw_list.finish();
+
+        let submit_id = upload_draw_list(
+            &self.device,
+            &self.draw_list,
+            frame,
+            &image,
+            self.swapchain_rtv,
+        );
 
         unsafe { self.swapchain.Present(1, 0) }.unwrap();
 
@@ -259,6 +273,13 @@ impl Context {
 
         #[cfg(feature = "profile")]
         tracing_tracy::client::frame_mark();
+    }
+}
+
+impl Drop for Context {
+    fn drop(&mut self) {
+        // technically, wait for the most recent present to complete
+        self.device.wait_for_idle();
     }
 }
 

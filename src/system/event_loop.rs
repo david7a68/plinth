@@ -1,10 +1,10 @@
 use super::{
-    dpi::{DpiScale, WindowPoint, WindowSize},
     input::{ButtonState, KeyCode, ModifierKeys, MouseButton, ScrollAxis},
     platform_impl,
     power::{MonitorState, PowerPreference, PowerSource},
     window::{PaintReason, Window, WindowAttributes, WindowError},
 };
+use crate::geometry::window::{DpiScale, WindowPoint, WindowSize};
 
 #[derive(Debug, thiserror::Error)]
 pub enum EventLoopError {

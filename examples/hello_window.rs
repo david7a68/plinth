@@ -1,7 +1,9 @@
 use plinth::{
-    graphics::{Canvas, FrameInfo, GraphicsConfig},
-    AppContext, Application, ButtonState, DpiScale, EventHandler, KeyCode, ModifierKeys,
-    MouseButton, ScrollAxis, Window, WindowAttributes, WindowPoint, WindowSize,
+    geometry::window::{DpiScale, WindowPoint, WindowSize},
+    input::{ButtonState, KeyCode, ModifierKeys, MouseButton, ScrollAxis},
+    power::{MonitorState, PowerPreference, PowerSource},
+    AppContext, Application, Canvas, EventHandler, FrameInfo, GraphicsConfig, Window,
+    WindowAttributes,
 };
 
 pub struct App {}
@@ -36,26 +38,18 @@ impl EventHandler<()> for App {
         println!("Low memory event");
     }
 
-    fn power_source_changed(
-        &mut self,
-        app: &AppContext<()>,
-        power_source: plinth::system::power::PowerSource,
-    ) {
+    fn power_source_changed(&mut self, app: &AppContext<()>, power_source: PowerSource) {
         println!("Power source changed: {:?}", power_source);
     }
 
-    fn monitor_state_changed(
-        &mut self,
-        app: &AppContext<()>,
-        monitor: plinth::system::power::MonitorState,
-    ) {
+    fn monitor_state_changed(&mut self, app: &AppContext<()>, monitor: MonitorState) {
         println!("Monitor state changed: {:?}", monitor);
     }
 
     fn power_preference_changed(
         &mut self,
         app: &AppContext<()>,
-        power_preference: plinth::system::power::PowerPreference,
+        power_preference: PowerPreference,
     ) {
         println!("Power preference changed: {:?}", power_preference);
     }
@@ -91,7 +85,7 @@ impl EventHandler<()> for App {
         println!("Window size: {:?}", size);
     }
 
-    fn close_requested(&mut self, _app: &AppContext<()>, mut window: &mut Window<()>) {
+    fn close_requested(&mut self, _app: &AppContext<()>, window: &mut Window<()>) {
         println!("Window close request");
         window.destroy();
     }

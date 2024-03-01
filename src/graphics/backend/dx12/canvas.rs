@@ -57,6 +57,11 @@ impl DrawList {
             self.n_rects = end;
         }
     }
+
+    pub fn finish(&mut self) {
+        self.flush_command(DrawCommand::End);
+        self.commands.push((DrawCommand::End, 0));
+    }
 }
 
 pub struct Canvas<'a> {

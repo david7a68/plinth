@@ -9,9 +9,9 @@ use windows::Win32::{
     },
 };
 
-use crate::system::{
-    dpi::WindowPoint,
-    input::{ButtonState, ModifierKeys, MouseButton, ScrollAxis},
+use crate::{
+    geometry::window::WindowPoint,
+    system::input::{ButtonState, ModifierKeys, MouseButton, ScrollAxis},
 };
 
 pub(crate) fn mouse_button(msg: u32) -> Option<(MouseButton, ButtonState)> {

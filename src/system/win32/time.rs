@@ -1,13 +1,16 @@
+use std::sync::OnceLock;
+
 use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
 
 use crate::system::time::NANOSECONDS_PER_SECOND;
 
-lazy_static::lazy_static! {
-    static ref QPF_FREQUENCY: i64 = {
+fn query_freq() -> i64 {
+    static FREQUENCY: OnceLock<i64> = OnceLock::new();
+    *FREQUENCY.get_or_init(|| {
         let mut freq = 0;
         unsafe { QueryPerformanceFrequency(&mut freq) }.unwrap();
         freq
-    };
+    })
 }
 
 pub fn now_nanoseconds() -> i64 {
@@ -17,7 +20,7 @@ pub fn now_nanoseconds() -> i64 {
 }
 
 pub fn qpc_to_nanoseconds(ticks: i64) -> i64 {
-    mul_div_i64(ticks, NANOSECONDS_PER_SECOND, *QPF_FREQUENCY)
+    mul_div_i64(ticks, NANOSECONDS_PER_SECOND, query_freq())
 }
 
 /// Scale without overflow as long as the result and n * d do not overflow.

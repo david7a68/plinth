@@ -6,17 +6,6 @@ use plinth::{
 };
 
 fn main() {
-    #[cfg(feature = "profile")]
-    {
-        tracing::subscriber::set_global_default(
-            tracing_subscriber::registry().with(tracing_tracy::TracyLayer::new()),
-        )
-        .expect("set up the subscriber");
-
-        tracing_tracy::client::set_thread_name!("Main Thread");
-    }
-
-    #[cfg(not(feature = "profile"))]
     tracing_subscriber::fmt::fmt().pretty().init();
 
     let graphics_config = GraphicsConfig {

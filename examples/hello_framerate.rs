@@ -10,17 +10,7 @@ const STARTING_REFRESH_RATE: FramesPerSecond = FramesPerSecond::new(60.0);
 // // consume 100ms per frame (10fps), the clock should correct accordingly
 // // const SLEEP_PER_FRAME: Duration = Duration::from_millis(100);
 
-#[cfg(feature = "profile")]
-use tracing_subscriber::layer::SubscriberExt;
-
 pub fn main() {
-    #[cfg(feature = "profile")]
-    tracing::subscriber::set_global_default(
-        tracing_subscriber::registry().with(tracing_tracy::TracyLayer::new()),
-    )
-    .expect("set up the subscriber");
-
-    #[cfg(not(feature = "profile"))]
     tracing_subscriber::fmt::fmt().pretty().init();
 
     let graphics_config = GraphicsConfig {

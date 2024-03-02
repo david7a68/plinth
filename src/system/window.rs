@@ -44,36 +44,43 @@ pub struct WindowAttributes {
 }
 
 impl WindowAttributes {
+    #[must_use]
     pub fn with_title(mut self, title: impl Into<Cow<'static, str>>) -> Self {
         self.title = title.into();
         self
     }
 
+    #[must_use]
     pub fn with_size(mut self, size: WindowSize) -> Self {
         self.size = Some(size);
         self
     }
 
+    #[must_use]
     pub fn with_min_size(mut self, min_size: WindowSize) -> Self {
         self.min_size = Some(min_size);
         self
     }
 
+    #[must_use]
     pub fn with_max_size(mut self, max_size: WindowSize) -> Self {
         self.max_size = Some(max_size);
         self
     }
 
+    #[must_use]
     pub fn with_position(mut self, position: WindowPoint) -> Self {
         self.position = Some(position);
         self
     }
 
+    #[must_use]
     pub fn with_visibility(mut self, is_visible: bool) -> Self {
         self.is_visible = is_visible;
         self
     }
 
+    #[must_use]
     pub fn with_resizability(mut self, is_resizable: bool) -> Self {
         self.is_resizable = is_resizable;
         self
@@ -94,11 +101,11 @@ impl Default for WindowAttributes {
     }
 }
 
-pub struct WindowWaker {
-    pub(crate) waker: platform_impl::WindowWaker,
+pub struct Waker {
+    pub(crate) waker: platform_impl::Waker,
 }
 
-impl WindowWaker {
+impl Waker {
     /// Notifies the window that it should wake up.
     ///
     /// If the window still exists, this will cause the window event handler to
@@ -107,7 +114,7 @@ impl WindowWaker {
     /// This function does nothing if the window has been destroyed. It is safe
     /// to do so, it just has no effect.
     pub fn wake(&self) {
-        self.waker.wake()
+        self.waker.wake();
     }
 }
 
@@ -130,8 +137,9 @@ pub struct Window<'a, User> {
     pub(crate) window: platform_impl::Window<'a, User>,
 }
 
-impl<'a, User> Window<'a, User> {
-    pub fn waker(&self) -> WindowWaker {
+impl<'a, Data> Window<'a, Data> {
+    #[must_use]
+    pub fn waker(&self) -> Waker {
         self.window.waker()
     }
 
@@ -139,19 +147,23 @@ impl<'a, User> Window<'a, User> {
         self.window.destroy();
     }
 
+    #[must_use]
     #[cfg(target_os = "windows")]
     pub fn hwnd(&self) -> windows::Win32::Foundation::HWND {
         self.window.hwnd()
     }
 
-    pub fn data(&self) -> &User {
+    #[must_use]
+    pub fn data(&self) -> &Data {
         self.window.data()
     }
 
-    pub fn data_mut(&mut self) -> &mut User {
+    #[must_use]
+    pub fn data_mut(&mut self) -> &mut Data {
         self.window.data_mut()
     }
 
+    #[must_use]
     pub fn title(&self) -> &str {
         self.window.title()
     }
@@ -160,6 +172,7 @@ impl<'a, User> Window<'a, User> {
         self.window.set_title(title);
     }
 
+    #[must_use]
     pub fn size(&self) -> WindowSize {
         self.window.size()
     }
@@ -168,6 +181,7 @@ impl<'a, User> Window<'a, User> {
         self.window.set_size(size);
     }
 
+    #[must_use]
     pub fn min_size(&self) -> WindowSize {
         self.window.min_size()
     }
@@ -176,6 +190,7 @@ impl<'a, User> Window<'a, User> {
         self.window.set_min_size(min_size);
     }
 
+    #[must_use]
     pub fn max_size(&self) -> WindowSize {
         self.window.max_size()
     }
@@ -184,6 +199,7 @@ impl<'a, User> Window<'a, User> {
         self.window.set_max_size(max_size);
     }
 
+    #[must_use]
     pub fn position(&self) -> WindowPoint {
         self.window.position()
     }
@@ -192,6 +208,7 @@ impl<'a, User> Window<'a, User> {
         self.window.set_position(position);
     }
 
+    #[must_use]
     pub fn is_visible(&self) -> bool {
         self.window.is_visible()
     }
@@ -204,22 +221,27 @@ impl<'a, User> Window<'a, User> {
         self.window.hide();
     }
 
+    #[must_use]
     pub fn is_resizable(&self) -> bool {
         self.window.is_resizable()
     }
 
+    #[must_use]
     pub fn dpi_scale(&self) -> DpiScale {
         self.window.dpi_scale()
     }
 
+    #[must_use]
     pub fn has_focus(&self) -> bool {
         self.window.has_focus()
     }
 
+    #[must_use]
     pub fn has_pointer(&self) -> bool {
         self.window.has_pointer()
     }
 
+    #[must_use]
     pub fn frame_rate(&self) -> FramesPerSecond {
         self.window.frame_rate()
     }

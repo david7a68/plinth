@@ -8,6 +8,7 @@ pub struct RoundRect {
 }
 
 impl RoundRect {
+    #[must_use]
     pub fn new(rect: Rect) -> Self {
         Self {
             rect,

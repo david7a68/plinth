@@ -63,17 +63,6 @@ pub struct RefreshRate {
     pub now: FramesPerSecond,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum RedrawRequest {
-    Idle,
-    /// Redraw once, as soon as possible.
-    Once,
-    /// Redraw once, to present on the target frame.
-    AtFrame(FrameId),
-    /// Redraw continuously at or above the target frame rate.
-    AtFrameRate(FramesPerSecond),
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FramesPerSecond(pub f64);
 

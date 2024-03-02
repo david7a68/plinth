@@ -1,4 +1,5 @@
 /// Platform-global power preference.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PowerPreference {
     /// Balance power consumption with user experience. Don't worry about saving
@@ -14,6 +15,7 @@ pub enum PowerPreference {
 }
 
 /// The computer's power source.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PowerSource {
     /// The computer is plugged into an external power source.

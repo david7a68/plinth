@@ -38,8 +38,8 @@ pub(crate) fn wheel_axis(msg: u32) -> Option<ScrollAxis> {
 }
 
 pub(crate) fn mouse_coords(lparam: LPARAM) -> WindowPoint {
-    let x = (lparam.0 & 0xffff) as i32;
-    let y = ((lparam.0 >> 16) & 0xffff) as i32;
+    let x = i32::try_from(lparam.0 & 0xffff).unwrap();
+    let y = i32::try_from((lparam.0 >> 16) & 0xffff).unwrap();
     WindowPoint { x, y }
 }
 

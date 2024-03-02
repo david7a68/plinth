@@ -6,6 +6,7 @@ use super::{
 };
 use crate::geometry::window::{DpiScale, WindowPoint, WindowSize};
 
+#[allow(clippy::module_name_repetitions)]
 #[derive(Debug, thiserror::Error)]
 pub enum EventLoopError {
     #[error("The operating system version is not supported.")]

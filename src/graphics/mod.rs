@@ -125,6 +125,7 @@ pub struct Canvas<'a> {
 }
 
 impl Canvas<'_> {
+    #[must_use]
     pub fn region(&self) -> image::Rect {
         match &self.canvas {
             #[cfg(target_os = "windows")]

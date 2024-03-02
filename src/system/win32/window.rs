@@ -44,7 +44,7 @@ pub(crate) const UM_DEFER_DESTROY: u32 = WM_APP + 1;
 pub(crate) const UM_DEFER_SHOW: u32 = WM_APP + 2;
 /// Message used to request a repaint. This is used instead of directly calling
 /// `InvalidateRect` so as to consolidate repaint logic to the event loop. This
-/// is safe to do since the event loop will not generate WM_PAINT events until
+/// is safe to do since the event loop will not generate `WM_PAINT` events until
 /// the message queue is empty.
 ///
 /// This is slightly less efficient since we need to round-trip into the message
@@ -53,17 +53,20 @@ pub(crate) const UM_DEFER_PAINT: u32 = WM_APP + 3;
 
 const WND_CLASS_NAME: PCWSTR = w!("plinth_wc");
 
+#[allow(clippy::cast_possible_truncation)]
+const DEFAULT_DPI: u16 = USER_DEFAULT_SCREEN_DPI as u16;
+
 #[derive(Clone, Debug, thiserror::Error)]
 pub enum WindowError {
     #[error("Window creation failed: {0:?}")]
     CreateFailed(windows::core::Error),
 }
 
-pub struct WindowWaker {
+pub struct Waker {
     target: HWND,
 }
 
-impl WindowWaker {
+impl Waker {
     pub fn wake(&self) {
         let _ = unsafe { PostMessageW(self.target, UM_WAKE, None, None) };
     }
@@ -83,6 +86,20 @@ pub struct CreateStruct<'a, WindowData> {
     pub is_resizable: bool,
 }
 
+bitflags::bitflags! {
+    pub(crate) struct WindowFlags: u8 {
+        const IS_VISIBLE = 0b0000_0001;
+        const IS_RESIZABLE = 0b0000_0010;
+        const HAS_FOCUS = 0b0000_0100;
+        const HAS_POINTER = 0b0000_1000;
+        const IS_RESIZING = 0b0001_0000;
+        /// Keep this per-window, not per-event-loop because a different window
+        /// might get a resize event while this one is still resizing. If that
+        /// happens, we don't want the other window to get resize begin/end events.
+        const IN_DRAG_RESIZE = 0b0010_0000;
+    }
+}
+
 pub(crate) struct WindowState {
     pub title: Cow<'static, str>,
     pub size: WindowSize,
@@ -90,15 +107,7 @@ pub(crate) struct WindowState {
     pub max_size: WindowSize,
     pub position: WindowPoint,
     pub dpi: u16,
-    pub has_focus: bool,
-    pub is_visible: bool,
-    pub has_pointer: bool,
-    pub is_resizable: bool,
-    pub is_resizing: bool,
-    /// Keep this per-window, not per-event-loop because a different window
-    /// might get a resize event while this one is still resizing. If that
-    /// happens, we don't want the other window to get resize begin/end events.
-    pub in_drag_resize: bool,
+    pub flags: WindowFlags,
     pub paint_reason: Option<PaintReason>,
 }
 
@@ -125,6 +134,16 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
             let mut default_rect = RECT::default();
             unsafe { GetClientRect(hwnd, &mut default_rect) }.expect("GetClientRect failed.");
 
+            let mut flags = WindowFlags::empty();
+
+            if create_struct.is_visible {
+                flags |= WindowFlags::IS_VISIBLE;
+            }
+
+            if create_struct.is_resizable {
+                flags |= WindowFlags::IS_RESIZABLE;
+            }
+
             WindowState {
                 title: unsafe { create_struct.title.take().unwrap_unchecked() },
                 size: WindowSize {
@@ -138,12 +157,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
                     y: default_rect.top,
                 },
                 dpi: u16::try_from(dpi).unwrap(),
-                has_focus: false,
-                is_visible: create_struct.is_visible,
-                has_pointer: false,
-                is_resizable: create_struct.is_resizable,
-                is_resizing: false,
-                in_drag_resize: false,
+                flags,
                 paint_reason: None,
             }
         });
@@ -164,11 +178,11 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
     }
 
     pub fn wake(&mut self) {
-        self.event(|handler, event_loop, window| handler.wake_requested(event_loop, window));
+        self.event(EventHandler::wake_requested);
     }
 
     pub fn close(&mut self) {
-        self.event(|handler, event_loop, window| handler.close_requested(event_loop, window));
+        self.event(EventHandler::close_requested);
     }
 
     pub fn destroy_defer(&mut self) {
@@ -194,27 +208,28 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
     }
 
     pub fn show(&mut self, is_visible: bool) {
-        self.with_state(|window| window.is_visible = is_visible);
+        self.with_state(|window| window.flags.set(WindowFlags::IS_VISIBLE, is_visible));
 
         if is_visible {
-            self.event(|handler, event_loop, window| handler.shown(event_loop, window));
+            self.event(EventHandler::shown);
         } else {
-            self.event(|handler, event_loop, window| handler.hidden(event_loop, window));
+            self.event(EventHandler::hidden);
         }
     }
 
     pub fn enter_size_move(&mut self) {
-        self.with_state(|window| window.is_resizing = true);
+        self.with_state(|window| window.flags.set(WindowFlags::IN_DRAG_RESIZE, true));
     }
 
     pub fn exit_size_move(&mut self) {
         let resize_ended: bool = self.with_state(|window| {
-            window.in_drag_resize = false;
-            std::mem::take(&mut window.is_resizing)
+            let ended = window.flags.contains(WindowFlags::IN_DRAG_RESIZE);
+            window.flags.set(WindowFlags::IN_DRAG_RESIZE, false);
+            ended
         });
 
         if resize_ended {
-            self.event(|handler, event_loop, window| handler.drag_resize_ended(event_loop, window));
+            self.event(EventHandler::drag_resize_ended);
         }
     }
 
@@ -244,17 +259,17 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
         .expect("SetWindowPos failed.");
 
         let scale = DpiScale {
-            factor: dpi as f32 / USER_DEFAULT_SCREEN_DPI as f32,
+            factor: f32::from(dpi) / f32::from(DEFAULT_DPI),
         };
 
         self.event(|handler, event_loop, window| {
-            handler.dpi_changed(event_loop, window, scale, size)
+            handler.dpi_changed(event_loop, window, scale, size);
         });
     }
 
     pub fn get_min_max_info(&mut self, mmi: &mut MINMAXINFO) {
         let (min, max, dpi) =
-            self.with_state(|window| (window.min_size, window.max_size, window.dpi as u32));
+            self.with_state(|window| (window.min_size, window.max_size, u32::from(window.dpi)));
 
         let os_min_x = unsafe { GetSystemMetricsForDpi(SM_CXMINTRACK, dpi) };
         let os_min_y = unsafe { GetSystemMetricsForDpi(SM_CYMINTRACK, dpi) };
@@ -274,10 +289,10 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
             (
                 {
                     let resized = width != window.size.width || height != window.size.height;
-                    let is_start = resized && window.in_drag_resize;
+                    let is_start = resized && window.flags.contains(WindowFlags::IN_DRAG_RESIZE);
 
                     window.size = WindowSize { width, height };
-                    window.is_resizing = is_start;
+                    window.flags.set(WindowFlags::IS_RESIZING, true);
                     window.paint_reason = resized
                         .then_some(PaintReason::Commanded) // override if resized
                         .or(window.paint_reason); // else keep the current reason
@@ -297,7 +312,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
         if let Some((start, size)) = resized {
             if start {
                 self.event(|handler, event_loop, window| {
-                    handler.drag_resize_started(event_loop, window)
+                    handler.drag_resize_started(event_loop, window);
                 });
             }
 
@@ -305,7 +320,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
         }
 
         if let Some(pos) = moved {
-            self.event(|handler, event_loop, window| handler.moved(event_loop, window, pos))
+            self.event(|handler, event_loop, window| handler.moved(event_loop, window, pos));
         }
     }
 
@@ -339,37 +354,41 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
     }
 
     pub fn mouse_move(&mut self, position: WindowPoint) {
-        let entered = self.with_state(|window| !std::mem::replace(&mut window.has_pointer, true));
+        let entered = self.with_state(|window| {
+            let has_pointer = window.flags.contains(WindowFlags::HAS_POINTER);
+            window.flags.set(WindowFlags::HAS_POINTER, true);
+            !has_pointer
+        });
 
         if entered {
             self.event(|handler, event_loop, window| {
-                handler.pointer_entered(event_loop, window, position)
+                handler.pointer_entered(event_loop, window, position);
             });
 
             unsafe {
                 TrackMouseEvent(&mut TRACKMOUSEEVENT {
-                    cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                    cbSize: u32::try_from(std::mem::size_of::<TRACKMOUSEEVENT>()).unwrap(),
                     dwFlags: TME_LEAVE,
                     hwndTrack: self.hwnd.get(),
                     dwHoverTime: 0,
                 })
             }
-            .unwrap()
+            .unwrap();
         }
 
         self.event(|handler, event_loop, window| {
-            handler.pointer_moved(event_loop, window, position)
+            handler.pointer_moved(event_loop, window, position);
         });
     }
 
     pub fn mouse_leave(&mut self) {
-        self.with_state(|window| window.has_pointer = false);
-        self.event(|handler, event_loop, window| handler.pointer_left(event_loop, window));
+        self.with_state(|window| window.flags.set(WindowFlags::HAS_POINTER, false));
+        self.event(EventHandler::pointer_left);
     }
 
     pub fn wm_mouse_wheel(&mut self, axis: ScrollAxis, delta: f32, mods: ModifierKeys) {
         self.event(|handler, event_loop, window| {
-            handler.mouse_scrolled(event_loop, window, delta, axis, mods)
+            handler.mouse_scrolled(event_loop, window, delta, axis, mods);
         });
     }
 
@@ -381,7 +400,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
         mods: ModifierKeys,
     ) {
         self.event(|handler, event_loop, window| {
-            handler.mouse_button(event_loop, window, button, state, position, mods)
+            handler.mouse_button(event_loop, window, button, state, position, mods);
         });
     }
 
@@ -424,9 +443,9 @@ pub struct Window<'a, Data> {
 }
 
 impl<'a, Data> Window<'a, Data> {
-    pub fn waker(&self) -> api::WindowWaker {
-        api::WindowWaker {
-            waker: WindowWaker { target: self.hwnd },
+    pub fn waker(&self) -> api::Waker {
+        api::Waker {
+            waker: Waker { target: self.hwnd },
         }
     }
 
@@ -490,7 +509,7 @@ impl<'a, Data> Window<'a, Data> {
     }
 
     pub fn is_visible(&self) -> bool {
-        self.state.is_visible
+        self.state.flags.contains(WindowFlags::IS_VISIBLE)
     }
 
     pub fn show(&mut self) {
@@ -502,20 +521,20 @@ impl<'a, Data> Window<'a, Data> {
     }
 
     pub fn is_resizable(&self) -> bool {
-        self.state.is_resizable
+        self.state.flags.contains(WindowFlags::IS_RESIZABLE)
     }
 
     pub fn dpi_scale(&self) -> DpiScale {
-        let factor = self.state.dpi as f32 / USER_DEFAULT_SCREEN_DPI as f32;
+        let factor = f32::from(self.state.dpi) / f32::from(DEFAULT_DPI);
         DpiScale { factor }
     }
 
     pub fn has_focus(&self) -> bool {
-        self.state.has_focus
+        self.state.flags.contains(WindowFlags::HAS_FOCUS)
     }
 
     pub fn has_pointer(&self) -> bool {
-        self.state.has_pointer
+        self.state.flags.contains(WindowFlags::HAS_POINTER)
     }
 
     pub fn frame_rate(&self) -> FramesPerSecond {
@@ -554,7 +573,7 @@ pub(crate) fn register_wndclass(
 ) -> windows::core::Result<PCWSTR> {
     let atom = unsafe {
         RegisterClassExW(&WNDCLASSEXW {
-            cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+            cbSize: u32::try_from(std::mem::size_of::<WNDCLASSEXW>()).unwrap(),
             style: CS_HREDRAW | CS_VREDRAW,
             lpfnWndProc: Some(wndproc),
             cbClsExtra: 0,
@@ -585,5 +604,6 @@ pub fn post_defer_show(hwnd: HWND, show: SHOW_WINDOW_CMD) {
 /// Extract the `SHOW_WINDOW_CMD` from the `LPARAM` of a `UM_DEFER_SHOW`
 /// message.
 pub fn from_defer_show(lparam: LPARAM) -> SHOW_WINDOW_CMD {
-    SHOW_WINDOW_CMD(lparam.0 as i32)
+    #[allow(clippy::cast_possible_truncation)]
+    SHOW_WINDOW_CMD(lparam.0 as _)
 }

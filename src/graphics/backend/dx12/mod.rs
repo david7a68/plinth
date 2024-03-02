@@ -24,7 +24,7 @@ impl Graphics {
     pub fn new(config: &GraphicsConfig) -> Self {
         let device = Arc::new(device::Device::new(config));
         let compositor = unsafe { DCompositionCreateDevice2(None) }.unwrap();
-        Self { compositor, device }
+        Self { device, compositor }
     }
 
     pub fn create_context(&self, hwnd: HWND) -> Context {

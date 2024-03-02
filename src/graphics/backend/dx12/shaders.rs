@@ -42,7 +42,7 @@ impl RectShader {
                 DestBlendAlpha: D3D12_BLEND_ONE,
                 BlendOpAlpha: D3D12_BLEND_OP_ADD,
                 LogicOp: D3D12_LOGIC_OP_NOOP,
-                RenderTargetWriteMask: D3D12_COLOR_WRITE_ENABLE_ALL.0 as u8,
+                RenderTargetWriteMask: u8::try_from(D3D12_COLOR_WRITE_ENABLE_ALL.0).unwrap(),
             };
 
             let mut rtv_formats = [DXGI_FORMAT_UNKNOWN; 8];
@@ -77,7 +77,7 @@ impl RectShader {
                 },
                 InputLayout: D3D12_INPUT_LAYOUT_DESC {
                     pInputElementDescs: INPUT_ELEMENTS.as_ptr(),
-                    NumElements: INPUT_ELEMENTS.len() as u32,
+                    NumElements: u32::try_from(INPUT_ELEMENTS.len()).unwrap(),
                 },
                 PrimitiveTopologyType: D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE,
                 NumRenderTargets: 1,

@@ -82,13 +82,6 @@ impl<'a> Canvas<'a> {
         Self { draw_list, region }
     }
 
-    pub fn finish(self) -> &'a mut DrawList {
-        self.draw_list.flush_command(DrawCommand::End);
-        self.draw_list.commands.push((DrawCommand::End, 0));
-
-        self.draw_list
-    }
-
     pub fn region(&self) -> image::Rect {
         self.region
     }
@@ -128,16 +121,16 @@ mod tests {
             color: Color::BLACK,
         });
 
-        let draws = canvas.finish();
+        list.finish();
 
-        assert_eq!(draws.commands.len(), 4);
-        assert_eq!(draws.rects.len(), 2);
-        assert_eq!(draws.areas.len(), 1);
-        assert_eq!(draws.clears.len(), 1);
+        assert_eq!(list.commands.len(), 4);
+        assert_eq!(list.rects.len(), 2);
+        assert_eq!(list.areas.len(), 1);
+        assert_eq!(list.clears.len(), 1);
 
-        assert_eq!(draws.commands[0], (DrawCommand::Begin, 0));
-        assert_eq!(draws.commands[1], (DrawCommand::Clear, 0));
-        assert_eq!(draws.commands[2], (DrawCommand::DrawRects, 2));
-        assert_eq!(draws.commands[3], (DrawCommand::End, 0));
+        assert_eq!(list.commands[0], (DrawCommand::Begin, 0));
+        assert_eq!(list.commands[1], (DrawCommand::Clear, 0));
+        assert_eq!(list.commands[2], (DrawCommand::DrawRects, 2));
+        assert_eq!(list.commands[3], (DrawCommand::End, 0));
     }
 }

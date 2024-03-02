@@ -33,6 +33,7 @@ impl Rect {
         height: 1,
     };
 
+    #[must_use]
     pub fn new(x: u16, y: u16, width: u16, height: u16) -> Self {
         Self {
             x,
@@ -42,14 +43,17 @@ impl Rect {
         }
     }
 
+    #[must_use]
     pub fn right(&self) -> u16 {
         self.x + self.width
     }
 
+    #[must_use]
     pub fn bottom(&self) -> u16 {
         self.y + self.height
     }
 
+    #[must_use]
     pub fn to_xywh(&self) -> [u16; 4] {
         [self.x, self.y, self.width, self.height]
     }
@@ -61,13 +65,13 @@ impl Default for Rect {
     }
 }
 
-impl Into<Box> for Rect {
-    fn into(self) -> Box {
+impl From<Rect> for Box {
+    fn from(rect: Rect) -> Box {
         Box {
-            top: self.y,
-            bottom: self.bottom(),
-            left: self.x,
-            right: self.right(),
+            top: rect.y,
+            bottom: rect.bottom(),
+            left: rect.x,
+            right: rect.right(),
         }
     }
 }

@@ -8,6 +8,7 @@ use std::{
     cell::{Cell, RefCell},
     marker::PhantomData,
     mem::MaybeUninit,
+    ptr::addr_of,
 };
 
 use arrayvec::ArrayVec;
@@ -43,7 +44,7 @@ use super::{event_loop::EventHandler, window::WindowAttributes};
 
 mod api {
     pub use crate::system::event_loop::{ActiveEventLoop, EventLoopError};
-    pub use crate::system::window::{Window, WindowError, WindowWaker};
+    pub use crate::system::window::{Waker, Window, WindowError};
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -85,13 +86,11 @@ impl<WindowData> ActiveEventLoop<WindowData> {
 
         let (width, height) = attributes
             .size
-            .map(|s| (s.width, s.height))
-            .unwrap_or((CW_USEDEFAULT, CW_USEDEFAULT));
+            .map_or((CW_USEDEFAULT, CW_USEDEFAULT), |s| (s.width, s.height));
 
         let (x, y) = attributes
             .position
-            .map(|p| (p.x, p.y))
-            .unwrap_or((CW_USEDEFAULT, CW_USEDEFAULT));
+            .map_or((CW_USEDEFAULT, CW_USEDEFAULT), |p| (p.x, p.y));
 
         let mut opt = Some(constructor);
         let wrap_ctor = RefCell::new(|window: api::Window<()>| opt.take().unwrap()(window));
@@ -120,7 +119,7 @@ impl<WindowData> ActiveEventLoop<WindowData> {
                 None,
                 None,
                 None,
-                Some((&create_struct as *const RefCell<_>).cast()),
+                Some(addr_of!(create_struct).cast()),
             )
         };
 
@@ -151,10 +150,12 @@ impl<WindowData> ActiveEventLoop<WindowData> {
 pub struct EventLoop {}
 
 impl EventLoop {
+    #[allow(clippy::unnecessary_wraps)] // for consistency with other platforms
     pub fn new() -> Result<Self, EventLoopError> {
         Ok(Self {})
     }
 
+    #[allow(clippy::unused_self)]
     pub fn run<WindowData, H: EventHandler<WindowData>>(
         &mut self,
         event_handler: H,
@@ -168,9 +169,9 @@ impl EventLoop {
             wndclass,
             event_handler: RefCell::new(event_handler),
 
-            hwnds: [(); MAX_WINDOWS].map(|_| Cell::new(HWND::default())),
-            window_data: [(); MAX_WINDOWS].map(|_| RefCell::new(MaybeUninit::uninit())),
-            window_states: [(); MAX_WINDOWS].map(|_| RefCell::new(MaybeUninit::uninit())),
+            hwnds: [(); MAX_WINDOWS].map(|()| Cell::new(HWND::default())),
+            window_data: [(); MAX_WINDOWS].map(|()| RefCell::new(MaybeUninit::uninit())),
+            window_states: [(); MAX_WINDOWS].map(|()| RefCell::new(MaybeUninit::uninit())),
         };
 
         let event_loop = wndproc_state.as_active_event_loop();
@@ -238,7 +239,7 @@ impl<WindowData, H: EventHandler<WindowData>> WndProcState<WindowData, H> {
         api::ActiveEventLoop {
             event_loop: ActiveEventLoop {
                 wndclass: self.wndclass,
-                opaque_state: self as *const WndProcState<_, _> as *const (),
+                opaque_state: (self as *const WndProcState<_, _>).cast(),
                 _phantom: PhantomData::<*const WindowData>,
             },
         }
@@ -282,7 +283,7 @@ unsafe extern "system" fn unsafe_wndproc<WindowData, H: EventHandler<WindowData>
             cs.borrow_mut()
         };
 
-        let state = &*(cs.wndproc_state as *const WndProcState<WindowData, H>);
+        let state = &*cs.wndproc_state.cast::<WndProcState<WindowData, H>>();
 
         let slot_index = state.hwnds.iter().position(|h| h.get() == HWND(0));
         let Some(slot_index) = slot_index else {
@@ -301,7 +302,7 @@ unsafe extern "system" fn unsafe_wndproc<WindowData, H: EventHandler<WindowData>
                 return unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
             }
 
-            unsafe { &*(state as *const WndProcState<WindowData, H>) }
+            unsafe { &*state.cast::<WndProcState<WindowData, H>>() }
         };
 
         let Some(mut context) = state.get_context(hwnd) else {
@@ -317,7 +318,7 @@ unsafe extern "system" fn unsafe_wndproc<WindowData, H: EventHandler<WindowData>
 
                 let mut count = 0;
                 for h in &state.hwnds {
-                    count += (h.get() != HWND::default()) as u32; // branchless count
+                    count += u32::from(h.get() != HWND::default()); // branchless count
                 }
 
                 if count == 0 {
@@ -340,7 +341,7 @@ unsafe extern "system" fn unsafe_wndproc<WindowData, H: EventHandler<WindowData>
             msg @ (WM_MOUSEWHEEL | WM_MOUSEHWHEEL) => {
                 let axis = input::wheel_axis(msg).unwrap();
 
-                #[allow(clippy::cast_possible_wrap)]
+                #[allow(clippy::cast_possible_wrap, clippy::cast_possible_truncation)]
                 let delta = f32::from((wparam.0 >> 16) as i16) / 120.0;
 
                 let mods = input::mouse_modifiers(wparam);

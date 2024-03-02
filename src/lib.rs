@@ -1,3 +1,5 @@
+#![allow(clippy::module_name_repetitions)]
+
 mod frame;
 pub mod geometry;
 mod graphics;
@@ -8,7 +10,7 @@ mod application;
 
 pub use application::{AppContext, Application, EventHandler};
 pub use graphics::{Canvas, Color, FrameInfo, GraphicsConfig, RoundRect};
-pub use system::window::{Window, WindowAttributes, WindowError, WindowWaker};
+pub use system::window::{Waker, Window, WindowAttributes, WindowError};
 
 pub mod input {
     pub use crate::system::input::*;

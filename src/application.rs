@@ -23,6 +23,14 @@ pub struct Application {
 }
 
 impl Application {
+    /// Initializes the application.
+    ///
+    /// Only one application may be initialized at a time.
+    ///
+    /// # Errors
+    ///
+    /// This will fail if the event loop could not be initialized, or if an
+    /// application has already been initialized.
     pub fn new(graphics: &GraphicsConfig) -> Result<Self, Error> {
         let event_loop = EventLoop::new()?;
         let graphics = Graphics::new(graphics);
@@ -36,6 +44,10 @@ impl Application {
     /// Runs the application is finished.
     ///
     /// This returns when all windows are closed. This may only be called once.
+    ///
+    /// # Errors
+    ///
+    /// This function returns an error if the event loop could not be initialized.
     pub fn run<WindowData, H: EventHandler<WindowData>>(
         &mut self,
         event_handler: H,
@@ -50,6 +62,10 @@ impl Application {
     }
 }
 
+/// A reference to the application context.
+///
+/// This is passed into event handler methods to allow the handler to interact
+/// with the application.
 pub struct AppContext<'a, UserWindowData> {
     graphics: &'a Graphics,
     event_loop: &'a ActiveEventLoop<(WindowState, UserWindowData)>,
@@ -66,6 +82,16 @@ impl<'a, UserWindowData> AppContext<'a, UserWindowData> {
         }
     }
 
+    /// Creates a new window.
+    ///
+    /// # Errors
+    ///
+    /// This function returns an error if the window title exceeds
+    /// [`MAX_WINDOW_TITLE_LENGTH`](crate::limits::MAX_WINDOW_TITLE_LENGTH)
+    /// bytes, or if creating a new window would exceed the
+    /// [`MAX_WINDOWS`](crate::limits::MAX_WINDOWS) limit.
+    ///
+    /// It may also return an error under platform-specific conditions.
     pub fn create_window(
         &self,
         attributes: WindowAttributes,

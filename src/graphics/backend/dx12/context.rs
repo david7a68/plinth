@@ -92,8 +92,8 @@ impl Context {
             };
 
             let swapchain_desc = DXGI_SWAP_CHAIN_DESC1 {
-                Width: width as u32,   // extract from hwnd
-                Height: height as u32, // extract from hwnd
+                Width: u32::try_from(width).unwrap(),   // extract from hwnd
+                Height: u32::try_from(height).unwrap(), // extract from hwnd
                 Format: DXGI_FORMAT_R16G16B16A16_FLOAT,
                 Stereo: false.into(),
                 SampleDesc: DXGI_SAMPLE_DESC {
@@ -374,10 +374,12 @@ pub fn resize_swapchain(
         unsafe { swapchain.GetDesc1(&mut desc) }.unwrap();
 
         if width > desc.Width || height > desc.Height {
-            #[allow(clippy::cast_sign_loss)]
-            let w = ((width as f32) * flex).min(f32::from(MAX_WINDOW_DIMENSION)) as u32;
-            #[allow(clippy::cast_sign_loss)]
-            let h = ((height as f32) * flex).min(f32::from(MAX_WINDOW_DIMENSION)) as u32;
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            let w =
+                (f64::from(width) * f64::from(flex)).min(f64::from(MAX_WINDOW_DIMENSION)) as u32;
+            #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+            let h =
+                (f64::from(height) * f64::from(flex)).min(f64::from(MAX_WINDOW_DIMENSION)) as u32;
 
             idle();
             unsafe {
@@ -451,14 +453,14 @@ fn upload_draw_list(
         }
     }
 
-    let viewpowrt: image::Box = {
+    let viewport: image::Box = {
         assert!(content.commands[0].0 == DrawCommand::Begin);
         content.areas[0].into()
     };
 
     let viewport_scale = [
-        1.0 / f32::from(viewpowrt.right),
-        1.0 / f32::from(viewpowrt.bottom),
+        1.0 / f32::from(viewport.right),
+        1.0 / f32::from(viewport.bottom),
     ];
 
     let mut rect_idx = 0;
@@ -488,17 +490,17 @@ fn upload_draw_list(
                 frame.command_list.RSSetViewports(&[D3D12_VIEWPORT {
                     TopLeftX: 0.0,
                     TopLeftY: 0.0,
-                    Width: f32::from(viewpowrt.right),
-                    Height: f32::from(viewpowrt.bottom),
+                    Width: f32::from(viewport.right),
+                    Height: f32::from(viewport.bottom),
                     MinDepth: 0.0,
                     MaxDepth: 1.0,
                 }]);
 
                 frame.command_list.RSSetScissorRects(&[RECT {
-                    left: i32::from(viewpowrt.left),
-                    top: i32::from(viewpowrt.top),
-                    right: i32::from(viewpowrt.right),
-                    bottom: i32::from(viewpowrt.bottom),
+                    left: i32::from(viewport.left),
+                    top: i32::from(viewport.top),
+                    right: i32::from(viewport.right),
+                    bottom: i32::from(viewport.bottom),
                 }]);
             },
             DrawCommand::End => unsafe {
@@ -527,7 +529,7 @@ fn upload_draw_list(
                     &frame.command_list,
                     frame.buffer.as_ref().unwrap(),
                     viewport_scale,
-                    (viewpowrt.bottom.checked_sub(viewpowrt.top)).unwrap() as f32,
+                    f32::from(viewport.bottom.checked_sub(viewport.top).unwrap()),
                 );
 
                 unsafe { frame.command_list.DrawInstanced(4, num_rects, 0, rect_idx) };

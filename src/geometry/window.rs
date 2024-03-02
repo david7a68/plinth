@@ -16,6 +16,7 @@ impl WindowSize {
 }
 
 impl WindowSize {
+    #[must_use]
     pub fn into_rect(self) -> WindowRect {
         WindowRect {
             x: 0,

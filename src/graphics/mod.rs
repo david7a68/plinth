@@ -1,6 +1,5 @@
 mod backend;
 mod color;
-mod frame_statistics;
 mod primitives;
 
 use windows::Win32::Foundation::HWND;
@@ -11,11 +10,10 @@ use crate::{
         window::{DpiScale, WindowSize},
     },
     system::power::PowerPreference,
+    time::{FramesPerSecond, PresentPeriod, PresentTime},
 };
 
-pub use self::color::*;
-pub use self::frame_statistics::*;
-pub use self::primitives::*;
+pub use self::{color::Color, primitives::RoundRect};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Backend {
@@ -41,9 +39,21 @@ impl Default for GraphicsConfig {
     }
 }
 
-enum GraphicsImpl {
-    #[cfg(target_os = "windows")]
-    Dx12(backend::dx12::Graphics),
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FrameInfo {
+    /// The target refresh rate, if a frame rate has been set.
+    pub target_frame_rate: Option<FramesPerSecond>,
+
+    pub vblank_period: PresentPeriod,
+
+    /// The estimated time that the next present will occur.
+    pub next_present_time: PresentTime,
+
+    /// The time that the last present occurred.
+    pub prev_present_time: PresentTime,
+
+    /// The time that the last present was scheduled to occur.
+    pub prev_target_present_time: PresentTime,
 }
 
 pub(crate) struct Graphics {
@@ -76,11 +86,6 @@ impl Graphics {
 
         WindowContext { context }
     }
-}
-
-enum ContextImpl {
-    #[cfg(target_os = "windows")]
-    Dx12(backend::dx12::Context),
 }
 
 pub(crate) struct WindowContext {
@@ -150,6 +155,16 @@ impl Canvas<'_> {
     pub fn finish(&mut self) {
         // todo
     }
+}
+
+enum GraphicsImpl {
+    #[cfg(target_os = "windows")]
+    Dx12(backend::dx12::Graphics),
+}
+
+enum ContextImpl {
+    #[cfg(target_os = "windows")]
+    Dx12(backend::dx12::Context),
 }
 
 enum CanvasImpl<'a> {

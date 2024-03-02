@@ -28,13 +28,13 @@ use windows::{
 };
 
 use crate::{
-    frame::FramesPerSecond,
     geometry::window::{DpiScale, WindowPoint, WindowSize},
     system::{
         event_loop::EventHandler,
         input::{ButtonState, ModifierKeys, MouseButton, ScrollAxis},
         window::{PaintReason, RefreshRateRequest},
     },
+    time::FramesPerSecond,
 };
 
 use super::api;
@@ -488,6 +488,7 @@ impl<'a, Data> Window<'a, Data> {
     }
 
     pub fn set_min_size(&mut self, min_size: WindowSize) {
+        let _ = min_size;
         todo!()
     }
 
@@ -496,6 +497,7 @@ impl<'a, Data> Window<'a, Data> {
     }
 
     pub fn set_max_size(&mut self, max_size: WindowSize) {
+        let _ = max_size;
         todo!()
     }
 

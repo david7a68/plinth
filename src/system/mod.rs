@@ -1,7 +1,7 @@
-pub mod event_loop;
+pub(crate) mod event_loop;
 pub mod input;
 pub mod power;
-pub mod time;
+pub(crate) mod time;
 pub mod window;
 
 #[cfg(target_os = "windows")]

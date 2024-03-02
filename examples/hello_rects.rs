@@ -1,6 +1,8 @@
 use plinth::{
-    geometry::pixel::Rect, AppContext, Application, Canvas, Color, EventHandler, FrameInfo,
-    GraphicsConfig, RoundRect, Window, WindowAttributes,
+    geometry::pixel::Rect,
+    graphics::{Canvas, Color, FrameInfo, GraphicsConfig, RoundRect},
+    system::window::{Window, WindowAttributes},
+    AppContext, Application, EventHandler,
 };
 
 fn main() {

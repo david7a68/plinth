@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
-use crate::frame::FramesPerSecond;
+use crate::time::FramesPerSecond;
 
-use super::{platform_impl, time::Instant};
+use super::platform_impl;
 use crate::geometry::window::{DpiScale, WindowPoint, WindowSize};
 
 #[derive(Debug, thiserror::Error)]
@@ -116,14 +116,6 @@ impl Waker {
     pub fn wake(&self) {
         self.waker.wake();
     }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct PaintInfo {
-    pub target_present_time: Instant,
-    pub target_refresh_rate: FramesPerSecond,
-    pub prev_present_time: Instant,
-    pub prev_target_present_time: Instant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

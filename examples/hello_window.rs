@@ -1,9 +1,12 @@
 use plinth::{
     geometry::window::{DpiScale, WindowPoint, WindowSize},
-    input::{ButtonState, KeyCode, ModifierKeys, MouseButton, ScrollAxis},
-    power::{MonitorState, PowerPreference, PowerSource},
-    AppContext, Application, Canvas, EventHandler, FrameInfo, GraphicsConfig, Window,
-    WindowAttributes,
+    graphics::{Canvas, FrameInfo, GraphicsConfig},
+    system::{
+        input::{ButtonState, KeyCode, ModifierKeys, MouseButton, ScrollAxis},
+        power::{MonitorState, PowerPreference, PowerSource},
+        window::{Window, WindowAttributes},
+    },
+    AppContext, Application, EventHandler,
 };
 
 pub struct App {}

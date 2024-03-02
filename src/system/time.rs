@@ -1,86 +1,24 @@
-use std::{
-    iter::Sum,
-    ops::{Add, AddAssign, Div, Mul, Sub},
-};
+use std::ops::{Add, AddAssign, Div, Mul, Sub, SubAssign};
 
 use super::platform_impl;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Instant(pub f64);
+pub(crate) const NANOSECONDS_PER_SECOND: i64 = 1_000_000_000;
 
-impl Instant {
-    pub const ZERO: Self = Self(0.0);
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
+pub struct Nanoseconds(pub i64);
 
-    #[must_use]
+impl Nanoseconds {
     pub fn now() -> Self {
-        Self(platform_impl::time::present_time_now())
+        Self(platform_impl::time::now_nanoseconds())
     }
 
-    #[must_use]
-    pub fn elapsed(&self) -> Duration {
-        Duration(platform_impl::time::present_time_now() - self.0)
-    }
-
-    #[must_use]
-    pub fn from_ticks(ticks: i64) -> Self {
-        Self(platform_impl::time::present_time_from_ticks(ticks))
-    }
-
-    #[must_use]
-    pub fn max(&self, rhs: &Self) -> Self {
-        Self(self.0.max(rhs.0))
-    }
-
-    #[must_use]
-    pub fn saturating_sub(&self, rhs: &Self) -> Duration {
-        Duration((self.0 - rhs.0).max(0.0))
+    #[cfg(target_os = "windows")]
+    pub fn from_qpc_time(ticks: i64) -> Self {
+        Self(platform_impl::time::qpc_to_nanoseconds(ticks))
     }
 }
 
-impl Sub for Instant {
-    type Output = Duration;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        Duration(self.0 - rhs.0)
-    }
-}
-
-impl Sub<Duration> for Instant {
-    type Output = Self;
-
-    fn sub(self, rhs: Duration) -> Self::Output {
-        Self(self.0 - rhs.0)
-    }
-}
-
-impl Add<Duration> for Instant {
-    type Output = Self;
-
-    fn add(self, rhs: Duration) -> Self::Output {
-        Self(self.0 + rhs.0)
-    }
-}
-
-impl AddAssign<Duration> for Instant {
-    fn add_assign(&mut self, rhs: Duration) {
-        self.0 += rhs.0;
-    }
-}
-
-impl PartialOrd for Instant {
-    fn partial_cmp(&self, rhs: &Self) -> Option<std::cmp::Ordering> {
-        self.0.partial_cmp(&rhs.0)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Duration(pub f64);
-
-impl Duration {
-    pub const ZERO: Self = Self(0.0);
-}
-
-impl Add for Duration {
+impl Add for Nanoseconds {
     type Output = Self;
 
     fn add(self, rhs: Self) -> Self::Output {
@@ -88,7 +26,13 @@ impl Add for Duration {
     }
 }
 
-impl Sub for Duration {
+impl AddAssign for Nanoseconds {
+    fn add_assign(&mut self, rhs: Self) {
+        self.0 += rhs.0;
+    }
+}
+
+impl Sub for Nanoseconds {
     type Output = Self;
 
     fn sub(self, rhs: Self) -> Self::Output {
@@ -96,78 +40,65 @@ impl Sub for Duration {
     }
 }
 
-impl Div for Duration {
-    type Output = f64;
-
-    fn div(self, rhs: Self) -> Self::Output {
-        self.0 / rhs.0
+impl SubAssign for Nanoseconds {
+    fn sub_assign(&mut self, rhs: Self) {
+        self.0 -= rhs.0;
     }
 }
 
-impl Div<f64> for Duration {
-    type Output = Self;
-
-    fn div(self, rhs: f64) -> Self::Output {
-        Self(self.0 / rhs)
-    }
-}
-
-impl Div<Duration> for f64 {
-    type Output = f64;
-
-    fn div(self, rhs: Duration) -> Self::Output {
-        self / rhs.0
-    }
-}
-
-impl Mul<f64> for Duration {
+impl Mul<f64> for Nanoseconds {
     type Output = Self;
 
     fn mul(self, rhs: f64) -> Self::Output {
+        let rhs = (rhs * NANOSECONDS_PER_SECOND as f64).floor() as i64;
         Self(self.0 * rhs)
     }
 }
 
-impl Mul<Duration> for f64 {
-    type Output = Duration;
+impl Div<f64> for Nanoseconds {
+    type Output = Self;
 
-    fn mul(self, rhs: Duration) -> Self::Output {
-        Duration(self * rhs.0)
+    fn div(self, rhs: f64) -> Self::Output {
+        let rhs = (rhs * NANOSECONDS_PER_SECOND as f64).floor() as i64;
+        Self(self.0 / rhs)
     }
 }
 
-impl PartialOrd for Duration {
-    fn partial_cmp(&self, rhs: &Self) -> Option<std::cmp::Ordering> {
-        self.0.partial_cmp(&rhs.0)
+impl Div for Nanoseconds {
+    type Output = f64;
+
+    fn div(self, rhs: Self) -> Self::Output {
+        let lhs_seconds = self.0 / NANOSECONDS_PER_SECOND;
+        let rhs_seconds = rhs.0 / NANOSECONDS_PER_SECOND;
+        let div_seconds = lhs_seconds as f64 / rhs_seconds as f64;
+
+        let lhs_nanos = self.0 % NANOSECONDS_PER_SECOND;
+        let rhs_nanos = rhs.0 % NANOSECONDS_PER_SECOND;
+        let div_nanos = lhs_nanos as f64 / rhs_nanos as f64;
+
+        div_seconds + div_nanos
     }
 }
 
-impl PartialEq<f64> for Duration {
-    fn eq(&self, rhs: &f64) -> bool {
-        self.0 == *rhs
+impl From<Hertz> for Nanoseconds {
+    fn from(hertz: Hertz) -> Self {
+        hertz.to_period()
     }
 }
 
-impl PartialEq<Duration> for f64 {
-    fn eq(&self, rhs: &Duration) -> bool {
-        *self == rhs.0
-    }
-}
+#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
+pub struct Hertz(pub f64);
 
-impl PartialOrd<f64> for Duration {
-    fn partial_cmp(&self, rhs: &f64) -> Option<std::cmp::Ordering> {
-        self.0.partial_cmp(rhs)
+impl Hertz {
+    pub fn from_period(period: Nanoseconds) -> Self {
+        let period_s = period.0 as f64 / NANOSECONDS_PER_SECOND as f64;
+        let hz = 1.0 / period_s;
+        Self(hz)
     }
-}
 
-impl Sum for Duration {
-    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        iter.fold(Self::ZERO, |a, b| a + b)
-    }
-}
-
-impl<'a> Sum<&'a Duration> for Duration {
-    fn sum<I: Iterator<Item = &'a Self>>(iter: I) -> Self {
-        iter.fold(Self::ZERO, |a, b| a + *b)
+    pub fn to_period(self) -> Nanoseconds {
+        let period_s = 1.0 / self.0;
+        let period_n = period_s * NANOSECONDS_PER_SECOND as f64;
+        Nanoseconds(period_n.floor() as i64)
     }
 }

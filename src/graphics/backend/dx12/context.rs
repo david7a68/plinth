@@ -32,12 +32,11 @@ use windows::{
 };
 
 use crate::{
-    frame::FramesPerSecond,
     geometry::image,
     geometry::window::{DpiScale, WindowSize},
     graphics::{backend::SubmitId, FrameInfo},
     limits::MAX_WINDOW_DIMENSION,
-    system::time::Instant,
+    time::{FramesPerSecond, PresentPeriod, PresentTime},
 };
 
 use super::{
@@ -173,7 +172,7 @@ impl Context {
             frame_counter: 0,
             target_frame_rate: None,
             is_visible: false,
-            composition_rate: FramesPerSecond::ZERO,
+            composition_rate: FramesPerSecond::default(),
             is_drag_resizing: false,
             deferred_resize: None,
         }
@@ -214,16 +213,16 @@ impl Context {
                 let mut stats = DXGI_FRAME_STATISTICS::default();
                 unsafe { self.swapchain.GetFrameStatistics(&mut stats) }
                     .ok()
-                    .map_or(Instant::ZERO, |()| {
+                    .map_or(PresentTime::default(), |()| {
                         #[allow(clippy::cast_sign_loss)]
-                        Instant::from_ticks(stats.SyncQPCTime)
+                        PresentTime::from_qpc_time(stats.SyncQPCTime)
                     })
             };
 
             let next_present_time = {
-                let now = Instant::now();
+                let now = PresentTime::now();
                 let mut time = prev_present_time;
-                let frame_time = self.composition_rate.frame_time();
+                let frame_time = self.composition_rate.into();
 
                 while time < now {
                     time += frame_time;
@@ -234,8 +233,10 @@ impl Context {
 
             FrameInfo {
                 target_frame_rate: self.target_frame_rate,
-                prev_present_time,
+                vblank_period: PresentPeriod::default(),
                 next_present_time,
+                prev_present_time,
+                prev_target_present_time: PresentTime::default(),
             }
         };
 

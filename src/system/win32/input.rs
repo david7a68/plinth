@@ -38,8 +38,10 @@ pub(crate) fn wheel_axis(msg: u32) -> Option<ScrollAxis> {
 }
 
 pub(crate) fn mouse_coords(lparam: LPARAM) -> WindowPoint {
-    let x = i32::try_from(lparam.0 & 0xffff).unwrap();
-    let y = i32::try_from((lparam.0 >> 16) & 0xffff).unwrap();
+    #[allow(clippy::cast_possible_truncation)]
+    let x = (lparam.0 & 0xffff) as i32;
+    #[allow(clippy::cast_possible_truncation)]
+    let y = ((lparam.0 >> 16) & 0xffff) as i32;
     WindowPoint { x, y }
 }
 

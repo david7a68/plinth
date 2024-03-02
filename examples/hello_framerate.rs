@@ -1,13 +1,14 @@
-const STARTING_REFRESH_RATE: FramesPerSecond = FramesPerSecond(60.0);
+use plinth::{
+    graphics::{Canvas, Color, FrameInfo, GraphicsConfig},
+    system::window::{Window, WindowAttributes},
+    time::{FramesPerSecond, PresentTime},
+    AppContext, Application, EventHandler,
+};
+
+const STARTING_REFRESH_RATE: FramesPerSecond = FramesPerSecond::new(60.0);
 
 // // consume 100ms per frame (10fps), the clock should correct accordingly
 // // const SLEEP_PER_FRAME: Duration = Duration::from_millis(100);
-
-use plinth::{
-    time::{FramesPerSecond, Instant, SecondsPerFrame},
-    AppContext, Application, Canvas, Color, EventHandler, FrameInfo, GraphicsConfig, Window,
-    WindowAttributes,
-};
 
 #[cfg(feature = "profile")]
 use tracing_subscriber::layer::SubscriberExt;
@@ -35,7 +36,7 @@ pub fn main() {
 
 pub struct AppWindow {
     refresh_rate: FramesPerSecond,
-    prev_draw_start_time: Instant,
+    prev_draw_start_time: PresentTime,
 }
 
 pub struct App {}
@@ -44,7 +45,7 @@ impl EventHandler<AppWindow> for App {
     fn start(&mut self, app: &plinth::AppContext<AppWindow>) {
         app.create_window(WindowAttributes::default(), |_| AppWindow {
             refresh_rate: STARTING_REFRESH_RATE,
-            prev_draw_start_time: Instant::now(),
+            prev_draw_start_time: PresentTime::now(),
         })
         .unwrap();
     }
@@ -70,13 +71,13 @@ impl EventHandler<AppWindow> for App {
     ) {
         let this = window.data_mut();
 
-        let now = Instant::now();
+        let now = PresentTime::now();
         let elapsed = now - this.prev_draw_start_time;
         this.prev_draw_start_time = now;
 
         canvas.clear(Color::BLUE);
 
-        let instantaneous_frame_rate = SecondsPerFrame(elapsed).as_frames_per_second();
+        let instantaneous_frame_rate = FramesPerSecond::from_period(elapsed);
 
         tracing::info!(
                 "repaint:\n    prev present time: {:?}\n    present time: {:?}\n    frame budget: {:?}\n    target refresh rate: {:?}\n    provided refresh rate: {:?}\n    estimated refresh rate: {:?}",

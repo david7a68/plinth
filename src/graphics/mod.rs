@@ -5,10 +5,7 @@ mod primitives;
 use windows::Win32::Foundation::HWND;
 
 use crate::{
-    geometry::{
-        image,
-        window::{DpiScale, WindowSize},
-    },
+    geometry::{DpiScale, Extent, Pixel, Rect, Wixel},
     system::power::PowerPreference,
     time::{FramesPerSecond, PresentPeriod, PresentTime},
 };
@@ -93,17 +90,17 @@ pub(crate) struct WindowContext {
 }
 
 impl WindowContext {
-    pub fn resize(&mut self, size: WindowSize) {
+    pub fn resize(&mut self, size: Extent<Wixel>) {
         match &mut self.context {
             #[cfg(target_os = "windows")]
             ContextImpl::Dx12(context) => context.resize(size),
         }
     }
 
-    pub fn change_dpi(&mut self, scale: DpiScale, size: WindowSize) {
+    pub fn change_dpi(&mut self, dpi: DpiScale, size: Extent<Wixel>) {
         match &mut self.context {
             #[cfg(target_os = "windows")]
-            ContextImpl::Dx12(context) => context.change_dpi(size, scale),
+            ContextImpl::Dx12(context) => context.change_dpi(size, dpi),
         }
     }
 
@@ -131,7 +128,7 @@ pub struct Canvas<'a> {
 
 impl Canvas<'_> {
     #[must_use]
-    pub fn region(&self) -> image::Rect {
+    pub fn region(&self) -> Rect<Pixel> {
         match &self.canvas {
             #[cfg(target_os = "windows")]
             CanvasImpl::Dx12(canvas) => canvas.region(),

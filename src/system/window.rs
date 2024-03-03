@@ -1,9 +1,11 @@
 use std::borrow::Cow;
 
-use crate::time::FramesPerSecond;
-
 use super::platform_impl;
-use crate::geometry::window::{DpiScale, WindowPoint, WindowSize};
+
+use crate::{
+    geometry::{DpiScale, Extent, Point, Wixel},
+    time::FramesPerSecond,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum WindowError {
@@ -35,10 +37,10 @@ pub enum PaintReason {
 
 pub struct WindowAttributes {
     pub title: Cow<'static, str>,
-    pub size: Option<WindowSize>,
-    pub min_size: Option<WindowSize>,
-    pub max_size: Option<WindowSize>,
-    pub position: Option<WindowPoint>,
+    pub size: Option<Extent<Wixel>>,
+    pub min_size: Option<Extent<Wixel>>,
+    pub max_size: Option<Extent<Wixel>>,
+    pub position: Option<Point<Wixel>>,
     pub is_visible: bool,
     pub is_resizable: bool,
 }
@@ -51,25 +53,25 @@ impl WindowAttributes {
     }
 
     #[must_use]
-    pub fn with_size(mut self, size: WindowSize) -> Self {
+    pub fn with_size(mut self, size: Extent<Wixel>) -> Self {
         self.size = Some(size);
         self
     }
 
     #[must_use]
-    pub fn with_min_size(mut self, min_size: WindowSize) -> Self {
+    pub fn with_min_size(mut self, min_size: Extent<Wixel>) -> Self {
         self.min_size = Some(min_size);
         self
     }
 
     #[must_use]
-    pub fn with_max_size(mut self, max_size: WindowSize) -> Self {
+    pub fn with_max_size(mut self, max_size: Extent<Wixel>) -> Self {
         self.max_size = Some(max_size);
         self
     }
 
     #[must_use]
-    pub fn with_position(mut self, position: WindowPoint) -> Self {
+    pub fn with_position(mut self, position: Point<Wixel>) -> Self {
         self.position = Some(position);
         self
     }
@@ -165,38 +167,38 @@ impl<'a, Data> Window<'a, Data> {
     }
 
     #[must_use]
-    pub fn size(&self) -> WindowSize {
+    pub fn size(&self) -> Extent<Wixel> {
         self.window.size()
     }
 
-    pub fn set_size(&mut self, size: WindowSize) {
+    pub fn set_size(&mut self, size: Extent<Wixel>) {
         self.window.set_size(size);
     }
 
     #[must_use]
-    pub fn min_size(&self) -> WindowSize {
+    pub fn min_size(&self) -> Extent<Wixel> {
         self.window.min_size()
     }
 
-    pub fn set_min_size(&mut self, min_size: WindowSize) {
+    pub fn set_min_size(&mut self, min_size: Extent<Wixel>) {
         self.window.set_min_size(min_size);
     }
 
     #[must_use]
-    pub fn max_size(&self) -> WindowSize {
+    pub fn max_size(&self) -> Extent<Wixel> {
         self.window.max_size()
     }
 
-    pub fn set_max_size(&mut self, max_size: WindowSize) {
+    pub fn set_max_size(&mut self, max_size: Extent<Wixel>) {
         self.window.set_max_size(max_size);
     }
 
     #[must_use]
-    pub fn position(&self) -> WindowPoint {
+    pub fn position(&self) -> Point<Wixel> {
         self.window.position()
     }
 
-    pub fn set_position(&mut self, position: WindowPoint) {
+    pub fn set_position(&mut self, position: Point<Wixel>) {
         self.window.set_position(position);
     }
 

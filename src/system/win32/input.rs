@@ -10,7 +10,7 @@ use windows::Win32::{
 };
 
 use crate::{
-    geometry::window::WindowPoint,
+    geometry::{Point, Wixel},
     system::input::{ButtonState, ModifierKeys, MouseButton, ScrollAxis},
 };
 
@@ -37,12 +37,16 @@ pub(crate) fn wheel_axis(msg: u32) -> Option<ScrollAxis> {
     }
 }
 
-pub(crate) fn mouse_coords(lparam: LPARAM) -> WindowPoint {
+pub(crate) fn mouse_coords(lparam: LPARAM) -> Point<Wixel> {
     #[allow(clippy::cast_possible_truncation)]
-    let x = (lparam.0 & 0xffff) as i32;
+    let x = (lparam.0 & 0xffff) as i16;
     #[allow(clippy::cast_possible_truncation)]
-    let y = ((lparam.0 >> 16) & 0xffff) as i32;
-    WindowPoint { x, y }
+    let y = ((lparam.0 >> 16) & 0xffff) as i16;
+
+    Point {
+        x: Wixel(x),
+        y: Wixel(y),
+    }
 }
 
 pub(crate) fn mouse_modifiers(wparam: WPARAM) -> ModifierKeys {

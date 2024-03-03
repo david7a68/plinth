@@ -1,5 +1,5 @@
 use crate::{
-    geometry::image,
+    geometry::{Pixel, Rect},
     graphics::{Color, RoundRect},
     limits::enforce_draw_list_max_commands_u32,
 };
@@ -14,8 +14,13 @@ pub struct RRect {
 impl From<RoundRect> for RRect {
     #[inline]
     fn from(value: RoundRect) -> Self {
+        let x = value.rect.x.0;
+        let y = value.rect.y.0;
+        let w = value.rect.width.0;
+        let h = value.rect.height.0;
+
         Self {
-            xywh: value.rect.to_xywh(),
+            xywh: [x, y, w, h],
             color: value.color.to_array_f32(),
         }
     }
@@ -32,7 +37,7 @@ pub enum DrawCommand {
 #[repr(align(16))]
 pub struct DrawList {
     pub(super) rects: Vec<RRect>,
-    pub(super) areas: Vec<image::Rect>,
+    pub(super) areas: Vec<Rect<Pixel>>,
     pub(super) clears: Vec<Color>,
     pub(super) commands: Vec<(DrawCommand, u32)>,
 
@@ -66,11 +71,11 @@ impl DrawList {
 
 pub struct Canvas<'a> {
     draw_list: &'a mut DrawList,
-    region: image::Rect,
+    region: Rect<Pixel>,
 }
 
 impl<'a> Canvas<'a> {
-    pub fn new(draw_list: &'a mut DrawList, region: image::Rect) -> Self {
+    pub fn new(draw_list: &'a mut DrawList, region: Rect<Pixel>) -> Self {
         draw_list.rects.clear();
         draw_list.areas.clear();
         draw_list.clears.clear();
@@ -82,7 +87,7 @@ impl<'a> Canvas<'a> {
         Self { draw_list, region }
     }
 
-    pub fn region(&self) -> image::Rect {
+    pub fn region(&self) -> Rect<Pixel> {
         self.region
     }
 
@@ -104,20 +109,20 @@ impl<'a> Canvas<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::pixel;
+    use crate::geometry::{Pixel, Rect};
 
     #[test]
     fn draw_list() {
         let mut list = DrawList::new();
-        let mut canvas = Canvas::new(&mut list, image::Rect::new(0, 0, 100, 100));
+        let mut canvas = Canvas::new(&mut list, Rect::new((0.0, 0.0), (100.0, 100.0)));
 
         canvas.clear(Color::WHITE);
         canvas.draw_rect(RoundRect {
-            rect: pixel::Rect::ZERO,
+            rect: Rect::<Pixel>::ZERO,
             color: Color::BLACK,
         });
         canvas.draw_rect(RoundRect {
-            rect: pixel::Rect::ZERO,
+            rect: Rect::<Pixel>::ZERO,
             color: Color::BLACK,
         });
 

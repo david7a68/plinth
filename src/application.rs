@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use crate::{
-    geometry::window::{DpiScale, WindowPoint, WindowSize},
+    geometry::{DpiScale, Extent, Point, Wixel},
     graphics::{Canvas, FrameInfo, Graphics, GraphicsConfig, WindowContext},
     system::{
         event_loop::{ActiveEventLoop, EventHandler as SysEventHandler, EventLoop, EventLoopError},
@@ -146,7 +146,7 @@ pub trait EventHandler<WindowData> {
         &mut self,
         app: &AppContext<WindowData>,
         window: &mut Window<WindowData>,
-        size: WindowSize,
+        size: Extent<Wixel>,
     ) {
     }
 
@@ -155,7 +155,7 @@ pub trait EventHandler<WindowData> {
         app: &AppContext<WindowData>,
         window: &mut Window<WindowData>,
         dpi: DpiScale,
-        size: WindowSize,
+        size: Extent<Wixel>,
     ) {
     }
 
@@ -178,7 +178,7 @@ pub trait EventHandler<WindowData> {
         &mut self,
         app: &AppContext<WindowData>,
         window: &mut Window<WindowData>,
-        position: WindowPoint,
+        position: Point<Wixel>,
     ) {
     }
 
@@ -212,7 +212,7 @@ pub trait EventHandler<WindowData> {
         window: &mut Window<WindowData>,
         button: MouseButton,
         state: ButtonState,
-        position: WindowPoint,
+        position: Point<Wixel>,
         modifiers: ModifierKeys,
     ) {
     }
@@ -231,7 +231,7 @@ pub trait EventHandler<WindowData> {
         &mut self,
         app: &AppContext<WindowData>,
         window: &mut Window<WindowData>,
-        position: WindowPoint,
+        position: Point<Wixel>,
     ) {
     }
 
@@ -239,7 +239,7 @@ pub trait EventHandler<WindowData> {
         &mut self,
         app: &AppContext<WindowData>,
         window: &mut Window<WindowData>,
-        position: WindowPoint,
+        position: Point<Wixel>,
     ) {
     }
 
@@ -359,7 +359,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
         &mut self,
         event_loop: &ActiveEventLoop<(WindowState, UserData)>,
         window: Window<(WindowState, UserData)>,
-        size: WindowSize,
+        size: Extent<Wixel>,
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (meta, mut wn) = window.split();
@@ -373,7 +373,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
         event_loop: &ActiveEventLoop<(WindowState, UserData)>,
         window: Window<(WindowState, UserData)>,
         dpi: DpiScale,
-        size: WindowSize,
+        size: Extent<Wixel>,
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (meta, mut wn) = window.split();
@@ -446,7 +446,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
         &mut self,
         event_loop: &ActiveEventLoop<(WindowState, UserData)>,
         window: Window<(WindowState, UserData)>,
-        position: WindowPoint,
+        position: Point<Wixel>,
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (_, mut wn) = window.split();
@@ -507,7 +507,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
         window: Window<(WindowState, UserData)>,
         button: MouseButton,
         state: ButtonState,
-        position: WindowPoint,
+        position: Point<Wixel>,
         modifiers: ModifierKeys,
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
@@ -534,7 +534,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
         &mut self,
         event_loop: &ActiveEventLoop<(WindowState, UserData)>,
         window: Window<(WindowState, UserData)>,
-        position: WindowPoint,
+        position: Point<Wixel>,
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (_, mut wn) = window.split();
@@ -545,7 +545,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
         &mut self,
         event_loop: &ActiveEventLoop<(WindowState, UserData)>,
         window: Window<(WindowState, UserData)>,
-        position: WindowPoint,
+        position: Point<Wixel>,
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (_, mut wn) = window.split();

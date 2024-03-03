@@ -32,8 +32,7 @@ use windows::{
 };
 
 use crate::{
-    geometry::image,
-    geometry::window::{DpiScale, WindowSize},
+    geometry::{DpiScale, Extent, Scale, Wixel},
     graphics::{backend::SubmitId, FrameInfo},
     limits::MAX_WINDOW_DIMENSION,
     time::{FramesPerSecond, PresentPeriod, PresentTime},
@@ -57,7 +56,7 @@ pub struct Context {
     swapchain_rtv_heap: ID3D12DescriptorHeap,
     swapchain_rtv: D3D12_CPU_DESCRIPTOR_HANDLE,
 
-    size: WindowSize,
+    size: Extent<Wixel>,
     scale: DpiScale,
 
     draw_list: DrawList,
@@ -73,7 +72,7 @@ pub struct Context {
 
     /// A resize event. Deferred until repaint to consolidate graphics work and
     /// in case multiple resize events are received in a single frame.
-    deferred_resize: Option<(WindowSize, DpiScale, Option<f32>)>,
+    deferred_resize: Option<(Extent<Wixel>, DpiScale, Option<f32>)>,
 }
 
 impl Context {
@@ -162,8 +161,8 @@ impl Context {
             target,
             visual,
             swapchain_ready: latency_event,
-            size: WindowSize::default(),
-            scale: DpiScale::default(),
+            size: Extent::default(),
+            scale: Scale::default(),
             swapchain_rtv_heap,
             swapchain_rtv,
             draw_list,
@@ -178,11 +177,11 @@ impl Context {
         }
     }
 
-    pub fn resize(&mut self, size: WindowSize) {
+    pub fn resize(&mut self, size: Extent<Wixel>) {
         self.deferred_resize = Some((size, self.scale, None));
     }
 
-    pub fn change_dpi(&mut self, size: WindowSize, scale: DpiScale) {
+    pub fn change_dpi(&mut self, size: Extent<Wixel>, scale: DpiScale) {
         self.deferred_resize = Some((size, scale, None));
     }
 
@@ -204,8 +203,8 @@ impl Context {
         }
 
         let canvas = {
-            let rect = self.size.into_rect().into();
-            Canvas::new(&mut self.draw_list, rect)
+            let scaled = self.size.scale_to(self.scale);
+            Canvas::new(&mut self.draw_list, scaled.into())
         };
 
         let timings = {
@@ -264,6 +263,7 @@ impl Context {
             &self.draw_list,
             frame,
             &image,
+            self.size,
             self.swapchain_rtv,
         );
 
@@ -363,7 +363,7 @@ pub fn image_barrier(
 #[tracing::instrument(skip(swapchain, idle))]
 pub fn resize_swapchain(
     swapchain: &IDXGISwapChain3,
-    size: WindowSize,
+    size: Extent<Wixel>,
     flex: Option<f32>,
     idle: impl Fn(),
 ) {
@@ -417,6 +417,7 @@ fn upload_draw_list(
     content: &DrawList,
     frame: &mut Frame,
     target: &ID3D12Resource,
+    target_size: Extent<Wixel>,
     target_rtv: D3D12_CPU_DESCRIPTOR_HANDLE,
 ) -> SubmitId {
     if let Some(submit_id) = frame.submit_id {
@@ -454,14 +455,11 @@ fn upload_draw_list(
         }
     }
 
-    let viewport: image::Box = {
-        assert!(content.commands[0].0 == DrawCommand::Begin);
-        content.areas[0].into()
-    };
+    assert!(content.commands[0].0 == DrawCommand::Begin);
 
     let viewport_scale = [
-        1.0 / f32::from(viewport.right),
-        1.0 / f32::from(viewport.bottom),
+        1.0 / f32::from(target_size.width),
+        1.0 / f32::from(target_size.height),
     ];
 
     let mut rect_idx = 0;
@@ -491,17 +489,17 @@ fn upload_draw_list(
                 frame.command_list.RSSetViewports(&[D3D12_VIEWPORT {
                     TopLeftX: 0.0,
                     TopLeftY: 0.0,
-                    Width: f32::from(viewport.right),
-                    Height: f32::from(viewport.bottom),
+                    Width: f32::from(target_size.width),
+                    Height: f32::from(target_size.height),
                     MinDepth: 0.0,
                     MaxDepth: 1.0,
                 }]);
 
                 frame.command_list.RSSetScissorRects(&[RECT {
-                    left: i32::from(viewport.left),
-                    top: i32::from(viewport.top),
-                    right: i32::from(viewport.right),
-                    bottom: i32::from(viewport.bottom),
+                    left: 0,
+                    top: 0,
+                    right: i32::from(target_size.width),
+                    bottom: i32::from(target_size.height),
                 }]);
             },
             DrawCommand::End => unsafe {
@@ -530,7 +528,7 @@ fn upload_draw_list(
                     &frame.command_list,
                     frame.buffer.as_ref().unwrap(),
                     viewport_scale,
-                    f32::from(viewport.bottom.checked_sub(viewport.top).unwrap()),
+                    f32::from(target_size.height),
                 );
 
                 unsafe { frame.command_list.DrawInstanced(4, num_rects, 0, rect_idx) };

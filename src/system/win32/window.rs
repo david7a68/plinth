@@ -28,7 +28,7 @@ use windows::{
 };
 
 use crate::{
-    geometry::window::{DpiScale, WindowPoint, WindowSize},
+    geometry::{DpiScale, Extent, Point, Scale, Wixel},
     system::{
         event_loop::EventHandler,
         input::{ButtonState, ModifierKeys, MouseButton, ScrollAxis},
@@ -80,8 +80,8 @@ pub struct CreateStruct<'a, WindowData> {
     /// Place to stash any errors that may occur during window creation.
     pub error: Result<(), api::WindowError>,
     pub title: Option<Cow<'static, str>>,
-    pub min_size: WindowSize,
-    pub max_size: WindowSize,
+    pub min_size: Extent<Wixel>,
+    pub max_size: Extent<Wixel>,
     pub is_visible: bool,
     pub is_resizable: bool,
 }
@@ -102,10 +102,10 @@ bitflags::bitflags! {
 
 pub(crate) struct WindowState {
     pub title: Cow<'static, str>,
-    pub size: WindowSize,
-    pub min_size: WindowSize,
-    pub max_size: WindowSize,
-    pub position: WindowPoint,
+    pub size: Extent<Wixel>,
+    pub min_size: Extent<Wixel>,
+    pub max_size: Extent<Wixel>,
+    pub position: Point<Wixel>,
     pub dpi: u16,
     pub flags: WindowFlags,
     pub paint_reason: Option<PaintReason>,
@@ -131,8 +131,11 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
             let dpi = unsafe { GetDpiForWindow(hwnd) };
             assert!(dpi > 0, "GetDpiForWindow failed.");
 
-            let mut default_rect = RECT::default();
-            unsafe { GetClientRect(hwnd, &mut default_rect) }.expect("GetClientRect failed.");
+            let (size, position) = {
+                let mut default_rect = RECT::default();
+                unsafe { GetClientRect(hwnd, &mut default_rect) }.expect("GetClientRect failed.");
+                unpack_rect(&default_rect)
+            };
 
             let mut flags = WindowFlags::empty();
 
@@ -146,16 +149,10 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
 
             WindowState {
                 title: unsafe { create_struct.title.take().unwrap_unchecked() },
-                size: WindowSize {
-                    width: (default_rect.right - default_rect.left) as _,
-                    height: (default_rect.bottom - default_rect.top) as _,
-                },
+                size,
                 max_size: create_struct.max_size,
                 min_size: create_struct.min_size,
-                position: WindowPoint {
-                    x: default_rect.left,
-                    y: default_rect.top,
-                },
+                position,
                 dpi: u16::try_from(dpi).unwrap(),
                 flags,
                 paint_reason: None,
@@ -234,10 +231,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
     }
 
     pub fn dpi_changed(&mut self, dpi: u16, rect: &RECT) {
-        let size = WindowSize {
-            width: rect.right - rect.left,
-            height: rect.bottom - rect.top,
-        };
+        let (size, _) = unpack_rect(rect);
 
         self.with_state(|window| {
             window.dpi = dpi;
@@ -258,9 +252,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
         }
         .expect("SetWindowPos failed.");
 
-        let scale = DpiScale {
-            factor: f32::from(dpi) / f32::from(DEFAULT_DPI),
-        };
+        let scale = Scale::new(f32::from(dpi) / f32::from(DEFAULT_DPI));
 
         self.event(|handler, event_loop, window| {
             handler.dpi_changed(event_loop, window, scale, size);
@@ -270,6 +262,9 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
     pub fn get_min_max_info(&mut self, mmi: &mut MINMAXINFO) {
         let (min, max, dpi) =
             self.with_state(|window| (window.min_size, window.max_size, u32::from(window.dpi)));
+
+        let min: Extent<i32> = min.cast();
+        let max: Extent<i32> = max.cast();
 
         let os_min_x = unsafe { GetSystemMetricsForDpi(SM_CXMINTRACK, dpi) };
         let os_min_y = unsafe { GetSystemMetricsForDpi(SM_CYMINTRACK, dpi) };
@@ -283,30 +278,32 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
     }
 
     pub fn pos_changed(&mut self, pos: &WINDOWPOS) {
-        let (x, y, width, height) = (pos.x, pos.y, pos.cx, pos.cy);
+        let x = i16::try_from(pos.x).unwrap().into();
+        let y = i16::try_from(pos.y).unwrap().into();
+        let width = i16::try_from(pos.cx).unwrap().into();
+        let height = i16::try_from(pos.cy).unwrap().into();
 
         let (resized, moved) = self.with_state(|window| {
-            (
-                {
-                    let resized = width != window.size.width || height != window.size.height;
-                    let is_start = resized && window.flags.contains(WindowFlags::IN_DRAG_RESIZE);
+            let resized = {
+                let resized = width != window.size.width || height != window.size.height;
+                let is_start = resized && window.flags.contains(WindowFlags::IN_DRAG_RESIZE);
 
-                    window.size = WindowSize { width, height };
-                    window.flags.set(WindowFlags::IS_RESIZING, true);
-                    window.paint_reason = resized
-                        .then_some(PaintReason::Commanded) // override if resized
-                        .or(window.paint_reason); // else keep the current reason
+                window.size = Extent { width, height };
+                window.flags.set(WindowFlags::IS_RESIZING, true);
+                window.paint_reason = resized
+                    .then_some(PaintReason::Commanded) // override if resized
+                    .or(window.paint_reason); // else keep the current reason
 
-                    resized.then_some((is_start, window.size))
-                },
-                {
-                    let moved = x != window.position.x || y != window.position.y;
+                resized.then_some((is_start, window.size))
+            };
 
-                    window.position = WindowPoint { x, y }; // doesn't matter if it's the same
+            let moved = {
+                let moved = x != window.position.x || y != window.position.y;
+                window.position = Point { x, y }; // doesn't matter if it's the same
+                moved.then_some(window.position)
+            };
 
-                    moved.then_some(window.position)
-                },
-            )
+            (resized, moved)
         });
 
         if let Some((start, size)) = resized {
@@ -353,7 +350,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
         self.event(|handler, event_loop, window| handler.needs_repaint(event_loop, window, reason));
     }
 
-    pub fn mouse_move(&mut self, position: WindowPoint) {
+    pub fn mouse_move(&mut self, position: Point<Wixel>) {
         let entered = self.with_state(|window| {
             let has_pointer = window.flags.contains(WindowFlags::HAS_POINTER);
             window.flags.set(WindowFlags::HAS_POINTER, true);
@@ -396,7 +393,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
         &mut self,
         button: MouseButton,
         state: ButtonState,
-        position: WindowPoint,
+        position: Point<Wixel>,
         mods: ModifierKeys,
     ) {
         self.event(|handler, event_loop, window| {
@@ -474,39 +471,39 @@ impl<'a, Data> Window<'a, Data> {
         todo!()
     }
 
-    pub fn size(&self) -> WindowSize {
+    pub fn size(&self) -> Extent<Wixel> {
         self.state.size
     }
 
     #[allow(unused_variables)]
-    pub fn set_size(&mut self, size: WindowSize) {
+    pub fn set_size(&mut self, size: Extent<Wixel>) {
         todo!()
     }
 
-    pub fn min_size(&self) -> WindowSize {
+    pub fn min_size(&self) -> Extent<Wixel> {
         self.state.min_size
     }
 
-    pub fn set_min_size(&mut self, min_size: WindowSize) {
+    pub fn set_min_size(&mut self, min_size: Extent<Wixel>) {
         let _ = min_size;
         todo!()
     }
 
-    pub fn max_size(&self) -> WindowSize {
+    pub fn max_size(&self) -> Extent<Wixel> {
         self.state.max_size
     }
 
-    pub fn set_max_size(&mut self, max_size: WindowSize) {
+    pub fn set_max_size(&mut self, max_size: Extent<Wixel>) {
         let _ = max_size;
         todo!()
     }
 
-    pub fn position(&self) -> WindowPoint {
+    pub fn position(&self) -> Point<Wixel> {
         self.state.position
     }
 
     #[allow(unused_variables)]
-    pub fn set_position(&mut self, position: WindowPoint) {
+    pub fn set_position(&mut self, position: Point<Wixel>) {
         todo!()
     }
 
@@ -528,7 +525,7 @@ impl<'a, Data> Window<'a, Data> {
 
     pub fn dpi_scale(&self) -> DpiScale {
         let factor = f32::from(self.state.dpi) / f32::from(DEFAULT_DPI);
-        DpiScale { factor }
+        Scale::new(factor)
     }
 
     pub fn has_focus(&self) -> bool {
@@ -608,4 +605,18 @@ pub fn post_defer_show(hwnd: HWND, show: SHOW_WINDOW_CMD) {
 pub fn from_defer_show(lparam: LPARAM) -> SHOW_WINDOW_CMD {
     #[allow(clippy::cast_possible_truncation)]
     SHOW_WINDOW_CMD(lparam.0 as _)
+}
+
+fn unpack_rect(rect: &RECT) -> (Extent<Wixel>, Point<Wixel>) {
+    let point = Point {
+        x: i16::try_from(rect.left).unwrap().into(),
+        y: i16::try_from(rect.top).unwrap().into(),
+    };
+
+    let extent = Extent {
+        width: i16::try_from(rect.right - rect.left).unwrap().into(),
+        height: i16::try_from(rect.bottom - rect.top).unwrap().into(),
+    };
+
+    (extent, point)
 }

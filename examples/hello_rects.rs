@@ -1,5 +1,5 @@
 use plinth::{
-    geometry::pixel::Rect,
+    geometry::Rect,
     graphics::{Canvas, Color, FrameInfo, GraphicsConfig, RoundRect},
     system::window::{Window, WindowAttributes},
     AppContext, Application, EventHandler,
@@ -52,9 +52,11 @@ impl EventHandler<AppWindow> for App {
         _frame: &FrameInfo,
     ) {
         canvas.clear(Color::BLACK);
-        canvas
-            .draw_rect(RoundRect::new(Rect::new(50.0, 100.0, 40.0, 70.0)).with_color(Color::BLUE));
-        canvas
-            .draw_rect(RoundRect::new(Rect::new(100.0, 100.0, 40.0, 70.0)).with_color(Color::RED));
+        canvas.draw_rect(
+            RoundRect::new(Rect::new((50.0, 100.0), (40.0, 70.0))).with_color(Color::BLUE),
+        );
+        canvas.draw_rect(
+            RoundRect::new(Rect::new((100.0, 100.0), (40.0, 70.0))).with_color(Color::RED),
+        );
     }
 }

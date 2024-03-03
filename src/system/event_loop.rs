@@ -4,7 +4,8 @@ use super::{
     power::{MonitorState, PowerPreference, PowerSource},
     window::{PaintReason, Window, WindowAttributes, WindowError},
 };
-use crate::geometry::window::{DpiScale, WindowPoint, WindowSize};
+
+use crate::geometry::{DpiScale, Extent, Point, Wixel};
 
 #[allow(clippy::module_name_repetitions)]
 #[derive(Debug, thiserror::Error)]
@@ -66,7 +67,7 @@ pub trait EventHandler<WindowData> {
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         window: Window<WindowData>,
-        size: WindowSize,
+        size: Extent<Wixel>,
     );
 
     fn dpi_changed(
@@ -74,7 +75,7 @@ pub trait EventHandler<WindowData> {
         event_loop: &ActiveEventLoop<WindowData>,
         window: Window<WindowData>,
         dpi: DpiScale,
-        size: WindowSize,
+        size: Extent<Wixel>,
     );
 
     fn close_requested(
@@ -97,7 +98,7 @@ pub trait EventHandler<WindowData> {
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         window: Window<WindowData>,
-        position: WindowPoint,
+        position: Point<Wixel>,
     );
 
     fn wake_requested(
@@ -132,7 +133,7 @@ pub trait EventHandler<WindowData> {
         window: Window<WindowData>,
         button: MouseButton,
         state: ButtonState,
-        position: WindowPoint,
+        position: Point<Wixel>,
         modifiers: ModifierKeys,
     );
 
@@ -149,14 +150,14 @@ pub trait EventHandler<WindowData> {
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         window: Window<WindowData>,
-        position: WindowPoint,
+        position: Point<Wixel>,
     );
 
     fn pointer_entered(
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         window: Window<WindowData>,
-        position: WindowPoint,
+        position: Point<Wixel>,
     );
 
     fn pointer_left(

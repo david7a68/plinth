@@ -6,10 +6,12 @@ use crate::system::time::{Hertz, Nanoseconds};
 pub struct FramesPerSecond(pub(crate) Hertz);
 
 impl FramesPerSecond {
+    #[must_use]
     pub const fn new(fps: f64) -> Self {
         Self(Hertz(fps))
     }
 
+    #[must_use]
     pub fn from_period(period: PresentPeriod) -> Self {
         Self(Hertz::from_period(period.0))
     }
@@ -19,10 +21,12 @@ impl FramesPerSecond {
 pub struct PresentTime(Nanoseconds);
 
 impl PresentTime {
+    #[must_use]
     pub fn now() -> Self {
         Self(Nanoseconds::now())
     }
 
+    #[must_use]
     pub(crate) fn from_qpc_time(ticks: i64) -> Self {
         Self(Nanoseconds::from_qpc_time(ticks))
     }

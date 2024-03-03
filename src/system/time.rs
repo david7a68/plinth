@@ -1,8 +1,9 @@
-use std::ops::{Add, AddAssign, Div, Mul, Sub, SubAssign};
+use std::ops::{Add, AddAssign, Sub, SubAssign};
 
 use super::platform_impl;
 
 pub(crate) const NANOSECONDS_PER_SECOND: i64 = 1_000_000_000;
+pub(crate) const NANOSECONDS_PER_SECOND_F64: f64 = 1_000_000_000.0;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Nanoseconds(pub i64);
@@ -46,40 +47,6 @@ impl SubAssign for Nanoseconds {
     }
 }
 
-impl Mul<f64> for Nanoseconds {
-    type Output = Self;
-
-    fn mul(self, rhs: f64) -> Self::Output {
-        let rhs = (rhs * NANOSECONDS_PER_SECOND as f64).floor() as i64;
-        Self(self.0 * rhs)
-    }
-}
-
-impl Div<f64> for Nanoseconds {
-    type Output = Self;
-
-    fn div(self, rhs: f64) -> Self::Output {
-        let rhs = (rhs * NANOSECONDS_PER_SECOND as f64).floor() as i64;
-        Self(self.0 / rhs)
-    }
-}
-
-impl Div for Nanoseconds {
-    type Output = f64;
-
-    fn div(self, rhs: Self) -> Self::Output {
-        let lhs_seconds = self.0 / NANOSECONDS_PER_SECOND;
-        let rhs_seconds = rhs.0 / NANOSECONDS_PER_SECOND;
-        let div_seconds = lhs_seconds as f64 / rhs_seconds as f64;
-
-        let lhs_nanos = self.0 % NANOSECONDS_PER_SECOND;
-        let rhs_nanos = rhs.0 % NANOSECONDS_PER_SECOND;
-        let div_nanos = lhs_nanos as f64 / rhs_nanos as f64;
-
-        div_seconds + div_nanos
-    }
-}
-
 impl From<Hertz> for Nanoseconds {
     fn from(hertz: Hertz) -> Self {
         hertz.to_period()
@@ -91,14 +58,20 @@ pub struct Hertz(pub f64);
 
 impl Hertz {
     pub fn from_period(period: Nanoseconds) -> Self {
-        let period_s = period.0 as f64 / NANOSECONDS_PER_SECOND as f64;
-        let hz = 1.0 / period_s;
-        Self(hz)
+        let period_s = period.0 / NANOSECONDS_PER_SECOND;
+        let period_n = period.0 % NANOSECONDS_PER_SECOND;
+
+        #[allow(clippy::cast_precision_loss)]
+        let period_f = period_s as f64 + period_n as f64 / NANOSECONDS_PER_SECOND_F64;
+
+        Self(1.0 / period_f)
     }
 
     pub fn to_period(self) -> Nanoseconds {
         let period_s = 1.0 / self.0;
-        let period_n = period_s * NANOSECONDS_PER_SECOND as f64;
+        let period_n = period_s * NANOSECONDS_PER_SECOND_F64;
+
+        #[allow(clippy::cast_possible_truncation)]
         Nanoseconds(period_n.floor() as i64)
     }
 }

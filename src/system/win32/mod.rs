@@ -36,7 +36,7 @@ use windows::{
 };
 
 use crate::{
-    geometry::window::WindowSize,
+    geometry::Extent,
     limits::{MAX_WINDOWS, MAX_WINDOW_TITLE_LENGTH},
 };
 
@@ -82,15 +82,17 @@ impl<WindowData> ActiveEventLoop<WindowData> {
         let style_ex = WS_EX_NOREDIRECTIONBITMAP;
 
         let min_size = attributes.min_size.unwrap_or_default();
-        let max_size = attributes.max_size.unwrap_or(WindowSize::MAX);
+        let max_size = attributes.max_size.unwrap_or(Extent::MAX);
 
-        let (width, height) = attributes
-            .size
-            .map_or((CW_USEDEFAULT, CW_USEDEFAULT), |s| (s.width, s.height));
+        let (width, height) = attributes.size.map_or((CW_USEDEFAULT, CW_USEDEFAULT), |s| {
+            (i32::from(s.width), i32::from(s.height))
+        });
 
         let (x, y) = attributes
             .position
-            .map_or((CW_USEDEFAULT, CW_USEDEFAULT), |p| (p.x, p.y));
+            .map_or((CW_USEDEFAULT, CW_USEDEFAULT), |p| {
+                (i32::from(p.x), i32::from(p.y))
+            });
 
         let mut opt = Some(constructor);
         let wrap_ctor = RefCell::new(|window: api::Window<()>| opt.take().unwrap()(window));

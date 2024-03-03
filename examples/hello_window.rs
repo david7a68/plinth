@@ -1,5 +1,5 @@
 use plinth::{
-    geometry::window::{DpiScale, WindowPoint, WindowSize},
+    geometry::{DpiScale, Extent, Point, Wixel},
     graphics::{Canvas, FrameInfo, GraphicsConfig},
     system::{
         input::{ButtonState, KeyCode, ModifierKeys, MouseButton, ScrollAxis},
@@ -73,7 +73,7 @@ impl EventHandler<()> for App {
         println!("Window drag resize ended");
     }
 
-    fn resized(&mut self, app: &AppContext<()>, window: &mut Window<()>, size: WindowSize) {
+    fn resized(&mut self, app: &AppContext<()>, window: &mut Window<()>, size: Extent<Wixel>) {
         println!("Window resized: {:?}", size);
     }
 
@@ -82,7 +82,7 @@ impl EventHandler<()> for App {
         app: &AppContext<()>,
         window: &mut Window<()>,
         dpi: DpiScale,
-        size: WindowSize,
+        size: Extent<Wixel>,
     ) {
         println!("Window DPI changed: {:?}", dpi);
         println!("Window size: {:?}", size);
@@ -113,7 +113,7 @@ impl EventHandler<()> for App {
         println!("Window restored");
     }
 
-    fn moved(&mut self, app: &AppContext<()>, window: &mut Window<()>, position: WindowPoint) {
+    fn moved(&mut self, app: &AppContext<()>, window: &mut Window<()>, position: Point<Wixel>) {
         println!("Window moved: {:?}", position);
     }
 
@@ -152,7 +152,7 @@ impl EventHandler<()> for App {
         window: &mut Window<()>,
         button: MouseButton,
         state: ButtonState,
-        position: WindowPoint,
+        position: Point<Wixel>,
         modifiers: ModifierKeys,
     ) {
         println!(
@@ -165,7 +165,7 @@ impl EventHandler<()> for App {
         &mut self,
         app: &AppContext<()>,
         window: &mut Window<()>,
-        position: WindowPoint,
+        position: Point<Wixel>,
     ) {
         println!("Mouse moved: {:?}", position);
     }
@@ -174,7 +174,7 @@ impl EventHandler<()> for App {
         &mut self,
         app: &AppContext<()>,
         window: &mut Window<()>,
-        position: WindowPoint,
+        position: Point<Wixel>,
     ) {
         println!("Mouse entered: {:?}", position);
     }

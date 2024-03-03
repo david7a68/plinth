@@ -1,15 +1,15 @@
-use crate::geometry::pixel::Rect;
+use crate::geometry::{Pixel, Rect};
 
 use super::Color;
 
 pub struct RoundRect {
-    pub rect: Rect,
+    pub rect: Rect<Pixel>,
     pub color: Color,
 }
 
 impl RoundRect {
     #[must_use]
-    pub fn new(rect: Rect) -> Self {
+    pub fn new(rect: Rect<Pixel>) -> Self {
         Self {
             rect,
             color: Color::BLACK,

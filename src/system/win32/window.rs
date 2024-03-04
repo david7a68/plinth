@@ -5,24 +5,17 @@ use std::{
     mem::MaybeUninit,
 };
 
-use windows::{
-    core::{w, PCWSTR},
-    Win32::{
-        Foundation::{
-            GetLastError, SetLastError, HWND, LPARAM, LRESULT, RECT, WIN32_ERROR, WPARAM,
-        },
-        Graphics::Gdi::{BeginPaint, EndPaint, InvalidateRect, HBRUSH, PAINTSTRUCT},
-        System::LibraryLoader::GetModuleHandleW,
-        UI::{
-            HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi},
-            Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT},
-            WindowsAndMessaging::{
-                DestroyWindow, GetClientRect, LoadCursorW, PostMessageW, RegisterClassExW,
-                SetWindowLongPtrW, SetWindowPos, ShowWindow, CS_HREDRAW, CS_VREDRAW, GWLP_USERDATA,
-                HICON, IDC_ARROW, MINMAXINFO, SET_WINDOW_POS_FLAGS, SHOW_WINDOW_CMD, SM_CXMAXTRACK,
-                SM_CXMINTRACK, SM_CYMAXTRACK, SM_CYMINTRACK, SW_HIDE, SW_NORMAL,
-                USER_DEFAULT_SCREEN_DPI, WINDOWPOS, WM_APP, WNDCLASSEXW,
-            },
+use windows::Win32::{
+    Foundation::{GetLastError, SetLastError, HWND, LPARAM, RECT, WIN32_ERROR},
+    Graphics::Gdi::{BeginPaint, EndPaint, InvalidateRect, PAINTSTRUCT},
+    UI::{
+        HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi},
+        Input::KeyboardAndMouse::{TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT},
+        WindowsAndMessaging::{
+            DestroyWindow, GetClientRect, PostMessageW, SetWindowLongPtrW, SetWindowPos,
+            ShowWindow, GWLP_USERDATA, MINMAXINFO, SET_WINDOW_POS_FLAGS, SHOW_WINDOW_CMD,
+            SM_CXMAXTRACK, SM_CXMINTRACK, SM_CYMAXTRACK, SM_CYMINTRACK, SW_HIDE, SW_NORMAL,
+            USER_DEFAULT_SCREEN_DPI, WINDOWPOS, WM_APP,
         },
     },
 };
@@ -50,8 +43,6 @@ pub(crate) const UM_DEFER_SHOW: u32 = WM_APP + 2;
 /// This is slightly less efficient since we need to round-trip into the message
 /// queue, but the simplicity was deemed worth it.
 pub(crate) const UM_DEFER_PAINT: u32 = WM_APP + 3;
-
-const WND_CLASS_NAME: PCWSTR = w!("plinth_wc");
 
 #[allow(clippy::cast_possible_truncation)]
 const DEFAULT_DPI: u16 = USER_DEFAULT_SCREEN_DPI as u16;
@@ -567,31 +558,18 @@ impl<'a, Meta, User> Window<'a, (Meta, User)> {
     }
 }
 
-pub(crate) fn register_wndclass(
-    wndproc: unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT,
-) -> windows::core::Result<PCWSTR> {
-    let atom = unsafe {
-        RegisterClassExW(&WNDCLASSEXW {
-            cbSize: u32::try_from(std::mem::size_of::<WNDCLASSEXW>()).unwrap(),
-            style: CS_HREDRAW | CS_VREDRAW,
-            lpfnWndProc: Some(wndproc),
-            cbClsExtra: 0,
-            cbWndExtra: 0,
-            hInstance: GetModuleHandleW(None).unwrap().into(),
-            hIcon: HICON::default(),
-            hCursor: LoadCursorW(None, IDC_ARROW).unwrap(),
-            hbrBackground: HBRUSH::default(),
-            lpszMenuName: PCWSTR::null(),
-            lpszClassName: WND_CLASS_NAME,
-            hIconSm: HICON::default(),
-        })
+fn unpack_rect(rect: &RECT) -> (Extent<Wixel>, Point<Wixel>) {
+    let point = Point {
+        x: i16::try_from(rect.left).unwrap().into(),
+        y: i16::try_from(rect.top).unwrap().into(),
     };
 
-    if atom == 0 {
-        unsafe { GetLastError() }?;
-    }
+    let extent = Extent {
+        width: i16::try_from(rect.right - rect.left).unwrap().into(),
+        height: i16::try_from(rect.bottom - rect.top).unwrap().into(),
+    };
 
-    Ok(PCWSTR(atom as usize as *const _))
+    (extent, point)
 }
 
 /// Add a message to the queue to show or hide a window. Necessary because
@@ -605,18 +583,4 @@ pub fn post_defer_show(hwnd: HWND, show: SHOW_WINDOW_CMD) {
 pub fn from_defer_show(lparam: LPARAM) -> SHOW_WINDOW_CMD {
     #[allow(clippy::cast_possible_truncation)]
     SHOW_WINDOW_CMD(lparam.0 as _)
-}
-
-fn unpack_rect(rect: &RECT) -> (Extent<Wixel>, Point<Wixel>) {
-    let point = Point {
-        x: i16::try_from(rect.left).unwrap().into(),
-        y: i16::try_from(rect.top).unwrap().into(),
-    };
-
-    let extent = Extent {
-        width: i16::try_from(rect.right - rect.left).unwrap().into(),
-        height: i16::try_from(rect.bottom - rect.top).unwrap().into(),
-    };
-
-    (extent, point)
 }

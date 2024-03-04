@@ -171,8 +171,6 @@ impl EventLoop {
             wndclass,
             event_handler: RefCell::new(event_handler),
 
-            in_size_move: Cell::new(false),
-
             hwnds: [(); MAX_WINDOWS].map(|()| Cell::new(HWND::default())),
             window_data: [(); MAX_WINDOWS].map(|()| RefCell::new(MaybeUninit::uninit())),
             window_states: [(); MAX_WINDOWS].map(|()| RefCell::new(MaybeUninit::uninit())),
@@ -232,8 +230,6 @@ impl EventLoop {
 struct WndProcState<WindowData, H: api::EventHandler<WindowData>> {
     wndclass: PCWSTR,
     event_handler: RefCell<H>,
-
-    in_size_move: Cell<bool>,
 
     hwnds: [Cell<HWND>; MAX_WINDOWS],
     window_data: [RefCell<MaybeUninit<WindowData>>; MAX_WINDOWS],
@@ -333,22 +329,8 @@ unsafe extern "system" fn unsafe_wndproc<WindowData, H: api::EventHandler<Window
             }
             UM_DEFER_SHOW => context.show_defer(from_defer_show(lparam)),
             WM_SHOWWINDOW => context.show(wparam.0 != 0),
-            WM_ENTERSIZEMOVE => {
-                assert!(
-                    !state.in_size_move.get(),
-                    "WM_ENTERSIZEMOVE while already in WM_ENTERSIZEMOVE"
-                );
-                state.in_size_move.set(true);
-                context.modal_loop_enter();
-            }
-            WM_EXITSIZEMOVE => {
-                assert!(
-                    state.in_size_move.get(),
-                    "WM_EXITSIZEMOVE without WM_ENTERSIZEMOVE"
-                );
-                state.in_size_move.set(false);
-                context.modal_loop_leave();
-            }
+            WM_ENTERSIZEMOVE => context.modal_loop_enter(),
+            WM_EXITSIZEMOVE => context.modal_loop_leave(),
             WM_DPICHANGED => {
                 let dpi = u16::try_from(wparam.0).expect("WM_DPICHANGED exceeded u16::MAX");
                 context.dpi_changed(dpi, cast_lparam_as_ref(lparam));

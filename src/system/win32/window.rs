@@ -206,22 +206,15 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
     }
 
     pub fn modal_loop_enter(&mut self) {
-        self.with_state(|window| {
-            assert!(
-                !window.flags.contains(WindowFlags::IN_DRAG_RESIZE),
-                "modal_loop_enter() does not nest"
-            );
-
-            window.flags.set(WindowFlags::IN_DRAG_RESIZE, true)
-        });
+        // This may be called more than once without first receiving a
+        // WM_EXITSIZEMOVE under certain conditions, so this operation must be
+        // idempotent. Not sure _why_ it's called more than once. -dz (2024-03-03)
+        self.with_state(|window| window.flags.set(WindowFlags::IN_DRAG_RESIZE, true));
     }
 
     pub fn modal_loop_leave(&mut self) {
         let resize_ended: bool = self.with_state(|window| {
-            assert!(
-                window.flags.contains(WindowFlags::IN_DRAG_RESIZE),
-                "modal_loop_leave() without matching enter_size_move()"
-            );
+            window.flags.remove(WindowFlags::IN_DRAG_RESIZE);
 
             let ended = window.flags.contains(WindowFlags::IS_RESIZING);
             window.flags.set(WindowFlags::IS_RESIZING, false);

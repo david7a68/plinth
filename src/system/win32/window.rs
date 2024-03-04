@@ -205,14 +205,26 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
         }
     }
 
-    pub fn enter_size_move(&mut self) {
-        self.with_state(|window| window.flags.set(WindowFlags::IN_DRAG_RESIZE, true));
+    pub fn modal_loop_enter(&mut self) {
+        self.with_state(|window| {
+            assert!(
+                !window.flags.contains(WindowFlags::IN_DRAG_RESIZE),
+                "modal_loop_enter() does not nest"
+            );
+
+            window.flags.set(WindowFlags::IN_DRAG_RESIZE, true)
+        });
     }
 
-    pub fn exit_size_move(&mut self) {
+    pub fn modal_loop_leave(&mut self) {
         let resize_ended: bool = self.with_state(|window| {
-            let ended = window.flags.contains(WindowFlags::IN_DRAG_RESIZE);
-            window.flags.set(WindowFlags::IN_DRAG_RESIZE, false);
+            assert!(
+                window.flags.contains(WindowFlags::IN_DRAG_RESIZE),
+                "modal_loop_leave() without matching enter_size_move()"
+            );
+
+            let ended = window.flags.contains(WindowFlags::IS_RESIZING);
+            window.flags.set(WindowFlags::IS_RESIZING, false);
             ended
         });
 
@@ -312,7 +324,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
         }
     }
 
-    pub fn defer_paint(&mut self) {
+    pub fn paint_defer(&mut self) {
         self.with_state(|window| {
             window.paint_reason = if let Some(reason) = window.paint_reason {
                 Some(reason.max(PaintReason::Requested))
@@ -374,7 +386,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
         self.event(EventHandler::pointer_left);
     }
 
-    pub fn wm_mouse_wheel(&mut self, axis: ScrollAxis, delta: f32, mods: ModifierKeys) {
+    pub fn mouse_wheel(&mut self, axis: ScrollAxis, delta: f32, mods: ModifierKeys) {
         self.event(|handler, event_loop, window| {
             handler.mouse_scrolled(event_loop, window, delta, axis, mods);
         });

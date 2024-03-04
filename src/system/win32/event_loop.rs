@@ -171,6 +171,8 @@ impl EventLoop {
             wndclass,
             event_handler: RefCell::new(event_handler),
 
+            in_size_move: Cell::new(false),
+
             hwnds: [(); MAX_WINDOWS].map(|()| Cell::new(HWND::default())),
             window_data: [(); MAX_WINDOWS].map(|()| RefCell::new(MaybeUninit::uninit())),
             window_states: [(); MAX_WINDOWS].map(|()| RefCell::new(MaybeUninit::uninit())),
@@ -231,6 +233,8 @@ struct WndProcState<WindowData, H: api::EventHandler<WindowData>> {
     wndclass: PCWSTR,
     event_handler: RefCell<H>,
 
+    in_size_move: Cell<bool>,
+
     hwnds: [Cell<HWND>; MAX_WINDOWS],
     window_data: [RefCell<MaybeUninit<WindowData>>; MAX_WINDOWS],
     window_states: [RefCell<MaybeUninit<WindowState>>; MAX_WINDOWS],
@@ -280,7 +284,7 @@ unsafe extern "system" fn unsafe_wndproc<WindowData, H: api::EventHandler<Window
 
         let mut cs = {
             // let cs = &*(lparam.0 as *const CREATESTRUCTW);
-            let cs: &CREATESTRUCTW = lparam_as_ref(lparam);
+            let cs: &CREATESTRUCTW = cast_lparam_as_ref(lparam);
             let cs = &*(cs.lpCreateParams as *const RefCell<CreateStruct<WindowData>>);
             cs.borrow_mut()
         };
@@ -329,14 +333,29 @@ unsafe extern "system" fn unsafe_wndproc<WindowData, H: api::EventHandler<Window
             }
             UM_DEFER_SHOW => context.show_defer(from_defer_show(lparam)),
             WM_SHOWWINDOW => context.show(wparam.0 != 0),
-            WM_ENTERSIZEMOVE => context.enter_size_move(),
-            WM_EXITSIZEMOVE => context.exit_size_move(),
-            WM_DPICHANGED => {
-                context.dpi_changed(u16::try_from(wparam.0).unwrap(), lparam_as_ref(lparam));
+            WM_ENTERSIZEMOVE => {
+                assert!(
+                    !state.in_size_move.get(),
+                    "WM_ENTERSIZEMOVE while already in WM_ENTERSIZEMOVE"
+                );
+                state.in_size_move.set(true);
+                context.modal_loop_enter();
             }
-            WM_GETMINMAXINFO => context.get_min_max_info(lparam_as_mut(lparam)),
-            WM_WINDOWPOSCHANGED => context.pos_changed(lparam_as_ref(lparam)),
-            UM_DEFER_PAINT => context.defer_paint(),
+            WM_EXITSIZEMOVE => {
+                assert!(
+                    state.in_size_move.get(),
+                    "WM_EXITSIZEMOVE without WM_ENTERSIZEMOVE"
+                );
+                state.in_size_move.set(false);
+                context.modal_loop_leave();
+            }
+            WM_DPICHANGED => {
+                let dpi = u16::try_from(wparam.0).expect("WM_DPICHANGED exceeded u16::MAX");
+                context.dpi_changed(dpi, cast_lparam_as_ref(lparam));
+            }
+            WM_GETMINMAXINFO => context.get_min_max_info(cast_lparam_as_mut(lparam)),
+            WM_WINDOWPOSCHANGED => context.pos_changed(cast_lparam_as_ref(lparam)),
+            UM_DEFER_PAINT => context.paint_defer(),
             WM_PAINT => context.paint(),
             WM_MOUSEMOVE => context.mouse_move(input::mouse_coords(lparam)),
             WM_MOUSELEAVE => context.mouse_leave(),
@@ -347,7 +366,7 @@ unsafe extern "system" fn unsafe_wndproc<WindowData, H: api::EventHandler<Window
                 let delta = f32::from((wparam.0 >> 16) as i16) / 120.0;
 
                 let mods = input::mouse_modifiers(wparam);
-                context.wm_mouse_wheel(axis, delta, mods);
+                context.mouse_wheel(axis, delta, mods);
             }
             msg @ WM_LBUTTONDOWN..=WM_MBUTTONDBLCLK => {
                 let (button, state) = input::mouse_button(msg).unwrap();
@@ -364,11 +383,11 @@ unsafe extern "system" fn unsafe_wndproc<WindowData, H: api::EventHandler<Window
     }
 }
 
-fn lparam_as_ref<T>(lparam: LPARAM) -> &'static T {
+fn cast_lparam_as_ref<T>(lparam: LPARAM) -> &'static T {
     unsafe { &*(lparam.0 as *const T) }
 }
 
-fn lparam_as_mut<T>(lparam: LPARAM) -> &'static mut T {
+fn cast_lparam_as_mut<T>(lparam: LPARAM) -> &'static mut T {
     unsafe { &mut *(lparam.0 as *mut T) }
 }
 

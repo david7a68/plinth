@@ -3,18 +3,13 @@ use std::borrow::Cow;
 use super::platform_impl;
 
 use crate::{
-    geometry::{DpiScale, Extent, Point, Wixel},
+    geometry::{Extent, Pixel, Point, Scale, Wixel},
+    limits,
     time::FramesPerSecond,
 };
 
 #[derive(Debug, thiserror::Error)]
 pub enum WindowError {
-    #[error(
-        "The window title exceeds {} characters.",
-        crate::limits::MAX_WINDOW_TITLE_LENGTH
-    )]
-    TitleTooLong,
-
     #[error("The maximum number of windows is open. Destroy one before creating another.")]
     TooManyWindows,
 
@@ -172,6 +167,7 @@ impl<'a, Data> Window<'a, Data> {
     }
 
     pub fn set_size(&mut self, size: Extent<Wixel>) {
+        limits::WINDOW_EXTENT.check(size);
         self.window.set_size(size);
     }
 
@@ -181,6 +177,7 @@ impl<'a, Data> Window<'a, Data> {
     }
 
     pub fn set_min_size(&mut self, min_size: Extent<Wixel>) {
+        limits::WINDOW_EXTENT.check(min_size);
         self.window.set_min_size(min_size);
     }
 
@@ -190,6 +187,7 @@ impl<'a, Data> Window<'a, Data> {
     }
 
     pub fn set_max_size(&mut self, max_size: Extent<Wixel>) {
+        limits::WINDOW_EXTENT.check(max_size);
         self.window.set_max_size(max_size);
     }
 
@@ -221,7 +219,7 @@ impl<'a, Data> Window<'a, Data> {
     }
 
     #[must_use]
-    pub fn dpi_scale(&self) -> DpiScale {
+    pub fn dpi_scale(&self) -> Scale<Wixel, Pixel> {
         self.window.dpi_scale()
     }
 

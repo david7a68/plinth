@@ -15,7 +15,7 @@ tracing = "0.1"
 windows-version = "0.1.0"
 
 [dependencies.windows]
-version = "0.53"
+version = "0.54"
 features = [
     "Win32_Foundation",
     "Win32_Devices_Display",

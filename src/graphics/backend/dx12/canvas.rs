@@ -14,13 +14,8 @@ pub struct RRect {
 impl From<RoundRect> for RRect {
     #[inline]
     fn from(value: RoundRect) -> Self {
-        let x = value.rect.x.0;
-        let y = value.rect.y.0;
-        let w = value.rect.width.0;
-        let h = value.rect.height.0;
-
         Self {
-            xywh: [x, y, w, h],
+            xywh: value.rect.to_xywh().map(|x| x.0),
             color: value.color.to_array_f32(),
         }
     }

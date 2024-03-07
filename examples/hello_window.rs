@@ -1,5 +1,5 @@
 use plinth::{
-    geometry::{DpiScale, Extent, Point, Wixel},
+    geometry::{Extent, Pixel, Point, Scale, Wixel},
     graphics::{Canvas, FrameInfo, GraphicsConfig},
     system::{
         input::{ButtonState, KeyCode, ModifierKeys, MouseButton, ScrollAxis},
@@ -94,7 +94,7 @@ impl EventHandler<()> for App {
         &mut self,
         app: &AppContext<()>,
         window: &mut Window<()>,
-        dpi: DpiScale,
+        dpi: Scale<Wixel, Pixel>,
         size: Extent<Wixel>,
     ) {
         println!("Window DPI changed: {:?}", dpi);

@@ -21,7 +21,8 @@ use windows::Win32::{
 };
 
 use crate::{
-    geometry::{DpiScale, Extent, Point, Scale, Wixel},
+    geometry::{Extent, Pixel, Point, Scale, Wixel},
+    limits,
     system::{
         event_loop::EventHandler,
         input::{ButtonState, ModifierKeys, MouseButton, ScrollAxis},
@@ -112,6 +113,10 @@ pub(crate) struct HandlerContext<'a, WindowData, H: EventHandler<WindowData>> {
 
 impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData, H> {
     pub fn init(&mut self, hwnd: HWND, create_struct: &mut CreateStruct<WindowData>) {
+        limits::MAX_WINDOW_TITLE_LENGTH.check(create_struct.title.as_ref().unwrap());
+        limits::WINDOW_EXTENT.check(create_struct.min_size);
+        limits::WINDOW_EXTENT.check(create_struct.max_size);
+
         self.hwnd.set(hwnd);
 
         unsafe { SetLastError(WIN32_ERROR(0)) };
@@ -269,24 +274,30 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
         let os_max_x = unsafe { GetSystemMetricsForDpi(SM_CXMAXTRACK, dpi) };
         let os_max_y = unsafe { GetSystemMetricsForDpi(SM_CYMAXTRACK, dpi) };
 
-        mmi.ptMinTrackSize.x = min.width.max(os_min_x);
-        mmi.ptMinTrackSize.y = min.height.max(os_min_y);
-        mmi.ptMaxTrackSize.x = max.width.min(os_max_x);
-        mmi.ptMaxTrackSize.y = max.height.min(os_max_y);
+        let new_min = min.max(&Extent::new(os_min_x, os_min_y));
+        let new_max = max.min(&Extent::new(os_max_x, os_max_y));
+
+        limits::WINDOW_EXTENT.check(new_min);
+        limits::WINDOW_EXTENT.check(new_max);
+
+        mmi.ptMinTrackSize.x = new_min.width;
+        mmi.ptMinTrackSize.y = new_min.height;
+        mmi.ptMaxTrackSize.x = new_max.width;
+        mmi.ptMaxTrackSize.y = new_max.height;
     }
 
     pub fn pos_changed(&mut self, pos: &WINDOWPOS) {
-        let x = i16::try_from(pos.x).unwrap().into();
-        let y = i16::try_from(pos.y).unwrap().into();
-        let width = i16::try_from(pos.cx).unwrap().into();
-        let height = i16::try_from(pos.cy).unwrap().into();
+        let x = i16::try_from(pos.x).unwrap();
+        let y = i16::try_from(pos.y).unwrap();
+        let width = i16::try_from(pos.cx).unwrap();
+        let height = i16::try_from(pos.cy).unwrap();
 
         let (resized, moved) = self.with_state(|window| {
             let resized = {
                 let resized = width != window.size.width || height != window.size.height;
                 let is_start = resized && window.flags.contains(WindowFlags::IN_DRAG_RESIZE);
 
-                window.size = Extent { width, height };
+                window.size = Extent::new(width, height);
                 window.flags.set(WindowFlags::IS_RESIZING, true);
                 window.paint_reason = resized
                     .then_some(PaintReason::Commanded) // override if resized
@@ -297,7 +308,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
 
             let moved = {
                 let moved = x != window.position.x || y != window.position.y;
-                window.position = Point { x, y }; // doesn't matter if it's the same
+                window.position = Point::new(x, y); // doesn't matter if it's the same
                 moved.then_some(window.position)
             };
 
@@ -521,7 +532,7 @@ impl<'a, Data> Window<'a, Data> {
         self.state.flags.contains(WindowFlags::IS_RESIZABLE)
     }
 
-    pub fn dpi_scale(&self) -> DpiScale {
+    pub fn dpi_scale(&self) -> Scale<Wixel, Pixel> {
         let factor = f32::from(self.state.dpi) / f32::from(DEFAULT_DPI);
         Scale::new(factor)
     }

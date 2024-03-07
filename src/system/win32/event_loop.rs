@@ -34,10 +34,7 @@ use windows::{
 
 const WND_CLASS_NAME: PCWSTR = w!("plinth_wc");
 
-use crate::{
-    geometry::Extent,
-    limits::{MAX_WINDOWS, MAX_WINDOW_TITLE_LENGTH},
-};
+use crate::limits::{self, MAX_WINDOWS, MAX_WINDOW_TITLE_LENGTH};
 
 use super::{
     api, input,
@@ -68,21 +65,22 @@ impl<WindowData> ActiveEventLoop<WindowData> {
         attributes: api::WindowAttributes,
         constructor: F,
     ) -> Result<(), api::WindowError> {
-        if attributes.title.as_ref().len() > MAX_WINDOW_TITLE_LENGTH {
-            return Err(api::WindowError::TitleTooLong);
-        }
+        MAX_WINDOW_TITLE_LENGTH.check(&attributes.title);
 
         let title = attributes
             .title
             .encode_utf16()
             .chain(std::iter::once(0))
-            .collect::<ArrayVec<_, { MAX_WINDOW_TITLE_LENGTH + 1 }>>();
+            .collect::<ArrayVec<_, { MAX_WINDOW_TITLE_LENGTH.get() + 1 }>>();
 
         let style = WS_OVERLAPPEDWINDOW;
         let style_ex = WS_EX_NOREDIRECTIONBITMAP;
 
-        let min_size = attributes.min_size.unwrap_or_default();
-        let max_size = attributes.max_size.unwrap_or(Extent::MAX);
+        let min_size = attributes.min_size.unwrap_or(limits::WINDOW_EXTENT.min());
+        let max_size = attributes.max_size.unwrap_or(limits::WINDOW_EXTENT.max());
+
+        limits::WINDOW_EXTENT.check(min_size);
+        limits::WINDOW_EXTENT.check(max_size);
 
         let (width, height) = attributes.size.map_or((CW_USEDEFAULT, CW_USEDEFAULT), |s| {
             (i32::from(s.width), i32::from(s.height))
@@ -171,9 +169,9 @@ impl EventLoop {
             wndclass,
             event_handler: RefCell::new(event_handler),
 
-            hwnds: [(); MAX_WINDOWS].map(|()| Cell::new(HWND::default())),
-            window_data: [(); MAX_WINDOWS].map(|()| RefCell::new(MaybeUninit::uninit())),
-            window_states: [(); MAX_WINDOWS].map(|()| RefCell::new(MaybeUninit::uninit())),
+            hwnds: [(); MAX_WINDOWS.get()].map(|()| Cell::new(HWND::default())),
+            window_data: [(); MAX_WINDOWS.get()].map(|()| RefCell::new(MaybeUninit::uninit())),
+            window_states: [(); MAX_WINDOWS.get()].map(|()| RefCell::new(MaybeUninit::uninit())),
         };
 
         let event_loop = wndproc_state.as_active_event_loop();
@@ -231,9 +229,9 @@ struct WndProcState<WindowData, H: api::EventHandler<WindowData>> {
     wndclass: PCWSTR,
     event_handler: RefCell<H>,
 
-    hwnds: [Cell<HWND>; MAX_WINDOWS],
-    window_data: [RefCell<MaybeUninit<WindowData>>; MAX_WINDOWS],
-    window_states: [RefCell<MaybeUninit<WindowState>>; MAX_WINDOWS],
+    hwnds: [Cell<HWND>; MAX_WINDOWS.get()],
+    window_data: [RefCell<MaybeUninit<WindowData>>; MAX_WINDOWS.get()],
+    window_states: [RefCell<MaybeUninit<WindowState>>; MAX_WINDOWS.get()],
 }
 
 impl<WindowData, H: api::EventHandler<WindowData>> WndProcState<WindowData, H> {

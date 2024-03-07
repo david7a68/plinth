@@ -5,7 +5,7 @@ use super::{
     window::{PaintReason, Window, WindowAttributes, WindowError},
 };
 
-use crate::geometry::{DpiScale, Extent, Point, Wixel};
+use crate::geometry::{Extent, Pixel, Point, Scale, Wixel};
 
 #[allow(clippy::module_name_repetitions)]
 #[derive(Debug, thiserror::Error)]
@@ -74,7 +74,7 @@ pub trait EventHandler<WindowData> {
         &mut self,
         event_loop: &ActiveEventLoop<WindowData>,
         window: Window<WindowData>,
-        dpi: DpiScale,
+        dpi: Scale<Wixel, Pixel>,
         size: Extent<Wixel>,
     );
 

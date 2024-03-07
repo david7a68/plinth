@@ -1,7 +1,7 @@
 use std::marker::PhantomData;
 
 use crate::{
-    geometry::{DpiScale, Extent, Point, Wixel},
+    geometry::{Extent, Pixel, Point, Scale, Wixel},
     graphics::{Canvas, FrameInfo, Graphics, GraphicsConfig, PixelBuf, WindowContext},
     static_str::StaticStr,
     system::{
@@ -165,7 +165,7 @@ pub trait EventHandler<WindowData> {
         &mut self,
         app: &AppContext<WindowData>,
         window: &mut Window<WindowData>,
-        dpi: DpiScale,
+        dpi: Scale<Wixel, Pixel>,
         size: Extent<Wixel>,
     ) {
     }
@@ -383,7 +383,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
         &mut self,
         event_loop: &ActiveEventLoop<(WindowState, UserData)>,
         window: Window<(WindowState, UserData)>,
-        dpi: DpiScale,
+        dpi: Scale<Wixel, Pixel>,
         size: Extent<Wixel>,
     ) {
         let cx = AppContext::new(self.graphics, event_loop);

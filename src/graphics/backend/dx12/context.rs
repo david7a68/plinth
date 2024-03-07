@@ -32,9 +32,9 @@ use windows::{
 };
 
 use crate::{
-    geometry::{DpiScale, Extent, Scale, Wixel},
+    geometry::{Extent, Pixel, Rect, Scale, Wixel},
     graphics::{backend::SubmitId, FrameInfo},
-    limits::MAX_WINDOW_DIMENSION,
+    limits,
     time::{FramesPerSecond, PresentPeriod, PresentTime},
 };
 
@@ -57,7 +57,7 @@ pub struct Context {
     swapchain_rtv: D3D12_CPU_DESCRIPTOR_HANDLE,
 
     size: Extent<Wixel>,
-    scale: DpiScale,
+    scale: Scale<Wixel, Pixel>,
 
     draw_list: DrawList,
     frames_in_flight: [Frame; 2],
@@ -72,7 +72,7 @@ pub struct Context {
 
     /// A resize event. Deferred until repaint to consolidate graphics work and
     /// in case multiple resize events are received in a single frame.
-    deferred_resize: Option<(Extent<Wixel>, DpiScale, Option<f32>)>,
+    deferred_resize: Option<(Extent<Wixel>, Scale<Wixel, Pixel>, Option<f32>)>,
 }
 
 impl Context {
@@ -181,7 +181,7 @@ impl Context {
         self.deferred_resize = Some((size, self.scale, None));
     }
 
-    pub fn change_dpi(&mut self, size: Extent<Wixel>, scale: DpiScale) {
+    pub fn change_dpi(&mut self, size: Extent<Wixel>, scale: Scale<Wixel, Pixel>) {
         self.deferred_resize = Some((size, scale, None));
     }
 
@@ -204,7 +204,7 @@ impl Context {
 
         let canvas = {
             let scaled = self.size.scale_to(self.scale);
-            Canvas::new(&mut self.draw_list, scaled.into())
+            Canvas::new(&mut self.draw_list, Rect::from_extent(scaled))
         };
 
         let timings = {
@@ -375,12 +375,11 @@ pub fn resize_swapchain(
         unsafe { swapchain.GetDesc1(&mut desc) }.unwrap();
 
         if width > desc.Width || height > desc.Height {
+            let max_dim = limits::WINDOW_EXTENT.max();
             #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-            let w =
-                (f64::from(width) * f64::from(flex)).min(f64::from(MAX_WINDOW_DIMENSION)) as u32;
+            let w = (f64::from(width) * f64::from(flex)).min(f64::from(max_dim.width.0)) as u32;
             #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-            let h =
-                (f64::from(height) * f64::from(flex)).min(f64::from(MAX_WINDOW_DIMENSION)) as u32;
+            let h = (f64::from(height) * f64::from(flex)).min(f64::from(max_dim.height.0)) as u32;
 
             idle();
             unsafe {

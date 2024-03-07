@@ -6,7 +6,7 @@ mod primitives;
 use windows::Win32::Foundation::HWND;
 
 use crate::{
-    geometry::{DpiScale, Extent, Pixel, Rect, Wixel},
+    geometry::{Extent, Pixel, Rect, Scale, Wixel},
     system::power::PowerPreference,
     time::{FramesPerSecond, PresentPeriod, PresentTime},
 };
@@ -103,7 +103,7 @@ impl WindowContext {
         }
     }
 
-    pub fn change_dpi(&mut self, dpi: DpiScale, size: Extent<Wixel>) {
+    pub fn change_dpi(&mut self, dpi: Scale<Wixel, Pixel>, size: Extent<Wixel>) {
         match &mut self.context {
             #[cfg(target_os = "windows")]
             ContextImpl::Dx12(context) => context.change_dpi(size, dpi),

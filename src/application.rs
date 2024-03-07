@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 use crate::{
     geometry::{DpiScale, Extent, Point, Wixel},
     graphics::{Canvas, FrameInfo, Graphics, GraphicsConfig, PixelBuf, WindowContext},
+    static_str::StaticStr,
     system::{
         event_loop::{ActiveEventLoop, EventHandler as SysEventHandler, EventLoop, EventLoopError},
         input::{ButtonState, KeyCode, ModifierKeys, MouseButton, ScrollAxis},
@@ -19,7 +20,7 @@ pub enum Error {
 
 #[derive(Debug, Default)]
 pub struct Config {
-    pub images: &'static [(&'static str, PixelBuf<'static>)],
+    pub images: &'static [(StaticStr, PixelBuf<'static>)],
     pub graphics: GraphicsConfig,
 }
 

@@ -206,9 +206,11 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
     }
 
     pub fn modal_loop_enter(&mut self) {
-        // This may be called more than once without first receiving a
+        // This may be called more than once without first receiving a matching
         // WM_EXITSIZEMOVE under certain conditions, so this operation must be
-        // idempotent. Not sure _why_ it's called more than once. -dz (2024-03-03)
+        // idempotent. Not sure _why_ it's called more than once.
+        //
+        // -dz (2024-03-03)
         self.with_state(|window| window.flags.set(WindowFlags::IN_DRAG_RESIZE, true));
     }
 

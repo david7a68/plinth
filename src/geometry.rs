@@ -35,7 +35,7 @@ impl<From: ScaleTo<To>, To> Default for Scale<From, To> {
 }
 
 /// A 2D extent.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Extent<T: Unit> {
     pub width: T,
     pub height: T,
@@ -92,7 +92,7 @@ impl<T: Unit, T1: Into<T>, T2: Into<T>> From<(T1, T2)> for Extent<T> {
 }
 
 /// A 2D point.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Point<T: Unit> {
     pub x: T,
     pub y: T,
@@ -125,7 +125,7 @@ impl<T: Unit, T1: Into<T>, T2: Into<T>> From<(T1, T2)> for Point<T> {
 }
 
 /// A 2D rectangle.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Rect<T: Unit> {
     pub x: T,
     pub y: T,
@@ -250,7 +250,7 @@ impl_unit!(
 
 impl_unit!(
     /// Texture coordinates.
-    #[derive(Eq, Ord)]
+    #[derive(Eq, Ord, Hash)]
     Texel(i16, 0),
     (i32, f32),
     ()
@@ -258,7 +258,7 @@ impl_unit!(
 
 impl_unit!(
     /// Window coordinates.
-    #[derive(Eq, Ord)]
+    #[derive(Eq, Ord, Hash)]
     Wixel(i16, 0),
     (i32, f32),
     (u32)

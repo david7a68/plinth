@@ -1,5 +1,6 @@
 mod backend;
 mod color;
+mod image;
 mod primitives;
 
 use windows::Win32::Foundation::HWND;
@@ -10,7 +11,11 @@ use crate::{
     time::{FramesPerSecond, PresentPeriod, PresentTime},
 };
 
-pub use self::{color::Color, primitives::RoundRect};
+pub use self::{
+    color::Color,
+    image::{Format, Info, PixelBuf},
+    primitives::RoundRect,
+};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Backend {

@@ -2,7 +2,7 @@ use plinth::{
     graphics::{Canvas, Color, FrameInfo, GraphicsConfig},
     system::window::{Window, WindowAttributes},
     time::{FramesPerSecond, PresentTime},
-    AppContext, Application, EventHandler,
+    AppContext, Application, Config, EventHandler,
 };
 
 const STARTING_REFRESH_RATE: FramesPerSecond = FramesPerSecond::new(60.0);
@@ -13,15 +13,15 @@ const STARTING_REFRESH_RATE: FramesPerSecond = FramesPerSecond::new(60.0);
 pub fn main() {
     tracing_subscriber::fmt::fmt().pretty().init();
 
-    let graphics_config = GraphicsConfig {
-        debug_mode: false,
+    let config = Config {
+        graphics: GraphicsConfig {
+            debug_mode: false,
+            ..Default::default()
+        },
         ..Default::default()
     };
 
-    Application::new(&graphics_config)
-        .unwrap()
-        .run(App {})
-        .unwrap();
+    Application::new(config).unwrap().run(App {}).unwrap();
 }
 
 pub struct AppWindow {

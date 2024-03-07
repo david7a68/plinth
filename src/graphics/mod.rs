@@ -25,6 +25,7 @@ pub enum Backend {
     Dx12,
 }
 
+#[derive(Debug)]
 pub struct GraphicsConfig {
     pub power_preference: PowerPreference,
     pub debug_mode: bool,

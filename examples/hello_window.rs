@@ -6,8 +6,21 @@ use plinth::{
         power::{MonitorState, PowerPreference, PowerSource},
         window::{Window, WindowAttributes},
     },
-    AppContext, Application, EventHandler,
+    AppContext, Application, Config, EventHandler,
 };
+
+pub fn main() {
+    let config = Config {
+        graphics: GraphicsConfig {
+            debug_mode: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let mut event_loop = Application::new(config).unwrap();
+    event_loop.run(App {}).unwrap();
+}
 
 pub struct App {}
 
@@ -193,10 +206,4 @@ impl EventHandler<()> for App {
     ) {
         println!("Mouse scrolled: {:?} {:?} {:?}", delta, axis, modifiers);
     }
-}
-
-pub fn main() {
-    let graphics_config = GraphicsConfig::default();
-    let mut event_loop = Application::new(&graphics_config).unwrap();
-    event_loop.run(App {}).unwrap();
 }

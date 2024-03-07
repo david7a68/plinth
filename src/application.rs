@@ -2,7 +2,7 @@ use std::marker::PhantomData;
 
 use crate::{
     geometry::{DpiScale, Extent, Point, Wixel},
-    graphics::{Canvas, FrameInfo, Graphics, GraphicsConfig, WindowContext},
+    graphics::{Canvas, FrameInfo, Graphics, GraphicsConfig, PixelBuf, WindowContext},
     system::{
         event_loop::{ActiveEventLoop, EventHandler as SysEventHandler, EventLoop, EventLoopError},
         input::{ButtonState, KeyCode, ModifierKeys, MouseButton, ScrollAxis},
@@ -15,6 +15,12 @@ use crate::{
 pub enum Error {
     #[error("An error occurred in the event loop.")]
     EventLoop(#[from] EventLoopError),
+}
+
+#[derive(Debug, Default)]
+pub struct Config {
+    pub images: &'static [(&'static str, PixelBuf<'static>)],
+    pub graphics: GraphicsConfig,
 }
 
 pub struct Application {
@@ -31,9 +37,13 @@ impl Application {
     ///
     /// This will fail if the event loop could not be initialized, or if an
     /// application has already been initialized.
-    pub fn new(graphics: &GraphicsConfig) -> Result<Self, Error> {
+    pub fn new(config: Config) -> Result<Self, Error> {
+        // todo: make use of these
+        #[allow(unused_variables)]
+        let static_images = config.images;
+
         let event_loop = EventLoop::new()?;
-        let graphics = Graphics::new(graphics);
+        let graphics = Graphics::new(&config.graphics);
 
         Ok(Self {
             event_loop,

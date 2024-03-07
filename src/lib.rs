@@ -8,4 +8,4 @@ pub mod time;
 
 mod application;
 
-pub use application::{AppContext, Application, EventHandler};
+pub use application::{AppContext, Application, Config, EventHandler};

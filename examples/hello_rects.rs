@@ -2,21 +2,21 @@ use plinth::{
     geometry::Rect,
     graphics::{Canvas, Color, FrameInfo, GraphicsConfig, RoundRect},
     system::window::{Window, WindowAttributes},
-    AppContext, Application, EventHandler,
+    AppContext, Application, Config, EventHandler,
 };
 
 fn main() {
     tracing_subscriber::fmt::fmt().pretty().init();
 
-    let graphics_config = GraphicsConfig {
-        debug_mode: false,
+    let config = Config {
+        graphics: GraphicsConfig {
+            debug_mode: false,
+            ..Default::default()
+        },
         ..Default::default()
     };
 
-    Application::new(&graphics_config)
-        .unwrap()
-        .run(App {})
-        .unwrap();
+    Application::new(config).unwrap().run(App {}).unwrap();
 }
 
 pub struct AppWindow {}

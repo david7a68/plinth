@@ -1,3 +1,5 @@
+use std::{fmt::Debug, ptr::addr_of};
+
 use crate::geometry::{Extent, Texel};
 
 /// The layout of pixel data in memory.
@@ -48,5 +50,14 @@ impl<'a> PixelBuf<'a> {
     #[must_use]
     pub fn unwrap(self) -> (Info, &'a [u8]) {
         (self.info, self.data)
+    }
+}
+
+impl Debug for PixelBuf<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PixelBuf")
+            .field("info", &self.info)
+            .field("data", &addr_of!(self.data))
+            .finish()
     }
 }

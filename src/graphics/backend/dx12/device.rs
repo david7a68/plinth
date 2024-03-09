@@ -47,7 +47,7 @@ impl Device {
                 unsafe { D3D12GetDebugInterface(&mut controller) }.unwrap();
 
                 if let Some(controller) = controller {
-                    tracing::info!("Enabling D3D12 debug layer");
+                    eprintln!("Enabling D3D12 debug layer");
                     unsafe { controller.EnableDebugLayer() };
                     unsafe { controller.SetEnableGPUBasedValidation(true) };
 
@@ -55,7 +55,7 @@ impl Device {
                         unsafe { controller.SetEnableAutoName(true) };
                     }
                 } else {
-                    tracing::warn!("Failed to enable D3D12 debug layer");
+                    eprintln!("Failed to enable D3D12 debug layer");
                 }
 
                 dxgi_flags |= DXGI_CREATE_FACTORY_DEBUG;
@@ -186,7 +186,7 @@ impl Device {
                 .CreateSwapChainForComposition(&self.queue.handle, desc, None)
         }
         .unwrap_or_else(|e| {
-            tracing::error!("Failed to create swapchain: {:?}", e);
+            eprintln!("Failed to create swapchain: {:?}", e);
             panic!();
         })
     }
@@ -226,7 +226,6 @@ impl Queue {
     }
 
     /// Causes the CPU to wait until the given submission has completed.
-    #[tracing::instrument(skip(self))]
     fn wait(&self, submission: SubmitId) {
         if self.is_done(submission) {
             return;
@@ -249,7 +248,6 @@ impl Queue {
     }
 
     /// Causes the CPU to wait until all submissions have completed.
-    #[tracing::instrument(skip(self))]
     fn wait_idle(&self) {
         // We have to increment the fence value before waiting, because DXGI may
         // submit work to the queue on our behalf when we call `Present`.
@@ -265,7 +263,6 @@ impl Queue {
         self.wait(id);
     }
 
-    #[tracing::instrument(skip(self))]
     fn is_done(&self, submission: SubmitId) -> bool {
         if submission.0 > self.num_completed.load(Ordering::Acquire) {
             self.poll_fence();
@@ -274,7 +271,6 @@ impl Queue {
         submission.0 <= self.num_completed.load(Ordering::Acquire)
     }
 
-    #[tracing::instrument(skip(self))]
     fn submit(&self, commands: &ID3D12CommandList) -> SubmitId {
         // todo: relax ordering if possible
         let signal = self.num_submitted.fetch_add(1, Ordering::SeqCst);
@@ -311,11 +307,11 @@ unsafe extern "system" fn dx12_debug_callback(
     _context: *mut std::ffi::c_void,
 ) {
     match severity {
-        D3D12_MESSAGE_SEVERITY_CORRUPTION => tracing::error!("D3D12 {}", description.display()),
-        D3D12_MESSAGE_SEVERITY_ERROR => tracing::error!("D3D12 {}", description.display()),
-        D3D12_MESSAGE_SEVERITY_WARNING => tracing::warn!("D3D12 {}", description.display()),
-        D3D12_MESSAGE_SEVERITY_INFO => tracing::debug!("D3D12 {}", description.display()),
-        D3D12_MESSAGE_SEVERITY_MESSAGE => tracing::info!("D3D12 {}", description.display()),
+        D3D12_MESSAGE_SEVERITY_CORRUPTION => eprintln!("D3D12 {}", description.display()),
+        D3D12_MESSAGE_SEVERITY_ERROR => eprintln!("D3D12 {}", description.display()),
+        D3D12_MESSAGE_SEVERITY_WARNING => eprintln!("D3D12 {}", description.display()),
+        D3D12_MESSAGE_SEVERITY_INFO => eprintln!("D3D12 {}", description.display()),
+        D3D12_MESSAGE_SEVERITY_MESSAGE => eprintln!("D3D12 {}", description.display()),
         _ => {}
     }
 }

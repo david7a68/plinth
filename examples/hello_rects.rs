@@ -6,8 +6,6 @@ use plinth::{
 };
 
 fn main() {
-    tracing_subscriber::fmt::fmt().pretty().init();
-
     let config = Config {
         graphics: GraphicsConfig {
             debug_mode: false,

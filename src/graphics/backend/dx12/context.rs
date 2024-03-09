@@ -76,7 +76,6 @@ pub struct Context {
 }
 
 impl Context {
-    #[tracing::instrument(skip(device, compositor))]
     pub fn new(device: Arc<Device>, compositor: &IDCompositionDevice, hwnd: HWND) -> Self {
         let (swapchain, target, visual) = {
             let target = unsafe { compositor.CreateTargetForHwnd(hwnd, true) }.unwrap();
@@ -110,7 +109,7 @@ impl Context {
                 .create_swapchain(&swapchain_desc)
                 .cast::<IDXGISwapChain3>()
                 .unwrap_or_else(|e| {
-                    tracing::error!(
+                    eprintln!(
                     "The running version of windows doesn't support IDXGISwapchain3. Error: {:?}",
                     e
                 );
@@ -143,7 +142,7 @@ impl Context {
             };
 
             unsafe { device.handle.CreateDescriptorHeap(&heap_desc) }.unwrap_or_else(|e| {
-                tracing::error!("Failed to create descriptor heap: {:?}", e);
+                eprintln!("Failed to create descriptor heap: {:?}", e);
                 panic!()
             })
         };
@@ -195,8 +194,6 @@ impl Context {
             resize_swapchain(&self.swapchain, size, flex, || {
                 self.device.wait_for_idle();
             });
-
-            tracing::info!("window: resized to {:?}", size);
 
             self.size = size;
             self.scale = dpi;
@@ -360,7 +357,6 @@ pub fn image_barrier(
     unsafe { command_list.ResourceBarrier(&[barrier]) };
 }
 
-#[tracing::instrument(skip(swapchain, idle))]
 pub fn resize_swapchain(
     swapchain: &IDXGISwapChain3,
     size: Extent<Wixel>,

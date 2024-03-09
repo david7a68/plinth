@@ -11,8 +11,6 @@ const STARTING_REFRESH_RATE: FramesPerSecond = FramesPerSecond::new(60.0);
 // // const SLEEP_PER_FRAME: Duration = Duration::from_millis(100);
 
 pub fn main() {
-    tracing_subscriber::fmt::fmt().pretty().init();
-
     let config = Config {
         graphics: GraphicsConfig {
             debug_mode: false,
@@ -69,7 +67,7 @@ impl EventHandler<AppWindow> for App {
 
         let instantaneous_frame_rate = FramesPerSecond::from_period(elapsed);
 
-        tracing::info!(
+        println!(
                 "repaint:\n    prev present time: {:?}\n    present time: {:?}\n    frame budget: {:?}\n    target refresh rate: {:?}\n    provided refresh rate: {:?}\n    estimated refresh rate: {:?}",
                 timing.prev_present_time,
                 timing.next_present_time,

@@ -13,7 +13,7 @@ use crate::{
 
 pub use self::{
     color::Color,
-    image::{Format, Info, PixelBuf},
+    image::{Image, Info, Layout, PixelBuf},
     primitives::RoundRect,
 };
 

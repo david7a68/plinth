@@ -4,7 +4,7 @@ use crate::geometry::{Extent, Texel};
 
 /// The layout of pixel data in memory.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Format {
+pub enum Layout {
     Rgba8,
     Bgra8,
     Alpha8,
@@ -12,17 +12,61 @@ pub enum Format {
 
 /// The color space that pixel data is encoded in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum ColorSpace {
+pub enum Format {
     Unkown,
     Srgb,
     Linear,
 }
 
+/// The resizability of an image.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Sizing {
+    /// The image can be resized without loss of quality.
+    Vector,
+    /// The image can be resized, but may lose quality.
+    Bitmap,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Info {
-    pub format: Format,
     pub extent: Extent<Texel>,
+    pub format: Format,
+    pub layout: Layout,
+    pub sizing: Sizing,
     pub stride: i16,
+}
+
+/// A handle to an image.
+///
+/// Once created, images are immutable.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Image {
+    data: u64,
+}
+
+impl Image {
+    pub fn extent(&self) -> Extent<Texel> {
+        todo!()
+    }
+
+    pub fn layout(&self) -> Layout {
+        todo!()
+    }
+
+    pub fn format(&self) -> Format {
+        todo!()
+    }
+
+    pub fn sizing(&self) -> Sizing {
+        todo!()
+    }
+}
+
+impl Debug for Image {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // todo: extract details from data -dz
+        f.debug_struct("Image").field("data", &self.data).finish()
+    }
 }
 
 /// Non-owning reference to pixel data.

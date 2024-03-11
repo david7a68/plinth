@@ -2,8 +2,10 @@ use std::marker::PhantomData;
 
 use crate::{
     geometry::{Extent, Pixel, Point, Scale, Wixel},
-    graphics::{Canvas, FrameInfo, Graphics, GraphicsConfig, PixelBuf, WindowContext},
-    static_str::StaticStr,
+    graphics::{Canvas, FrameInfo, Graphics, GraphicsConfig, Image, WindowContext},
+    limits,
+    resource::{Error as ResourceError, Resource, StaticResource},
+    string::HashedStr,
     system::{
         event_loop::{ActiveEventLoop, EventHandler as SysEventHandler, EventLoop, EventLoopError},
         input::{ButtonState, KeyCode, ModifierKeys, MouseButton, ScrollAxis},
@@ -20,7 +22,7 @@ pub enum Error {
 
 #[derive(Debug, Default)]
 pub struct Config {
-    pub images: &'static [(StaticStr, PixelBuf<'static>)],
+    pub resources: &'static [StaticResource],
     pub graphics: GraphicsConfig,
 }
 
@@ -41,7 +43,7 @@ impl Application {
     pub fn new(config: Config) -> Result<Self, Error> {
         // todo: make use of these
         #[allow(unused_variables)]
-        let static_images = config.images;
+        let static_images = config.resources;
 
         let event_loop = EventLoop::new()?;
         let graphics = Graphics::new(&config.graphics);
@@ -91,6 +93,46 @@ impl<'a, UserWindowData> AppContext<'a, UserWindowData> {
             graphics,
             event_loop,
         }
+    }
+
+    /// Loads an image from a path.
+    ///
+    /// If the image is already loaded, this will return a reference to the
+    /// existing image. Resources are cached to reduce the frequency of IO
+    /// operations but may be evicted from the cache to make room for others.
+    /// However, this will never happen while an event callback is running.
+    /// Static images are guaranteed to be available for the lifetime of the
+    /// app.
+    ///
+    /// # Errors
+    ///
+    ///  This function returns an error if the path is too long, or if the image
+    ///  is missing or malformed. It may also return an IO error if one is
+    ///  encountered.
+    pub fn load_image(&self, path: HashedStr) -> Result<Image, ResourceError> {
+        limits::MAX_RESOURCE_PATH_LENGTH.test(path.string, ResourceError::PathTooLong)?;
+        let _ = path;
+        todo!()
+    }
+
+    /// Loads a resource from a path.
+    ///
+    /// If the resource is already loaded, this will return a reference to the
+    /// existing resource. Resources are cached to reduce the frequency of IO
+    /// operations but may be evicted from the cache to make room for others.
+    /// However, this will never happen while an event callback is running.
+    /// Static resources are guaranteed to be available for the lifetime of the
+    /// app.
+    ///
+    /// # Errors
+    ///
+    ///  This function returns an error if the path is too long, or if the
+    ///  resource is missing or malformed. It may also return an IO error if one
+    ///  is encountered.
+    pub fn load_resource(&self, path: HashedStr) -> Result<Resource, ResourceError> {
+        limits::MAX_RESOURCE_PATH_LENGTH.test(path.string, ResourceError::PathTooLong)?;
+        let _ = path;
+        todo!()
     }
 
     /// Creates a new window.

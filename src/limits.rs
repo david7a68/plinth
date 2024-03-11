@@ -9,7 +9,7 @@ pub const MAX_WINDOWS: Usize<8> = Usize::new(
 );
 
 /// The maximum number of UTF-8 bytes that can be used to represent a window title.
-pub const MAX_WINDOW_TITLE_LENGTH: StrLen<255> = StrLen::new("Window title too long");
+pub const MAX_WINDOW_TITLE_LENGTH: StrLen<256> = StrLen::new("Window title too long");
 
 /// The maximum and minimum size of a window (inclusive).
 pub const WINDOW_EXTENT: WixelExtent<100, 100, { i16::MAX }, { i16::MAX }> =
@@ -19,6 +19,10 @@ pub const MAX_ITEMS_PER_DRAW_LIST: Usize<{ u32::MAX as _ }> = Usize::new(
     |Limit(limit), value| *value < limit,
     "Too many items in draw list",
 );
+
+/// The maximum number of UTF-8 bytes that can be used to represent a path to a
+/// resource.
+pub const MAX_RESOURCE_PATH_LENGTH: StrLen<1024> = StrLen::new("Resource path too long");
 
 /// Enforces the maximum number of items of each kind in a draw list and returns
 /// the value as a `u32`.
@@ -69,6 +73,14 @@ impl<const LIMIT: usize> StrLen<LIMIT> {
 
     pub const fn get(&self) -> usize {
         LIMIT
+    }
+
+    pub fn test<E>(&self, value: &str, error: E) -> Result<(), E> {
+        if value.len() <= LIMIT {
+            Ok(())
+        } else {
+            Err(error)
+        }
     }
 
     pub const fn check(&self, value: &str) {

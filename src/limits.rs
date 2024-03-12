@@ -1,6 +1,6 @@
 //! Static limits and constraints.
 
-use crate::geometry::{Extent, Wixel};
+use crate::geometry::{Extent, Texel, Wixel};
 
 /// Maximum number of windows that can be open at once.
 pub const MAX_WINDOWS: Usize<8> = Usize::new(
@@ -23,6 +23,12 @@ pub const MAX_ITEMS_PER_DRAW_LIST: Usize<{ u32::MAX as _ }> = Usize::new(
 /// The maximum number of UTF-8 bytes that can be used to represent a path to a
 /// resource.
 pub const MAX_RESOURCE_PATH_LENGTH: StrLen<1024> = StrLen::new("Resource path too long");
+
+pub const IMAGE_EXTENT: TexelExtent<1, 1, 4096, 4096> =
+    TexelExtent::new("Image extent out of range.");
+
+pub const MAX_IMAGE_COUNT: Usize<1023> = // 1023 since 0 is reserved for "no image"
+    Usize::new(|Limit(limit), value| *value < limit, "Too many images");
 
 /// Enforces the maximum number of items of each kind in a draw list and returns
 /// the value as a `u32`.
@@ -103,59 +109,67 @@ impl<const LIMIT: usize> std::fmt::Display for StrLen<LIMIT> {
     }
 }
 
-pub struct WixelExtent<const MIN_X: i16, const MIN_Y: i16, const MAX_X: i16, const MAX_Y: i16> {
-    error: &'static str,
+macro_rules! extent_min_max {
+    ($name:ident, $num:ty, $int:ty, $new:tt) => {
+        pub struct $name<const MIN_X: $int, const MIN_Y: $int, const MAX_X: $int, const MAX_Y: $int>
+        {
+            error: &'static str,
+        }
+
+        impl<const MIN_X: $int, const MIN_Y: $int, const MAX_X: $int, const MAX_Y: $int>
+            $name<MIN_X, MIN_Y, MAX_X, MAX_Y>
+        {
+            pub const fn new(error: &'static str) -> Self {
+                Self { error }
+            }
+
+            pub const fn min(&self) -> Extent<$num> {
+                Extent {
+                    width: $new(MIN_X),
+                    height: $new(MIN_Y),
+                }
+            }
+
+            pub const fn max(&self) -> Extent<$num> {
+                Extent {
+                    width: $new(MAX_X),
+                    height: $new(MAX_Y),
+                }
+            }
+
+            pub fn check(&self, value: impl TryInto<Extent<$num>>) {
+                let Ok(value): Result<Extent<$num>, _> = value.try_into() else {
+                    panic!("{}", self.error)
+                };
+
+                assert!(
+                    value.width.0 >= MIN_X,
+                    "width({}) >= MIN_X({}) is false: {}",
+                    value.width.0,
+                    MIN_X,
+                    self.error
+                );
+
+                assert!(
+                    value.height.0 >= MIN_Y,
+                    "height({}) >= MIN_Y({}) is false: {}",
+                    value.height.0,
+                    MIN_Y,
+                    self.error
+                );
+
+                assert!(value.width.0 <= MAX_X, "{}", self.error);
+
+                assert!(value.height.0 <= MAX_Y, "{}", self.error);
+            }
+
+            pub fn check_debug(&self, value: impl TryInto<Extent<$num>>) {
+                #[cfg(debug_assertions)]
+                self.check(value);
+            }
+        }
+    };
 }
 
-impl<const MIN_X: i16, const MIN_Y: i16, const MAX_X: i16, const MAX_Y: i16>
-    WixelExtent<MIN_X, MIN_Y, MAX_X, MAX_Y>
-{
-    pub const fn new(error: &'static str) -> Self {
-        Self { error }
-    }
-
-    pub const fn min(&self) -> Extent<Wixel> {
-        Extent {
-            width: Wixel(MIN_X),
-            height: Wixel(MIN_Y),
-        }
-    }
-
-    pub const fn max(&self) -> Extent<Wixel> {
-        Extent {
-            width: Wixel(MAX_X),
-            height: Wixel(MAX_Y),
-        }
-    }
-
-    pub fn check(&self, value: impl TryInto<Extent<Wixel>>) {
-        let Ok(value): Result<Extent<Wixel>, _> = value.try_into() else {
-            panic!("{}", self.error)
-        };
-
-        assert!(
-            value.width.0 >= MIN_X,
-            "width({}) >= MIN_X({}) is false: {}",
-            value.width.0,
-            MIN_X,
-            self.error
-        );
-
-        assert!(
-            value.height.0 >= MIN_Y,
-            "height({}) >= MIN_Y({}) is false: {}",
-            value.height.0,
-            MIN_Y,
-            self.error
-        );
-
-        assert!(value.width.0 <= MAX_X, "{}", self.error);
-
-        assert!(value.height.0 <= MAX_Y, "{}", self.error);
-    }
-
-    pub fn check_debug(&self, value: impl TryInto<Extent<Wixel>>) {
-        #[cfg(debug_assertions)]
-        self.check(value);
-    }
-}
+extent_min_max!(WixelExtent, Wixel, i16, Wixel);
+extent_min_max!(TexelExtent, Texel, i16, Texel);

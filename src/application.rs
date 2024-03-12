@@ -41,6 +41,8 @@ impl Application {
     /// This will fail if the event loop could not be initialized, or if an
     /// application has already been initialized.
     pub fn new(config: Config) -> Result<Self, Error> {
+        limits::MAX_IMAGE_COUNT.check(&config.resources.len());
+
         // todo: make use of these
         #[allow(unused_variables)]
         let static_images = config.resources;
@@ -67,7 +69,7 @@ impl Application {
     ) -> Result<(), Error> {
         self.event_loop
             .run(ApplicationEventHandler {
-                outer: event_handler,
+                client: event_handler,
                 graphics: &self.graphics,
                 phantom: PhantomData,
             })
@@ -308,8 +310,8 @@ struct WindowState {
     context: WindowContext,
 }
 
-struct ApplicationEventHandler<'a, UserData, Outer: EventHandler<UserData>> {
-    outer: Outer,
+struct ApplicationEventHandler<'a, UserData, Client: EventHandler<UserData>> {
+    client: Client,
     graphics: &'a Graphics,
     phantom: PhantomData<UserData>,
 }
@@ -319,26 +321,26 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
 {
     fn start(&mut self, event_loop: &ActiveEventLoop<(WindowState, UserData)>) {
         let cx = AppContext::new(self.graphics, event_loop);
-        self.outer.start(&cx);
+        self.client.start(&cx);
     }
 
     fn suspend(&mut self, event_loop: &ActiveEventLoop<(WindowState, UserData)>) {
         let cx = AppContext::new(self.graphics, event_loop);
-        self.outer.suspend(&cx);
+        self.client.suspend(&cx);
     }
 
     fn resume(&mut self, event_loop: &ActiveEventLoop<(WindowState, UserData)>) {
         let cx = AppContext::new(self.graphics, event_loop);
-        self.outer.resume(&cx);
+        self.client.resume(&cx);
     }
 
     fn stop(&mut self) {
-        self.outer.stop();
+        self.client.stop();
     }
 
     fn low_memory(&mut self, event_loop: &ActiveEventLoop<(WindowState, UserData)>) {
         let cx = AppContext::new(self.graphics, event_loop);
-        self.outer.low_memory(&cx);
+        self.client.low_memory(&cx);
     }
 
     fn power_source_changed(
@@ -347,7 +349,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
         power_source: PowerSource,
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
-        self.outer.power_source_changed(&cx, power_source);
+        self.client.power_source_changed(&cx, power_source);
     }
 
     fn monitor_state_changed(
@@ -356,7 +358,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
         monitor: MonitorState,
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
-        self.outer.monitor_state_changed(&cx, monitor);
+        self.client.monitor_state_changed(&cx, monitor);
     }
 
     fn power_preference_changed(
@@ -365,7 +367,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
         power_preference: PowerPreference,
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
-        self.outer.power_preference_changed(&cx, power_preference);
+        self.client.power_preference_changed(&cx, power_preference);
     }
 
     fn activated(
@@ -375,7 +377,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (_, mut wn) = window.split();
-        self.outer.activated(&cx, &mut wn);
+        self.client.activated(&cx, &mut wn);
     }
 
     fn deactivated(
@@ -385,7 +387,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (_, mut wn) = window.split();
-        self.outer.deactivated(&cx, &mut wn);
+        self.client.deactivated(&cx, &mut wn);
     }
 
     fn drag_resize_started(
@@ -395,7 +397,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (_, mut wn) = window.split();
-        self.outer.drag_resize_started(&cx, &mut wn);
+        self.client.drag_resize_started(&cx, &mut wn);
     }
 
     fn drag_resize_ended(
@@ -405,7 +407,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (_, mut wn) = window.split();
-        self.outer.drag_resize_ended(&cx, &mut wn);
+        self.client.drag_resize_ended(&cx, &mut wn);
     }
 
     fn resized(
@@ -418,7 +420,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
         let (meta, mut wn) = window.split();
 
         meta.context.resize(size);
-        self.outer.resized(&cx, &mut wn, size);
+        self.client.resized(&cx, &mut wn, size);
     }
 
     fn dpi_changed(
@@ -432,7 +434,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
         let (meta, mut wn) = window.split();
 
         meta.context.change_dpi(dpi, size);
-        self.outer.dpi_changed(&cx, &mut wn, dpi, size);
+        self.client.dpi_changed(&cx, &mut wn, dpi, size);
     }
 
     fn close_requested(
@@ -442,7 +444,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (_, mut wn) = window.split();
-        self.outer.close_requested(&cx, &mut wn);
+        self.client.close_requested(&cx, &mut wn);
     }
 
     fn shown(
@@ -452,7 +454,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (_, mut wn) = window.split();
-        self.outer.shown(&cx, &mut wn);
+        self.client.shown(&cx, &mut wn);
     }
 
     fn hidden(
@@ -462,7 +464,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (_, mut wn) = window.split();
-        self.outer.hidden(&cx, &mut wn);
+        self.client.hidden(&cx, &mut wn);
     }
 
     fn maximized(
@@ -472,7 +474,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (_, mut wn) = window.split();
-        self.outer.maximized(&cx, &mut wn);
+        self.client.maximized(&cx, &mut wn);
     }
 
     fn minimized(
@@ -482,7 +484,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (_, mut wn) = window.split();
-        self.outer.minimized(&cx, &mut wn);
+        self.client.minimized(&cx, &mut wn);
     }
 
     fn restored(
@@ -492,7 +494,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (_, mut wn) = window.split();
-        self.outer.restored(&cx, &mut wn);
+        self.client.restored(&cx, &mut wn);
     }
 
     fn moved(
@@ -503,7 +505,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (_, mut wn) = window.split();
-        self.outer.moved(&cx, &mut wn, position);
+        self.client.moved(&cx, &mut wn, position);
     }
 
     fn wake_requested(
@@ -513,7 +515,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (_, mut wn) = window.split();
-        self.outer.wake_requested(&cx, &mut wn);
+        self.client.wake_requested(&cx, &mut wn);
     }
 
     fn needs_repaint(
@@ -526,7 +528,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
         let (meta, mut wn) = window.split();
 
         meta.context.draw(|canvas, frame| {
-            self.outer.repaint(&cx, &mut wn, canvas, frame);
+            self.client.repaint(&cx, &mut wn, canvas, frame);
         });
     }
 
@@ -536,7 +538,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
         (_, window_data): (WindowState, UserData),
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
-        self.outer.destroyed(&cx, window_data);
+        self.client.destroyed(&cx, window_data);
     }
 
     fn key(
@@ -550,7 +552,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (_, mut wn) = window.split();
-        self.outer.key(&cx, &mut wn, code, state, modifiers);
+        self.client.key(&cx, &mut wn, code, state, modifiers);
     }
 
     fn mouse_button(
@@ -565,7 +567,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (_, mut wn) = window.split();
-        self.outer
+        self.client
             .mouse_button(&cx, &mut wn, button, state, position, modifiers);
     }
 
@@ -579,7 +581,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (_, mut wn) = window.split();
-        self.outer
+        self.client
             .mouse_scrolled(&cx, &mut wn, delta, axis, modifiers);
     }
 
@@ -591,7 +593,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (_, mut wn) = window.split();
-        self.outer.pointer_moved(&cx, &mut wn, position);
+        self.client.pointer_moved(&cx, &mut wn, position);
     }
 
     fn pointer_entered(
@@ -602,7 +604,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (_, mut wn) = window.split();
-        self.outer.pointer_entered(&cx, &mut wn, position);
+        self.client.pointer_entered(&cx, &mut wn, position);
     }
 
     fn pointer_left(
@@ -612,6 +614,6 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
     ) {
         let cx = AppContext::new(self.graphics, event_loop);
         let (_, mut wn) = window.split();
-        self.outer.pointer_left(&cx, &mut wn);
+        self.client.pointer_left(&cx, &mut wn);
     }
 }

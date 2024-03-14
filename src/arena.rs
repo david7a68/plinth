@@ -10,8 +10,11 @@ use std::{
     slice::{from_raw_parts, from_raw_parts_mut},
 };
 
+#[derive(Debug, thiserror::Error)]
 pub enum Error {
+    #[error("system out of memory, could not allocate arena")]
     SysOutOfMemory,
+    #[error("insufficient capacity in the arena, allocation failed")]
     InsufficientCapacity,
 }
 
@@ -63,18 +66,19 @@ impl<'a> Arena<'a> {
     }
 }
 
-impl Arena<'_> {
+impl<'a> Arena<'a> {
     #[must_use]
     pub fn alloc(&self, layout: Layout) -> Result<NonNull<u8>, Error> {
         let align = self.next.get().align_offset(layout.align());
 
         // SAFETY: `next` and `stop` belong to the same allocation.
-        let capacity = unsafe { self.next.get().offset_from(self.stop) };
+        let capacity = unsafe { self.stop.offset_from(self.next.get()) };
 
         let required = align + layout.size();
 
-        debug_assert!(capacity >= 0);
-        if required > capacity as usize {
+        debug_assert!(required <= isize::MAX as usize);
+        if required as isize > capacity {
+            eprintln!("Attempted to allocate {required} bytes but only had {capacity} bytes free");
             return Err(Error::InsufficientCapacity);
         }
 
@@ -117,7 +121,7 @@ impl Arena<'_> {
         })
     }
 
-    pub fn make_array<T>(&self, cap: usize) -> Result<Array<T>, Error> {
+    pub fn make_array<'this, T>(&'this self, cap: usize) -> Result<Array<'this, T>, Error> {
         assert!(cap <= u32::MAX as usize, "len exceeds u32::MAX");
 
         let ptr = self.alloc(Layout::array::<T>(cap).unwrap())?;
@@ -236,6 +240,10 @@ impl Arena<'_> {
     /// This function will panic if the new capacity exceeds `u32::MAX` items,
     /// or if the size of the array would exceed `isize::MAX` bytes.
     pub fn grow_array<T>(&self, new_cap: usize, array: &mut Array<T>) -> Result<bool, Error> {
+        // todo: under-grow if insufficient capacity remaining but more than
+        // array.cap, then return new capacity. allocate whatever's left in the
+        // arena.
+
         assert!(new_cap <= u32::MAX as usize, "len exceeds u32::MAX");
 
         let is_last_alloc =
@@ -280,7 +288,7 @@ impl Arena<'_> {
     }
 }
 
-pub struct Box<'a, T> {
+pub struct Box<'a, T: 'a> {
     ptr: NonNull<T>,
     phantom: PhantomData<&'a mut T>,
 }
@@ -342,7 +350,7 @@ impl<T> Drop for Box<'_, T> {
     }
 }
 
-pub struct Array<'a, T> {
+pub struct Array<'a, T: 'a> {
     ptr: NonNull<T>,
     len: u32,
     cap: u32,
@@ -406,7 +414,7 @@ impl<'a, T> Array<'a, T> {
         }
     }
 
-    pub fn push(&mut self, arena: &'a mut Arena, value: T) -> Result<usize, Error> {
+    pub fn push(&mut self, arena: &'a Arena, value: T) -> Result<usize, Error> {
         if self.len == self.cap {
             arena.grow_array(self.cap as usize * 2, self)?;
         }
@@ -478,33 +486,84 @@ mod tests {
 
     #[test]
     fn arena_heap() {
-        todo!()
+        let mut arena = Arena::new(1024).unwrap();
+
+        assert_eq!(unsafe { arena.root.offset_from(arena.stop) }, -1024);
+        assert_eq!(arena.root, arena.next.get());
+
+        arena.reset(); //  no-op here
+        assert_eq!(arena.root, arena.next.get());
+
+        test_arena(arena);
     }
 
     #[test]
     fn arena_stack() {
-        todo!()
+        let mut memory = [0u8; 1024];
+        let mut arena = Arena::with_memory(&mut memory);
+
+        assert_eq!(unsafe { arena.root.offset_from(arena.stop) }, -1024);
+        assert_eq!(arena.root, arena.next.get());
+
+        arena.reset(); //  no-op here
+        assert_eq!(arena.root, arena.next.get());
+
+        test_arena(arena);
     }
 
-    fn arena(arena: Arena) {
-        // alloc
+    fn test_arena(mut arena: Arena) {
+        let a = arena.alloc(Layout::array::<u8>(1024).unwrap()).unwrap();
+        assert_eq!(a.as_ptr(), arena.root);
 
-        // alloc_slice
+        let b = arena.alloc(Layout::new::<usize>());
+        b.unwrap_err();
 
-        // reset
+        arena.reset();
+
+        let c = arena.alloc(Layout::array::<u8>(3).unwrap()).unwrap();
+        assert_eq!(c.as_ptr(), arena.root);
+
+        for i in 0..10 {
+            // test aligning to layout
+            let p = arena.alloc(Layout::new::<usize>()).unwrap();
+            assert_eq!(p.as_ptr(), unsafe {
+                arena.root.add((i + 1) * std::mem::size_of::<usize>())
+            });
+        }
+
+        // fill the rest of the arena
+        let d = arena.alloc_slice::<usize>(117).unwrap();
+        assert_eq!(d.len(), 117);
+
+        let e = arena.alloc(Layout::new::<u8>());
+        e.unwrap_err();
     }
 
     #[test]
     fn arena_box() {
-        // make
+        let mut dropped = false;
 
-        // make_with
+        struct T<'a> {
+            dropped: &'a mut bool,
+        }
 
-        // drop
+        impl Drop for T<'_> {
+            fn drop(&mut self) {
+                *self.dropped = true;
+            }
+        }
 
-        // reset
+        let arena = Arena::new(1024).unwrap();
 
-        todo!()
+        let t = arena
+            .make(T {
+                dropped: &mut dropped,
+            })
+            .unwrap();
+
+        std::mem::drop(t);
+
+        assert!(dropped);
     }
 
     #[test]

@@ -9,7 +9,7 @@ pub mod system;
 pub mod time;
 
 mod application;
-mod arena;
+mod core;
 
 pub use application::{AppContext, Application, Config, EventHandler};
 pub use string::HashedStr;

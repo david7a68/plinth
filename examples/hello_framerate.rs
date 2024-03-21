@@ -30,7 +30,7 @@ pub struct AppWindow {
 pub struct App {}
 
 impl EventHandler<AppWindow> for App {
-    fn start(&mut self, app: &plinth::AppContext<AppWindow>) {
+    fn start(&mut self, app: &mut AppContext<AppWindow>) {
         app.create_window(WindowAttributes::default(), |_| AppWindow {
             refresh_rate: STARTING_REFRESH_RATE,
             prev_draw_start_time: PresentTime::now(),
@@ -42,17 +42,21 @@ impl EventHandler<AppWindow> for App {
         // no-op
     }
 
-    fn wake_requested(&mut self, _app: &AppContext<AppWindow>, _window: &mut Window<AppWindow>) {
+    fn wake_requested(
+        &mut self,
+        _app: &mut AppContext<AppWindow>,
+        _window: &mut Window<AppWindow>,
+    ) {
         // no-op
     }
 
-    fn destroyed(&mut self, _app: &AppContext<AppWindow>, _window_data: AppWindow) {
+    fn destroyed(&mut self, _app: &mut AppContext<AppWindow>, _window_data: AppWindow) {
         // no-op
     }
 
     fn repaint(
         &mut self,
-        _app: &AppContext<AppWindow>,
+        _app: &mut AppContext<AppWindow>,
         window: &mut Window<AppWindow>,
         canvas: &mut Canvas,
         timing: &FrameInfo,

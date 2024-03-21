@@ -84,11 +84,8 @@ impl<T: Num> Extent<T> {
         height: T::MAX,
     };
 
-    pub fn new(width: impl Into<T>, height: impl Into<T>) -> Self {
-        Self {
-            width: width.into(),
-            height: height.into(),
-        }
+    pub const fn new(width: T, height: T) -> Self {
+        Self { width, height }
     }
 
     pub fn cast<U: Num + From<T>>(self) -> Extent<U> {
@@ -191,6 +188,18 @@ impl<T: Num> Rect<T> {
         let origin = self.origin;
         let extent = self.extent;
         [origin.x, origin.y, extent.width, extent.height]
+    }
+}
+
+impl<T: Num, I: Into<T>> From<(I, I, I, I)> for Rect<T> {
+    fn from((x, y, w, h): (I, I, I, I)) -> Self {
+        Self::new((x, y), (w, h))
+    }
+}
+
+impl<T: Num, I: Into<T>> From<((I, I), (I, I))> for Rect<T> {
+    fn from(((x, y), (w, h)): ((I, I), (I, I))) -> Self {
+        Self::new((x, y), (w, h))
     }
 }
 

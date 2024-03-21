@@ -1,9 +1,30 @@
 use plinth::{
-    geometry::Rect,
-    graphics::{Canvas, Color, FrameInfo, GraphicsConfig, RoundRect},
+    geometry::{Extent, Texel},
+    graphics::{
+        Canvas, Color, Format, FrameInfo, GraphicsConfig, ImageInfo, Layout, PixelBuf, RoundRect,
+    },
+    resource::StaticResource,
+    static_str,
     system::window::{Window, WindowAttributes},
     AppContext, Application, Config, EventHandler,
 };
+
+#[rustfmt::skip]
+const IMAGE: PixelBuf<'static> = PixelBuf::new(
+    ImageInfo {
+        extent: Extent::new(Texel(3), Texel(1)),
+        format: Format::Linear,
+        layout: Layout::Rgba8,
+        stride: 1,
+    },
+    &[
+        255, 0, 0, 255,
+        0, 255, 0, 255,
+        0, 0, 255, 255
+    ],
+);
+
+const RESOURCES: &[StaticResource] = &[StaticResource::Image(static_str!("image"), IMAGE)];
 
 fn main() {
     let config = Config {
@@ -11,7 +32,7 @@ fn main() {
             debug_mode: false,
             ..Default::default()
         },
-        ..Default::default()
+        resources: RESOURCES,
     };
 
     Application::new(config).unwrap().run(App {}).unwrap();
@@ -48,17 +69,15 @@ impl EventHandler<AppWindow> for App {
 
     fn repaint(
         &mut self,
-        _app: &mut AppContext<AppWindow>,
+        app: &mut AppContext<AppWindow>,
         _window: &mut Window<AppWindow>,
         canvas: &mut Canvas,
         _frame: &FrameInfo,
     ) {
+        let image = app.load_image(static_str!("image")).unwrap();
+
         canvas.clear(Color::BLACK);
-        canvas.draw_rect(
-            RoundRect::new(Rect::new((50.0, 100.0), (40.0, 70.0))).with_color(Color::BLUE),
-        );
-        canvas.draw_rect(
-            RoundRect::new(Rect::new((100.0, 100.0), (40.0, 70.0))).with_color(Color::RED),
-        );
+        canvas.draw_rect(RoundRect::new((50.0, 100.0, 40.0, 70.0)).with_image(image));
+        canvas.draw_rect(RoundRect::new((100.0, 100.0, 40.0, 70.0)).with_color(Color::RED));
     }
 }

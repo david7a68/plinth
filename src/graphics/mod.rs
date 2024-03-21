@@ -13,7 +13,7 @@ use crate::{
 
 pub use self::{
     color::Color,
-    image::{Image, Info, Layout, PixelBuf},
+    image::{Error as ImageError, Format, Image, Info as ImageInfo, Layout, PixelBuf},
     primitives::RoundRect,
 };
 
@@ -89,6 +89,33 @@ impl Graphics {
 
         WindowContext { context }
     }
+
+    /// Creates a new image.
+    pub fn create_image(&self, info: &ImageInfo) -> Result<Image, ImageError> {
+        todo!()
+    }
+
+    /// Uploads pixels for an image.
+    ///
+    /// The pixel buffer must be the same size as the image.
+    pub fn upload_image(&self, image: Image, pixels: &PixelBuf) -> Result<(), ImageError> {
+        todo!()
+    }
+
+    /// Removes an image from circulation.
+    ///
+    /// The image may continue to be used in the background until any pending
+    /// drawing operations that use this image have completed.
+    pub fn remove_image(&self, image: Image) {
+        todo!()
+    }
+
+    /// Call to flush staging buffers.
+    ///
+    /// This does not block.
+    pub fn upload_flush(&self) {
+        todo!()
+    }
 }
 
 pub(crate) struct WindowContext {
@@ -153,10 +180,6 @@ impl Canvas<'_> {
             #[cfg(target_os = "windows")]
             CanvasImpl::Dx12(canvas) => canvas.draw_rect(rect),
         }
-    }
-
-    pub fn finish(&mut self) {
-        // todo
     }
 }
 

@@ -22,8 +22,9 @@ impl PartialOrd for HashedStr<'_> {
     }
 }
 
-impl<'a> From<&'a str> for HashedStr<'a> {
-    fn from(val: &'a str) -> Self {
+impl<'a, S: Deref<Target = &'a str>> From<S> for HashedStr<'a> {
+    fn from(val: S) -> Self {
+        let val = val.deref();
         HashedStr {
             hash: const_fnv1a_hash::fnv1a_hash_str_64(val),
             string: val,
@@ -47,7 +48,7 @@ impl Deref for HashedStr<'_> {
 macro_rules! static_str {
     ($s:expr) => {{
         let string: &'static str = $s;
-        StaticStr {
+        plinth::HashedStr {
             hash: const_fnv1a_hash::fnv1a_hash_str_64(string),
             string,
         }

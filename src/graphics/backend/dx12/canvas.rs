@@ -104,7 +104,10 @@ impl<'a> Canvas<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::geometry::{Pixel, Rect};
+    use crate::{
+        geometry::{Pixel, Rect},
+        graphics::Image,
+    };
 
     #[test]
     fn draw_list() {
@@ -115,10 +118,12 @@ mod tests {
         canvas.draw_rect(RoundRect {
             rect: Rect::<Pixel>::ZERO,
             color: Color::BLACK,
+            image: Image::default(),
         });
         canvas.draw_rect(RoundRect {
             rect: Rect::<Pixel>::ZERO,
             color: Color::BLACK,
+            image: Image::default(),
         });
 
         list.finish();

@@ -9,7 +9,7 @@ pub enum Error {
     PathTooLong,
 
     #[error("The path does not point to an image.")]
-    PathNotAnImage,
+    NotAnImage,
 
     #[error("The resource could not be found.")]
     NotFound,

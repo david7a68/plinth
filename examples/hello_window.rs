@@ -26,7 +26,7 @@ pub struct App {}
 
 #[allow(unused_variables)]
 impl EventHandler<()> for App {
-    fn start(&mut self, app: &AppContext<()>) {
+    fn start(&mut self, app: &mut AppContext<()>) {
         app.create_window(WindowAttributes::default(), |_| {
             println!("Window created");
         })
@@ -38,11 +38,11 @@ impl EventHandler<()> for App {
         .unwrap();
     }
 
-    fn suspend(&mut self, app: &AppContext<()>) {
+    fn suspend(&mut self, app: &mut AppContext<()>) {
         println!("Event loop suspended");
     }
 
-    fn resume(&mut self, app: &AppContext<()>) {
+    fn resume(&mut self, app: &mut AppContext<()>) {
         println!("Event loop resumed");
     }
 
@@ -50,49 +50,49 @@ impl EventHandler<()> for App {
         println!("Event loop stopped");
     }
 
-    fn low_memory(&mut self, app: &AppContext<()>) {
+    fn low_memory(&mut self, app: &mut AppContext<()>) {
         println!("Low memory event");
     }
 
-    fn power_source_changed(&mut self, app: &AppContext<()>, power_source: PowerSource) {
+    fn power_source_changed(&mut self, app: &mut AppContext<()>, power_source: PowerSource) {
         println!("Power source changed: {:?}", power_source);
     }
 
-    fn monitor_state_changed(&mut self, app: &AppContext<()>, monitor: MonitorState) {
+    fn monitor_state_changed(&mut self, app: &mut AppContext<()>, monitor: MonitorState) {
         println!("Monitor state changed: {:?}", monitor);
     }
 
     fn power_preference_changed(
         &mut self,
-        app: &AppContext<()>,
+        app: &mut AppContext<()>,
         power_preference: PowerPreference,
     ) {
         println!("Power preference changed: {:?}", power_preference);
     }
 
-    fn activated(&mut self, app: &AppContext<()>, window: &mut Window<()>) {
+    fn activated(&mut self, app: &mut AppContext<()>, window: &mut Window<()>) {
         println!("Window activated");
     }
 
-    fn deactivated(&mut self, app: &AppContext<()>, window: &mut Window<()>) {
+    fn deactivated(&mut self, app: &mut AppContext<()>, window: &mut Window<()>) {
         println!("Window deactivated");
     }
 
-    fn drag_resize_started(&mut self, app: &AppContext<()>, window: &mut Window<()>) {
+    fn drag_resize_started(&mut self, app: &mut AppContext<()>, window: &mut Window<()>) {
         println!("Window drag resize started");
     }
 
-    fn drag_resize_ended(&mut self, app: &AppContext<()>, window: &mut Window<()>) {
+    fn drag_resize_ended(&mut self, app: &mut AppContext<()>, window: &mut Window<()>) {
         println!("Window drag resize ended");
     }
 
-    fn resized(&mut self, app: &AppContext<()>, window: &mut Window<()>, size: Extent<Wixel>) {
+    fn resized(&mut self, app: &mut AppContext<()>, window: &mut Window<()>, size: Extent<Wixel>) {
         println!("Window resized: {:?}", size);
     }
 
     fn dpi_changed(
         &mut self,
-        app: &AppContext<()>,
+        app: &mut AppContext<()>,
         window: &mut Window<()>,
         dpi: Scale<Wixel, Pixel>,
         size: Extent<Wixel>,
@@ -101,42 +101,42 @@ impl EventHandler<()> for App {
         println!("Window size: {:?}", size);
     }
 
-    fn close_requested(&mut self, _app: &AppContext<()>, window: &mut Window<()>) {
+    fn close_requested(&mut self, _app: &mut AppContext<()>, window: &mut Window<()>) {
         println!("Window close request");
         window.destroy();
     }
 
-    fn shown(&mut self, app: &AppContext<()>, window: &mut Window<()>) {
+    fn shown(&mut self, app: &mut AppContext<()>, window: &mut Window<()>) {
         println!("Window shown");
     }
 
-    fn hidden(&mut self, app: &AppContext<()>, window: &mut Window<()>) {
+    fn hidden(&mut self, app: &mut AppContext<()>, window: &mut Window<()>) {
         println!("Window hidden");
     }
 
-    fn maximized(&mut self, app: &AppContext<()>, window: &mut Window<()>) {
+    fn maximized(&mut self, app: &mut AppContext<()>, window: &mut Window<()>) {
         println!("Window maximized");
     }
 
-    fn minimized(&mut self, app: &AppContext<()>, window: &mut Window<()>) {
+    fn minimized(&mut self, app: &mut AppContext<()>, window: &mut Window<()>) {
         println!("Window minimized");
     }
 
-    fn restored(&mut self, app: &AppContext<()>, window: &mut Window<()>) {
+    fn restored(&mut self, app: &mut AppContext<()>, window: &mut Window<()>) {
         println!("Window restored");
     }
 
-    fn moved(&mut self, app: &AppContext<()>, window: &mut Window<()>, position: Point<Wixel>) {
+    fn moved(&mut self, app: &mut AppContext<()>, window: &mut Window<()>, position: Point<Wixel>) {
         println!("Window moved: {:?}", position);
     }
 
-    fn wake_requested(&mut self, app: &AppContext<()>, window: &mut Window<()>) {
+    fn wake_requested(&mut self, app: &mut AppContext<()>, window: &mut Window<()>) {
         println!("Window wake requested");
     }
 
     fn repaint(
         &mut self,
-        app: &AppContext<()>,
+        app: &mut AppContext<()>,
         window: &mut Window<()>,
         canvas: &mut Canvas,
         frame_info: &FrameInfo,
@@ -144,13 +144,13 @@ impl EventHandler<()> for App {
         println!("Window needs repaint");
     }
 
-    fn destroyed(&mut self, _app: &AppContext<()>, _window_data: ()) {
+    fn destroyed(&mut self, _app: &mut AppContext<()>, _window_data: ()) {
         println!("Window destroyed");
     }
 
     fn key(
         &mut self,
-        app: &AppContext<()>,
+        app: &mut AppContext<()>,
         window: &mut Window<()>,
         code: KeyCode,
         state: ButtonState,
@@ -161,7 +161,7 @@ impl EventHandler<()> for App {
 
     fn mouse_button(
         &mut self,
-        app: &AppContext<()>,
+        app: &mut AppContext<()>,
         window: &mut Window<()>,
         button: MouseButton,
         state: ButtonState,
@@ -176,7 +176,7 @@ impl EventHandler<()> for App {
 
     fn pointer_moved(
         &mut self,
-        app: &AppContext<()>,
+        app: &mut AppContext<()>,
         window: &mut Window<()>,
         position: Point<Wixel>,
     ) {
@@ -185,20 +185,20 @@ impl EventHandler<()> for App {
 
     fn pointer_entered(
         &mut self,
-        app: &AppContext<()>,
+        app: &mut AppContext<()>,
         window: &mut Window<()>,
         position: Point<Wixel>,
     ) {
         println!("Mouse entered: {:?}", position);
     }
 
-    fn pointer_left(&mut self, app: &AppContext<()>, window: &mut Window<()>) {
+    fn pointer_left(&mut self, app: &mut AppContext<()>, window: &mut Window<()>) {
         println!("Mouse left");
     }
 
     fn mouse_scrolled(
         &mut self,
-        app: &AppContext<()>,
+        app: &mut AppContext<()>,
         window: &mut Window<()>,
         delta: f32,
         axis: ScrollAxis,

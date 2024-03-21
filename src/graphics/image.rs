@@ -1,12 +1,26 @@
 use std::{fmt::Debug, ptr::addr_of};
 
-use crate::geometry::{Extent, Texel};
+use crate::{
+    geometry::{Extent, Texel},
+    limits::MAX_IMAGE_COUNT,
+};
+
+#[derive(Debug, thiserror::Error)]
+pub enum Error {
+    #[error("The image size exceeds the max image size.")]
+    SizeLimit,
+    #[error("The image could not be created because the image count limit ({}) has been reached ", MAX_IMAGE_COUNT.get())]
+    MaxCount,
+    #[error("The image handle has expired.")]
+    Expired,
+}
 
 /// The layout of pixel data in memory.
 #[repr(u8)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Layout {
     Rgba8,
+    Rgba8Vector,
     Bgra8,
     Alpha8,
 }
@@ -15,8 +29,9 @@ impl From<u8> for Layout {
     fn from(value: u8) -> Self {
         match value {
             0 => Layout::Rgba8,
-            1 => Layout::Bgra8,
-            2 => Layout::Alpha8,
+            1 => Layout::Rgba8Vector,
+            2 => Layout::Bgra8,
+            3 => Layout::Alpha8,
             _ => panic!("Invalid layout value: {}", value),
         }
     }
@@ -42,39 +57,18 @@ impl From<u8> for Format {
     }
 }
 
-/// How the image responds to resizing.
-#[repr(u8)]
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum Sizing {
-    /// The image can be resized without loss of quality.
-    Vector,
-    /// The image can be resized, but may lose quality.
-    Bitmap,
-}
-
-impl From<u8> for Sizing {
-    fn from(value: u8) -> Self {
-        match value {
-            0 => Sizing::Vector,
-            1 => Sizing::Bitmap,
-            _ => panic!("Invalid sizing value: {}", value),
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Info {
     pub extent: Extent<Texel>,
     pub format: Format,
     pub layout: Layout,
-    pub sizing: Sizing,
     pub stride: i16,
 }
 
 /// A handle to an image.
 ///
 /// Once created, images are immutable.
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Image {
     packed: PackedImage,
 }
@@ -84,7 +78,6 @@ impl Image {
         extent: Extent<Texel>,
         layout: Layout,
         format: Format,
-        sizing: Sizing,
         index: u32,
         epoch: u32,
     ) -> Image {
@@ -93,7 +86,6 @@ impl Image {
             .with_height(extent.height.0)
             .with_layout(layout as u8)
             .with_format(format as u8)
-            .with_sizing(sizing as u8)
             .with_index(index)
             .with_epoch(epoch);
         Image { packed }
@@ -110,10 +102,6 @@ impl Image {
     pub fn format(&self) -> Format {
         self.packed.format().into()
     }
-
-    pub fn sizing(&self) -> Sizing {
-        self.packed.sizing().into()
-    }
 }
 
 impl Debug for Image {
@@ -122,7 +110,6 @@ impl Debug for Image {
             .field("extent", &self.extent())
             .field("layout", &self.layout())
             .field("format", &self.format())
-            .field("sizing", &self.sizing())
             .field("index", &self.packed.index())
             .field("epoch", &self.packed.epoch())
             .finish()
@@ -137,22 +124,22 @@ pub struct PixelBuf<'a> {
 
 impl<'a> PixelBuf<'a> {
     #[must_use]
-    pub fn new(info: Info, data: &[u8]) -> PixelBuf {
+    pub const fn new(info: Info, data: &[u8]) -> PixelBuf {
         PixelBuf { info, data }
     }
 
     #[must_use]
-    pub fn info(&self) -> &Info {
+    pub const fn info(&self) -> &Info {
         &self.info
     }
 
     #[must_use]
-    pub fn data(&self) -> &[u8] {
+    pub const fn data(&self) -> &[u8] {
         self.data
     }
 
     #[must_use]
-    pub fn unwrap(self) -> (Info, &'a [u8]) {
+    pub const fn unwrap(self) -> (Info, &'a [u8]) {
         (self.info, self.data)
     }
 }
@@ -178,9 +165,7 @@ pub struct PackedImage {
     layout: u8,
     #[bits(3)]
     format: u8,
-    #[bits(1)]
-    sizing: u8,
-    #[bits(3)]
+    #[bits(4)]
     _empty: u8,
     #[bits(10)] // max index: 1024, could take 1 bit from _empty for 2048
     index: u32,

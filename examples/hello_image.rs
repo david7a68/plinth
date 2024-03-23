@@ -12,7 +12,7 @@ use plinth::{
 #[rustfmt::skip]
 const IMAGE: PixelBuf<'static> = PixelBuf::new(
     ImageInfo {
-        extent: Extent::new(Texel(3), Texel(1)),
+        extent: Extent {width: Texel(3), height: Texel(1)},
         format: Format::Linear,
         layout: Layout::Rgba8,
         stride: 1,
@@ -29,7 +29,7 @@ const RESOURCES: &[StaticResource] = &[StaticResource::Image(static_str!("image"
 fn main() {
     let config = Config {
         graphics: GraphicsConfig {
-            debug_mode: false,
+            debug_mode: true,
             ..Default::default()
         },
         resources: RESOURCES,

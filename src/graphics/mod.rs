@@ -91,30 +91,38 @@ impl Graphics {
     }
 
     /// Creates a new image.
-    pub fn create_image(&self, info: &ImageInfo) -> Result<Image, ImageError> {
-        todo!()
+    pub fn create_image(&mut self, info: &ImageInfo) -> Result<Image, ImageError> {
+        match &mut self.graphics {
+            GraphicsImpl::Dx12(graphics) => graphics.create_image(info),
+        }
     }
 
     /// Uploads pixels for an image.
     ///
     /// The pixel buffer must be the same size as the image.
-    pub fn upload_image(&self, image: Image, pixels: &PixelBuf) -> Result<(), ImageError> {
-        todo!()
+    pub fn upload_image(&mut self, image: Image, pixels: &PixelBuf) -> Result<(), ImageError> {
+        match &mut self.graphics {
+            GraphicsImpl::Dx12(graphics) => graphics.upload_image(image, pixels),
+        }
     }
 
     /// Removes an image from circulation.
     ///
     /// The image may continue to be used in the background until any pending
     /// drawing operations that use this image have completed.
-    pub fn remove_image(&self, image: Image) {
-        todo!()
+    pub fn remove_image(&mut self, image: Image) {
+        match &mut self.graphics {
+            GraphicsImpl::Dx12(graphics) => graphics.remove_image(image),
+        }
     }
 
     /// Call to flush staging buffers.
     ///
     /// This does not block.
-    pub fn upload_flush(&self) {
-        todo!()
+    pub fn upload_flush(&mut self) {
+        match &mut self.graphics {
+            GraphicsImpl::Dx12(graphics) => graphics.upload_flush(),
+        };
     }
 }
 

@@ -37,6 +37,8 @@ new_key_type!(DefaultKey);
 pub struct SlotMap<const CAPACITY: usize, V, K: Key = DefaultKey> {
     slots: [Slot<V>; CAPACITY],
     next_free: u32,
+    num_free: u32,
+    num_alloc: u32,
     _phantom: PhantomData<K>,
 }
 
@@ -66,8 +68,14 @@ impl<const CAPACITY: usize, V, K: Key> SlotMap<CAPACITY, V, K> {
         Self {
             slots,
             next_free,
+            num_free: CAPACITY as u32 - 1,
+            num_alloc: 1,
             _phantom: PhantomData,
         }
+    }
+
+    pub fn has_capacity(&self, capacity: usize) -> bool {
+        u32::from(self.num_free) >= capacity as u32
     }
 
     pub fn get(&self, key: K) -> Option<&V> {
@@ -101,6 +109,9 @@ impl<const CAPACITY: usize, V, K: Key> SlotMap<CAPACITY, V, K> {
         self.next_free = slot.next;
         slot.value.write(value);
 
+        self.num_free.checked_sub(1).unwrap();
+        self.num_alloc.checked_add(1).unwrap();
+
         Ok(Key::new(index as u32, slot.epoch))
     }
 
@@ -116,11 +127,14 @@ impl<const CAPACITY: usize, V, K: Key> SlotMap<CAPACITY, V, K> {
                 slot.epoch = epoch;
                 slot.next = self.next_free;
                 self.next_free = key.index();
+                self.num_free.checked_add(1).unwrap();
             }
             None => {
                 // retire the slot, so don't add it to the free list
             }
         }
+
+        self.num_alloc.checked_sub(1).unwrap();
 
         Some(unsafe { slot.value.assume_init_read() })
     }

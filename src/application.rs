@@ -45,7 +45,7 @@ impl Application {
     pub fn new(config: Config) -> Result<Self, Error> {
         limits::MAX_IMAGE_COUNT.check(&config.resources.len());
 
-        let graphics = Graphics::new(&config.graphics);
+        let mut graphics = Graphics::new(&config.graphics);
 
         let mut resources =
             HashMap::with_capacity_and_hasher(MAX_IMAGE_COUNT.get(), PassthroughBuildHasher::new());

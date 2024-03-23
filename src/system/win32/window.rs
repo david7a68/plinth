@@ -297,7 +297,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
                 let resized = width != window.size.width || height != window.size.height;
                 let is_start = resized && window.flags.contains(WindowFlags::IN_DRAG_RESIZE);
 
-                window.size = Extent::new(width.into(), height.into());
+                window.size = Extent::new(width, height);
                 window.flags.set(WindowFlags::IS_RESIZING, true);
                 window.paint_reason = resized
                     .then_some(PaintReason::Commanded) // override if resized

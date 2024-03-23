@@ -10,13 +10,15 @@ use windows::{
             ID3D12InfoQueue1, ID3D12Resource, D3D12_COMMAND_LIST_TYPE,
             D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_QUEUE_DESC,
             D3D12_COMMAND_QUEUE_FLAG_NONE, D3D12_CPU_PAGE_PROPERTY_UNKNOWN, D3D12_FENCE_FLAG_NONE,
-            D3D12_HEAP_FLAG_NONE, D3D12_HEAP_PROPERTIES, D3D12_HEAP_TYPE_UPLOAD,
-            D3D12_MEMORY_POOL_UNKNOWN, D3D12_MESSAGE_CALLBACK_FLAG_NONE, D3D12_MESSAGE_CATEGORY,
-            D3D12_MESSAGE_ID, D3D12_MESSAGE_SEVERITY, D3D12_MESSAGE_SEVERITY_CORRUPTION,
-            D3D12_MESSAGE_SEVERITY_ERROR, D3D12_MESSAGE_SEVERITY_INFO,
-            D3D12_MESSAGE_SEVERITY_MESSAGE, D3D12_MESSAGE_SEVERITY_WARNING, D3D12_RESOURCE_DESC,
-            D3D12_RESOURCE_DIMENSION_BUFFER, D3D12_RESOURCE_FLAG_NONE,
-            D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_TEXTURE_LAYOUT_ROW_MAJOR,
+            D3D12_HEAP_FLAG_NONE, D3D12_HEAP_PROPERTIES, D3D12_HEAP_TYPE_DEFAULT,
+            D3D12_HEAP_TYPE_UPLOAD, D3D12_MEMORY_POOL_UNKNOWN, D3D12_MESSAGE_CALLBACK_FLAG_NONE,
+            D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_ID, D3D12_MESSAGE_SEVERITY,
+            D3D12_MESSAGE_SEVERITY_CORRUPTION, D3D12_MESSAGE_SEVERITY_ERROR,
+            D3D12_MESSAGE_SEVERITY_INFO, D3D12_MESSAGE_SEVERITY_MESSAGE,
+            D3D12_MESSAGE_SEVERITY_WARNING, D3D12_RESOURCE_DESC, D3D12_RESOURCE_DIMENSION_BUFFER,
+            D3D12_RESOURCE_DIMENSION_TEXTURE2D, D3D12_RESOURCE_FLAG_NONE,
+            D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+            D3D12_TEXTURE_LAYOUT_ROW_MAJOR, D3D12_TEXTURE_LAYOUT_UNKNOWN,
         },
         Dxgi::{
             Common::{DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC},
@@ -26,9 +28,12 @@ use windows::{
     },
 };
 
-use crate::graphics::{backend::SubmitId, GraphicsConfig};
+use crate::{
+    geometry::{Extent, Texel},
+    graphics::{backend::SubmitId, Format, GraphicsConfig, Layout},
+};
 
-use super::shaders::RectShader;
+use super::{shaders::RectShader, to_dxgi_format};
 
 pub struct Device {
     dxgi: IDXGIFactory2,
@@ -100,8 +105,13 @@ impl Device {
         }
     }
 
-    pub fn wait(&self, submit_id: SubmitId) {
-        self.queue.wait(submit_id);
+    /// Causes the CPU to wait until the given submission has completed.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the CPU had to wait, `false` if the submission has already completed.
+    pub fn wait(&self, submit_id: SubmitId) -> bool {
+        self.queue.wait(submit_id)
     }
 
     pub fn wait_for_idle(&self) {
@@ -111,32 +121,6 @@ impl Device {
     pub fn submit(&self, command_list: &ID3D12GraphicsCommandList) -> SubmitId {
         self.queue.submit(&command_list.cast().unwrap())
     }
-
-    // pub fn upload_texture(&self, pixels: &PixelBufferRef) -> (TextureId, SubmitId) {
-    // behavior here depends on the size of the texture that we want to
-    // upload. if it's small enough, use a texture atlas, otherwise use a
-    // dedicated allocation.
-    //
-    // uploading happens with fixed-size buffers, which may require multiple
-    // submissions. Wait for all but the last one to complete before
-    // returning. Upload buffer size can be defined at runtime, but must be
-    // at least 65536 * 4 bytes (a 256x256 pixel square). This is a single
-    // row of the largest texture size we support at 4 bytes per pixel. The
-    // larger the upload buffer size, the fewer submissions we need to make
-    // and the faster the upload will be in exchange for memory consumption.
-    //
-    // note: the buffer size restriction is kind of arbitrary. The actual
-    // smallest limit is 256 bytes according to the DX spec.
-    //
-    // Submission strategies:
-    // - upload all at once on the graphics queue (atlas update)
-    // - upload in chunks on a low-priority graphics queue (???)
-    // - upload in chunks on the copy queue (large textures only)
-    //
-    // -dz
-
-    //     todo!()
-    // }
 
     pub fn alloc_buffer(&self, size: u64) -> ID3D12Resource {
         let heap_desc = D3D12_HEAP_PROPERTIES {
@@ -178,6 +162,53 @@ impl Device {
         .unwrap();
 
         buffer.unwrap()
+    }
+
+    pub fn alloc_image(
+        &self,
+        extent: Extent<Texel>,
+        layout: Layout,
+        format: Format,
+    ) -> ID3D12Resource {
+        let heap_desc = D3D12_HEAP_PROPERTIES {
+            Type: D3D12_HEAP_TYPE_DEFAULT,
+            CPUPageProperty: D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+            MemoryPoolPreference: D3D12_MEMORY_POOL_UNKNOWN,
+            CreationNodeMask: 0,
+            VisibleNodeMask: 0,
+        };
+
+        let image_desc = D3D12_RESOURCE_DESC {
+            Dimension: D3D12_RESOURCE_DIMENSION_TEXTURE2D,
+            Alignment: 4096,
+            Width: extent.width.0 as u64,
+            Height: extent.height.0 as u32,
+            DepthOrArraySize: 1,
+            MipLevels: 1,
+            Format: to_dxgi_format(layout, format),
+            SampleDesc: DXGI_SAMPLE_DESC {
+                Count: 1,
+                Quality: 0,
+            },
+            Layout: D3D12_TEXTURE_LAYOUT_UNKNOWN,
+            Flags: D3D12_RESOURCE_FLAG_NONE,
+        };
+
+        let mut image = None;
+
+        unsafe {
+            self.handle.CreateCommittedResource(
+                &heap_desc,
+                D3D12_HEAP_FLAG_NONE,
+                &image_desc,
+                D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                None,
+                &mut image,
+            )
+        }
+        .unwrap();
+
+        image.unwrap()
     }
 
     pub fn create_swapchain(&self, desc: &DXGI_SWAP_CHAIN_DESC1) -> IDXGISwapChain1 {
@@ -226,9 +257,13 @@ impl Queue {
     }
 
     /// Causes the CPU to wait until the given submission has completed.
-    fn wait(&self, submission: SubmitId) {
+    ///
+    /// # Returns
+    ///
+    /// `true` if the CPU had to wait, `false` if the submission has already completed.
+    fn wait(&self, submission: SubmitId) -> bool {
         if self.is_done(submission) {
-            return;
+            return false;
         }
 
         unsafe {
@@ -245,6 +280,8 @@ impl Queue {
             .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |old| {
                 (old < submission.0).then_some(submission.0)
             });
+
+        true
     }
 
     /// Causes the CPU to wait until all submissions have completed.

@@ -1,4 +1,4 @@
-use std::{mem::ManuallyDrop, sync::Arc};
+use std::sync::Arc;
 
 use windows::{
     core::Interface,
@@ -9,11 +9,8 @@ use windows::{
                 ID3D12CommandAllocator, ID3D12DescriptorHeap, ID3D12GraphicsCommandList,
                 ID3D12Resource, D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_CPU_DESCRIPTOR_HANDLE,
                 D3D12_DESCRIPTOR_HEAP_DESC, D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
-                D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_RESOURCE_BARRIER, D3D12_RESOURCE_BARRIER_0,
-                D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_BARRIER_FLAG_NONE,
-                D3D12_RESOURCE_BARRIER_TYPE_TRANSITION, D3D12_RESOURCE_STATES,
-                D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET,
-                D3D12_RESOURCE_TRANSITION_BARRIER, D3D12_VIEWPORT,
+                D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_RESOURCE_STATE_PRESENT,
+                D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_VIEWPORT,
             },
             DirectComposition::{IDCompositionDevice, IDCompositionTarget, IDCompositionVisual},
             Dxgi::{
@@ -33,7 +30,10 @@ use windows::{
 
 use crate::{
     geometry::{Extent, Pixel, Rect, Scale, Wixel},
-    graphics::{backend::SubmitId, FrameInfo},
+    graphics::{
+        backend::{dx12::image_barrier, SubmitId},
+        FrameInfo,
+    },
     limits,
     time::{FramesPerSecond, PresentPeriod, PresentTime},
 };
@@ -331,30 +331,6 @@ impl Frame {
             command_list_mem: command_allocator,
         }
     }
-}
-
-pub fn image_barrier(
-    command_list: &ID3D12GraphicsCommandList,
-    image: &ID3D12Resource,
-    from: D3D12_RESOURCE_STATES,
-    to: D3D12_RESOURCE_STATES,
-) {
-    let transition = D3D12_RESOURCE_TRANSITION_BARRIER {
-        pResource: unsafe { std::mem::transmute_copy(image) },
-        Subresource: D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-        StateBefore: from,
-        StateAfter: to,
-    };
-
-    let barrier = D3D12_RESOURCE_BARRIER {
-        Type: D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-        Flags: D3D12_RESOURCE_BARRIER_FLAG_NONE,
-        Anonymous: D3D12_RESOURCE_BARRIER_0 {
-            Transition: ManuallyDrop::new(transition),
-        },
-    };
-
-    unsafe { command_list.ResourceBarrier(&[barrier]) };
 }
 
 pub fn resize_swapchain(

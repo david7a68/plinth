@@ -1,6 +1,6 @@
 //! 2D geometry types with type-safe coordinate spaces.
 
-use std::ops::{Add, Div, Mul, Sub};
+use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Hash)]
 pub struct Point<T: Num> {
@@ -84,8 +84,11 @@ impl<T: Num> Extent<T> {
         height: T::MAX,
     };
 
-    pub const fn new(width: T, height: T) -> Self {
-        Self { width, height }
+    pub fn new(width: impl Into<T>, height: impl Into<T>) -> Self {
+        Self {
+            width: width.into(),
+            height: height.into(),
+        }
     }
 
     pub fn cast<U: Num + From<T>>(self) -> Extent<U> {
@@ -267,7 +270,7 @@ pub trait ScaleTo<T: Num, U: Num> {
 }
 
 macro_rules! impl_num {
-    ($(#[$meta:meta])* $name:ident($int_ty:ty)) => {
+    ($(#[$meta:meta])* $name:ident($int_ty:ty): From($($from_ty:ty),*), Into($($into_ty:ty),*) ) => {
         $(#[$meta])*
         #[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
         pub struct $name(pub $int_ty);
@@ -280,11 +283,43 @@ macro_rules! impl_num {
             }
         }
 
+        impl Add<$int_ty> for $name {
+            type Output = Self;
+
+            fn add(self, other: $int_ty) -> Self {
+                Self(self.0 + other)
+            }
+        }
+
+        impl AddAssign for $name {
+            fn add_assign(&mut self, other: Self) {
+                self.0 += other.0;
+            }
+        }
+
+        impl AddAssign<$int_ty> for $name {
+            fn add_assign(&mut self, other: $int_ty) {
+                self.0 += other;
+            }
+        }
+
         impl Sub for $name {
             type Output = Self;
 
             fn sub(self, other: Self) -> Self {
                 Self(self.0 - other.0)
+            }
+        }
+
+        impl SubAssign for $name {
+            fn sub_assign(&mut self, other: Self) {
+                self.0 -= other.0;
+            }
+        }
+
+        impl SubAssign<$int_ty> for $name {
+            fn sub_assign(&mut self, other: $int_ty) {
+                self.0 -= other;
             }
         }
 
@@ -296,11 +331,35 @@ macro_rules! impl_num {
             }
         }
 
+        impl MulAssign for $name {
+            fn mul_assign(&mut self, other: Self) {
+                self.0 *= other.0;
+            }
+        }
+
+        impl MulAssign<$int_ty> for $name {
+            fn mul_assign(&mut self, other: $int_ty) {
+                self.0 *= other;
+            }
+        }
+
         impl Div for $name {
             type Output = Self;
 
             fn div(self, other: Self) -> Self {
                 Self(self.0 / other.0)
+            }
+        }
+
+        impl DivAssign for $name {
+            fn div_assign(&mut self, other: Self) {
+                self.0 /= other.0;
+            }
+        }
+
+        impl DivAssign<$int_ty> for $name {
+            fn div_assign(&mut self, other: $int_ty) {
+                self.0 /= other;
             }
         }
 
@@ -315,6 +374,22 @@ macro_rules! impl_num {
                 value.0
             }
         }
+
+        $(
+            impl From<$from_ty> for $name {
+                fn from(value: $from_ty) -> Self {
+                    Self(value as $int_ty)
+                }
+            }
+        )*
+
+        $(
+            impl From<$name> for $into_ty {
+                fn from(value: $name) -> Self {
+                    <$into_ty>::from(value.0)
+                }
+            }
+        )*
 
         impl PartialEq<$int_ty> for $name {
             fn eq(&self, other: &$int_ty) -> bool {
@@ -338,18 +413,33 @@ macro_rules! impl_num {
     };
 }
 
-impl_num!(Pixel(f32));
+impl_num!(Pixel(f32): From(), Into());
 
 impl_num!(
-    #[derive(Eq, Hash)]
-    Texel(i16)
+    #[derive(Eq, Hash, Ord)]
+    Texel(i16):
+    From(),
+    Into()
 );
+
+impl TryFrom<Texel> for u64 {
+    type Error = std::num::TryFromIntError;
+
+    fn try_from(value: Texel) -> Result<Self, Self::Error> {
+        value.0.try_into()
+    }
+}
 
 pub use wixel::Wixel;
 mod wixel {
     use super::*;
 
-    impl_num!(Wixel(i16));
+    impl_num!(
+        #[derive(Eq, Hash, Ord)]
+        Wixel(i16):
+        From(),
+        Into(i32, f32)
+    );
 
     impl Default for Extent<Wixel> {
         /// Special case for the default extent of a window.
@@ -363,18 +453,6 @@ mod wixel {
     impl ScaleTo<Wixel, Pixel> for Wixel {
         fn scale(&self, factor: Scale<Wixel, Pixel>) -> Pixel {
             Pixel(self.0 as f32 * factor.factor)
-        }
-    }
-
-    impl From<Wixel> for i32 {
-        fn from(value: Wixel) -> Self {
-            value.0 as i32
-        }
-    }
-
-    impl From<Wixel> for f32 {
-        fn from(value: Wixel) -> Self {
-            value.0 as f32
         }
     }
 

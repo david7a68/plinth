@@ -137,6 +137,17 @@ macro_rules! extent_min_max {
                 }
             }
 
+            pub fn test(&self, value: impl TryInto<Extent<$num>>) -> bool {
+                let Ok(value): Result<Extent<$num>, _> = value.try_into() else {
+                    return false;
+                };
+
+                value.width.0 >= MIN_X
+                    && value.height.0 >= MIN_Y
+                    && value.width.0 <= MAX_X
+                    && value.height.0 <= MAX_Y
+            }
+
             pub fn check(&self, value: impl TryInto<Extent<$num>>) {
                 let Ok(value): Result<Extent<$num>, _> = value.try_into() else {
                     panic!("{}", self.error)

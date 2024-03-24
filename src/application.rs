@@ -60,7 +60,7 @@ impl Application {
             }
         }
 
-        graphics.upload_flush();
+        graphics.flush_upload_buffer();
 
         let event_loop = EventLoop::new()?;
 
@@ -100,7 +100,7 @@ impl Application {
 pub struct AppContext<'a, UserWindowData> {
     graphics: &'a Graphics,
     resources: &'a mut HashMap<u64, Resource, PassthroughBuildHasher>,
-    event_loop: &'a ActiveEventLoop<(WindowState, UserWindowData)>,
+    event_loop: &'a ActiveEventLoop<(WindowState<'a>, UserWindowData)>,
 }
 
 impl<'a, UserWindowData> AppContext<'a, UserWindowData> {
@@ -347,8 +347,8 @@ pub trait EventHandler<WindowData> {
     }
 }
 
-struct WindowState {
-    context: WindowContext,
+struct WindowState<'a> {
+    context: WindowContext<'a>,
 }
 
 struct ApplicationEventHandler<'a, UserData, Client: EventHandler<UserData>> {
@@ -358,7 +358,7 @@ struct ApplicationEventHandler<'a, UserData, Client: EventHandler<UserData>> {
     phantom: PhantomData<UserData>,
 }
 
-impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, UserData)>
+impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState<'_>, UserData)>
     for ApplicationEventHandler<'_, UserData, Outer>
 {
     fn start(&mut self, event_loop: &ActiveEventLoop<(WindowState, UserData)>) {
@@ -476,7 +476,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState, User
         let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
         let (meta, mut wn) = window.split();
 
-        meta.context.change_dpi(dpi, size);
+        meta.context.change_dpi(size, dpi);
         self.client.dpi_changed(&mut cx, &mut wn, dpi, size);
     }
 

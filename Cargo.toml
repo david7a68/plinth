@@ -11,6 +11,7 @@ arrayvec = "0.7.4"
 bitfield-struct = "0.6.0"
 bitflags = "2.4.2"
 const-fnv1a-hash = "1.1"
+parking_lot = { version = "0.12", features = ["hardware-lock-elision"] }
 thiserror = "1"
 windows-version = "0.1.0"
 

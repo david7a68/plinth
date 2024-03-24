@@ -89,7 +89,7 @@ impl Info {
 }
 
 impl Info {
-    pub(crate) fn packed(&self) -> PackedInfo {
+    pub(crate) fn pack(&self) -> PackedInfo {
         PackedInfo::new()
             .with_width(self.extent.width.0)
             .with_height(self.extent.height.0)

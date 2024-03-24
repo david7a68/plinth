@@ -1,47 +1,38 @@
-mod canvas;
 mod context;
 mod device;
 mod shaders;
 
 use std::{mem::ManuallyDrop, sync::Arc};
 
-pub use canvas::Canvas;
-pub use context::Context;
+pub use context::Context as WindowContext;
+pub use device::Device;
 
-use windows::Win32::{
-    Foundation::HWND,
-    Graphics::{
-        Direct3D12::{
-            ID3D12CommandAllocator, ID3D12GraphicsCommandList, ID3D12Resource,
-            D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_PLACED_SUBRESOURCE_FOOTPRINT,
-            D3D12_RESOURCE_BARRIER, D3D12_RESOURCE_BARRIER_0,
-            D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES, D3D12_RESOURCE_BARRIER_FLAG_NONE,
-            D3D12_RESOURCE_BARRIER_TYPE_TRANSITION, D3D12_RESOURCE_STATES,
-            D3D12_RESOURCE_STATE_COPY_DEST, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-            D3D12_RESOURCE_TRANSITION_BARRIER, D3D12_SUBRESOURCE_FOOTPRINT,
-            D3D12_TEXTURE_COPY_LOCATION, D3D12_TEXTURE_COPY_LOCATION_0,
-            D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT, D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
-            D3D12_TEXTURE_DATA_PITCH_ALIGNMENT,
-        },
-        DirectComposition::{DCompositionCreateDevice2, IDCompositionDevice},
-        Dxgi::Common::{
-            DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
-            DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DXGI_FORMAT_R8_UNORM,
-        },
+use windows::Win32::Graphics::{
+    Direct3D12::{
+        ID3D12CommandAllocator, ID3D12GraphicsCommandList, ID3D12Resource,
+        D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_PLACED_SUBRESOURCE_FOOTPRINT, D3D12_RESOURCE_BARRIER,
+        D3D12_RESOURCE_BARRIER_0, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+        D3D12_RESOURCE_BARRIER_FLAG_NONE, D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+        D3D12_RESOURCE_STATES, D3D12_RESOURCE_STATE_COPY_DEST,
+        D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_RESOURCE_TRANSITION_BARRIER,
+        D3D12_SUBRESOURCE_FOOTPRINT, D3D12_TEXTURE_COPY_LOCATION, D3D12_TEXTURE_COPY_LOCATION_0,
+        D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT, D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
+        D3D12_TEXTURE_DATA_PITCH_ALIGNMENT,
+    },
+    Dxgi::Common::{
+        DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
+        DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DXGI_FORMAT_R8_UNORM,
     },
 };
 
 use crate::{
-    core::static_slot_map::{DefaultKey, Key as _, SlotMap},
-    geometry::{Extent, Point, Texel},
-    graphics::{
-        image::{PackedInfo, PackedKey},
-        Format, GraphicsConfig, Image, ImageError, ImageInfo, Layout, PixelBuf,
-    },
-    limits::IMAGE_EXTENT,
+    geometry::{Point, Texel},
+    graphics::{Format, Layout, PixelBuf},
 };
 
-use super::SubmitId;
+use self::device::Device_;
+
+use super::{SubmitId, TextureId};
 
 // "Linear subresource copying must be aligned to 512 bytes (with the
 // row pitch aligned to D3D12_TEXTURE_DATA_PITCH_ALIGNMENT bytes)." No
@@ -50,108 +41,9 @@ use super::SubmitId;
 // from https://learn.microsoft.com/en-us/windows/win32/direct3d12/upload-and-readback-of-texture-data#buffer-alignment
 const COPY_ALIGN: usize = 512;
 
-pub struct Graphics {
-    device: Arc<device::Device>,
-    uploader: Uploader,
-    images: SlotMap<1024, ImageResource>,
-    compositor: IDCompositionDevice,
-}
-
-impl Graphics {
-    pub fn new(config: &GraphicsConfig) -> Self {
-        let device = Arc::new(device::Device::new(config));
-
-        let white_pixel = {
-            let resource = device.alloc_image(Extent::new(1, 1), Layout::Rgba8, Format::Linear);
-            let info = PackedInfo::new()
-                .with_width(1)
-                .with_height(1)
-                .with_layout(Layout::Rgba8 as u8)
-                .with_format(Format::Linear as u8);
-
-            ImageResource { info, resource }
-        };
-
-        let mut uploader = Uploader::new(&device, 1024 * 1024 * 64);
-
-        uploader.upload_image(
-            &device,
-            &white_pixel.resource,
-            &PixelBuf::new(
-                ImageInfo {
-                    extent: Extent::new(1, 1),
-                    layout: Layout::Rgba8,
-                    format: Format::Linear,
-                    stride: 1,
-                },
-                &[0xFF, 0xFF, 0xFF, 0xFF],
-            ),
-            Point::new(0, 0),
-        );
-
-        let images = SlotMap::new(white_pixel);
-
-        let compositor = unsafe { DCompositionCreateDevice2(None) }.unwrap();
-
-        Self {
-            device,
-            uploader,
-            images,
-            compositor,
-        }
-    }
-
-    pub fn create_context(&self, hwnd: HWND) -> Context {
-        Context::new(self.device.clone(), &self.compositor, hwnd)
-    }
-
-    pub fn create_image(&mut self, info: &ImageInfo) -> Result<Image, ImageError> {
-        if !IMAGE_EXTENT.test(info.extent) {
-            return Err(ImageError::SizeLimit);
-        }
-
-        if !self.images.has_capacity(1) {
-            return Err(ImageError::MaxCount);
-        }
-
-        let resource = self
-            .device
-            .alloc_image(info.extent, info.layout, info.format);
-
-        let info = info.packed();
-
-        let key = match self.images.insert(ImageResource { info, resource }) {
-            Ok(key) => PackedKey::new()
-                .with_index(key.index())
-                .with_epoch(key.epoch()),
-            Err(_) => panic!("Reserved slot for image was not available!"),
-        };
-
-        Ok(Image { info, key })
-    }
-
-    pub fn upload_image(&mut self, image: Image, pixels: &PixelBuf) -> Result<(), ImageError> {
-        let key = DefaultKey::new(image.key.index(), image.key.epoch());
-        let resource = self.images.get_mut(key).unwrap();
-
-        self.uploader
-            .upload_image(&self.device, &resource.resource, pixels, Point::new(0, 0));
-
-        Ok(())
-    }
-
-    pub fn remove_image(&self, image: Image) {
-        let _ = image;
-        todo!()
-    }
-
-    pub fn upload_flush(&mut self) {
-        self.uploader.flush_upload_buffer(&self.device);
-    }
-}
-
 pub struct Uploader {
     command_list: ID3D12GraphicsCommandList,
+    device: Arc<Device_>,
     buffer: ID3D12Resource,
     stages: [UploadBuffer; 1],
     cursor: usize,
@@ -159,8 +51,8 @@ pub struct Uploader {
 }
 
 impl Uploader {
-    pub fn new(device: &device::Device, buffer_size: u64) -> Self {
-        let buffer = device.alloc_buffer(buffer_size);
+    pub(crate) fn new(device: Arc<Device_>, buffer_size: u64) -> Self {
+        let buffer = device.create_buffer(buffer_size);
 
         let command_allocator: ID3D12CommandAllocator = unsafe {
             device
@@ -196,6 +88,7 @@ impl Uploader {
 
         Self {
             command_list,
+            device,
             buffer,
             stages,
             cursor: 0,
@@ -203,13 +96,7 @@ impl Uploader {
         }
     }
 
-    pub fn upload_image(
-        &mut self,
-        device: &device::Device,
-        target: &ID3D12Resource,
-        pixels: &PixelBuf,
-        origin: Point<Texel>,
-    ) {
+    pub fn upload_image(&mut self, target: TextureId, pixels: &PixelBuf, origin: Point<Texel>) {
         let row_size = pixels.row_size(true);
         let row_size_aligned = row_size + (row_size % D3D12_TEXTURE_DATA_PITCH_ALIGNMENT as usize);
         let img_size_aligned = row_size_aligned * usize::try_from(pixels.height().0).unwrap();
@@ -224,6 +111,8 @@ impl Uploader {
                 "Image to large to upload. Increase buffer size to at least the size of a single row of pixels ({} bytes).",
                 row_size_aligned
             );
+
+        let target = self.device.get_texture(target).clone();
 
         let copy = |pixels: &PixelBuf, mut buffer: MappedSlice| {
             if pad_rows {
@@ -254,7 +143,7 @@ impl Uploader {
             };
 
             let dst = D3D12_TEXTURE_COPY_LOCATION {
-                pResource: ManuallyDrop::new(Some(unsafe { std::mem::transmute_copy(target) })),
+                pResource: ManuallyDrop::new(Some(unsafe { std::mem::transmute_copy(&target) })),
                 Type: D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX,
                 Anonymous: D3D12_TEXTURE_COPY_LOCATION_0 {
                     SubresourceIndex: 0,
@@ -265,12 +154,12 @@ impl Uploader {
         };
 
         if self.buffer_fits(img_size_aligned as u64) {
-            let buffer = self.buffer_alloc_bytes(device, img_size_aligned);
+            let buffer = self.buffer_alloc_bytes(img_size_aligned);
             let (src, dst) = copy(pixels, buffer);
 
             image_barrier(
                 &self.command_list,
-                target,
+                &target,
                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
                 D3D12_RESOURCE_STATE_COPY_DEST,
             );
@@ -288,18 +177,18 @@ impl Uploader {
 
             image_barrier(
                 &self.command_list,
-                target,
+                &target,
                 D3D12_RESOURCE_STATE_COPY_DEST,
                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
             );
         } else if buffer_size >= img_size_aligned {
-            self.flush_upload_buffer(device);
-            let buffer = self.buffer_alloc_bytes(device, img_size_aligned);
+            self.flush_upload_buffer();
+            let buffer = self.buffer_alloc_bytes(img_size_aligned);
             let (src, dst) = copy(pixels, buffer);
 
             image_barrier(
                 &self.command_list,
-                target,
+                &target,
                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
                 D3D12_RESOURCE_STATE_COPY_DEST,
             );
@@ -317,7 +206,7 @@ impl Uploader {
 
             image_barrier(
                 &self.command_list,
-                target,
+                &target,
                 D3D12_RESOURCE_STATE_COPY_DEST,
                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
             );
@@ -329,7 +218,7 @@ impl Uploader {
 
             image_barrier(
                 &self.command_list,
-                target,
+                &target,
                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
                 D3D12_RESOURCE_STATE_COPY_DEST,
             );
@@ -341,8 +230,8 @@ impl Uploader {
                 // image into the current buffer. No-op on an empty buffer.
                 //
                 // -dz (2024-03-23)
-                self.flush_upload_buffer(device);
-                let buffer = self.buffer_alloc_bytes(device, buffer_size);
+                self.flush_upload_buffer();
+                let buffer = self.buffer_alloc_bytes(buffer_size);
                 let (src, dst) = copy(&left, buffer);
 
                 unsafe {
@@ -362,7 +251,7 @@ impl Uploader {
 
             image_barrier(
                 &self.command_list,
-                target,
+                &target,
                 D3D12_RESOURCE_STATE_COPY_DEST,
                 D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
             );
@@ -378,7 +267,7 @@ impl Uploader {
     // also also, could use an i8 for comparison function, no need for a
     // function pointer.
 
-    pub fn flush_upload_buffer(&mut self, device: &device::Device) {
+    pub fn flush_upload_buffer(&mut self) {
         let buffer = &mut self.stages[self.cursor];
         if self.next.cast_const() == buffer.base {
             return;
@@ -387,18 +276,18 @@ impl Uploader {
         let buffer = &mut self.stages[self.cursor];
 
         unsafe { self.command_list.Close() }.unwrap();
-        buffer.sync = device.submit(&self.command_list);
+        buffer.sync = self.device.submit(&self.command_list);
 
         self.cursor = (self.cursor + 1) % self.stages.len();
         self.next = self.stages[self.cursor].base;
     }
 
-    fn buffer_alloc_bytes(&mut self, device: &device::Device, len: usize) -> MappedSlice {
+    fn buffer_alloc_bytes(&mut self, len: usize) -> MappedSlice {
         let buffer = &mut self.stages[self.cursor];
 
         assert!(unsafe { buffer.stop.offset_from(self.next) } >= isize::try_from(len).unwrap());
 
-        if device.wait(buffer.sync) {
+        if self.device.wait(buffer.sync) {
             unsafe { buffer.cmda.Reset() }.unwrap();
             unsafe { self.command_list.Reset(&buffer.cmda, None) }.unwrap();
         }
@@ -448,11 +337,6 @@ pub struct UploadBuffer {
     base: *mut u8,
     stop: *mut u8,
     sync: SubmitId,
-}
-
-struct ImageResource {
-    info: PackedInfo,
-    resource: ID3D12Resource,
 }
 
 pub fn image_barrier(

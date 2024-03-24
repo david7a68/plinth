@@ -16,6 +16,20 @@ macro_rules! new_key_type {
             epoch: u32,
         }
 
+        impl $name {
+            fn new(index: u32, epoch: u32) -> Self {
+                Self { index, epoch }
+            }
+
+            fn index(&self) -> u32 {
+                self.index
+            }
+
+            fn epoch(&self) -> u32 {
+                self.epoch
+            }
+        }
+
         impl crate::core::static_slot_map::Key for $name {
             fn new(index: u32, epoch: u32) -> Self {
                 Self { index, epoch }
@@ -32,6 +46,8 @@ macro_rules! new_key_type {
     };
 }
 
+pub(crate) use new_key_type;
+
 new_key_type!(DefaultKey);
 
 pub struct SlotMap<const CAPACITY: usize, V, K: Key = DefaultKey> {
@@ -43,7 +59,7 @@ pub struct SlotMap<const CAPACITY: usize, V, K: Key = DefaultKey> {
 }
 
 impl<const CAPACITY: usize, V, K: Key> SlotMap<CAPACITY, V, K> {
-    pub fn new(default: V) -> Self {
+    pub fn new() -> Self {
         assert!(CAPACITY > 0, "capacity must be greater than 0");
         assert!(
             CAPACITY <= u32::MAX as usize,
@@ -62,7 +78,6 @@ impl<const CAPACITY: usize, V, K: Key> SlotMap<CAPACITY, V, K> {
             slot.next = (i + 1) as u32;
         }
 
-        slots[0].value.write(default);
         slots.last_mut().unwrap().next = 0;
 
         Self {

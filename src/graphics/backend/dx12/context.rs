@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use windows::{
     core::Interface,
     Win32::{
@@ -12,7 +10,7 @@ use windows::{
                 D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_RESOURCE_STATE_PRESENT,
                 D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_VIEWPORT,
             },
-            DirectComposition::{IDCompositionDevice, IDCompositionTarget, IDCompositionVisual},
+            DirectComposition::{IDCompositionTarget, IDCompositionVisual},
             Dxgi::{
                 Common::{
                     DXGI_ALPHA_MODE_IGNORE, DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_UNKNOWN,
@@ -32,22 +30,20 @@ use crate::{
     geometry::{Extent, Pixel, Rect, Scale, Wixel},
     graphics::{
         backend::{
-            dx12::{canvas::Command, image_barrier},
+            draw_list::{Command, DrawCommand, DrawList},
+            dx12::image_barrier,
             SubmitId,
         },
-        FrameInfo,
+        Canvas, FrameInfo,
     },
     limits,
     time::{FramesPerSecond, PresentPeriod, PresentTime},
 };
 
-use super::{
-    canvas::{Canvas, DrawCommand, DrawList},
-    device::Device,
-};
+use super::device::Device_;
 
-pub struct Context {
-    device: Arc<Device>,
+pub struct Context<'a> {
+    device: &'a Device_,
 
     swapchain: IDXGISwapChain3,
     #[allow(dead_code)]
@@ -78,11 +74,11 @@ pub struct Context {
     deferred_resize: Option<(Extent<Wixel>, Scale<Wixel, Pixel>, Option<f32>)>,
 }
 
-impl Context {
-    pub fn new(device: Arc<Device>, compositor: &IDCompositionDevice, hwnd: HWND) -> Self {
+impl<'a> Context<'a> {
+    pub(super) fn new(device: &'a Device_, hwnd: HWND) -> Self {
         let (swapchain, target, visual) = {
-            let target = unsafe { compositor.CreateTargetForHwnd(hwnd, true) }.unwrap();
-            let visual = unsafe { compositor.CreateVisual() }.unwrap();
+            let target = unsafe { device.compositor.CreateTargetForHwnd(hwnd, true) }.unwrap();
+            let visual = unsafe { device.compositor.CreateVisual() }.unwrap();
             unsafe { target.SetRoot(&visual) }.unwrap();
 
             let (width, height) = {
@@ -131,7 +127,7 @@ impl Context {
             }
 
             unsafe { visual.SetContent(&swapchain) }.unwrap();
-            unsafe { compositor.Commit() }.unwrap();
+            unsafe { device.compositor.Commit() }.unwrap();
 
             (swapchain, target, visual)
         };
@@ -154,7 +150,7 @@ impl Context {
 
         let latency_event = unsafe { swapchain.GetFrameLatencyWaitableObject() };
 
-        let frames_in_flight = [Frame::new(&device), Frame::new(&device)];
+        let frames_in_flight = [Frame::new(device), Frame::new(device)];
         let draw_list = DrawList::new();
 
         Self {
@@ -187,7 +183,7 @@ impl Context {
         self.deferred_resize = Some((size, scale, None));
     }
 
-    pub fn begin_draw(&mut self) -> (Canvas, FrameInfo) {
+    pub fn draw(&mut self, mut callback: impl FnMut(&mut Canvas, &FrameInfo)) {
         // todo: how to handle multiple repaint events in a single frame (when
         // animating and resizing at the same time)? -dz
 
@@ -195,14 +191,14 @@ impl Context {
 
         if let Some((size, dpi, flex)) = self.deferred_resize.take() {
             resize_swapchain(&self.swapchain, size, flex, || {
-                self.device.wait_for_idle();
+                self.device.idle();
             });
 
             self.size = size;
             self.scale = dpi;
         }
 
-        let canvas = {
+        let mut canvas = {
             let scaled = self.size.scale_to(self.scale);
             Canvas::new(&mut self.draw_list, Rect::from_extent(scaled))
         };
@@ -239,10 +235,10 @@ impl Context {
             }
         };
 
-        (canvas, timings)
-    }
+        callback(&mut canvas, &timings);
 
-    pub fn end_draw(&mut self) {
+        canvas.finish();
+
         assert_eq!(
             self.draw_list.commands.last().cloned(),
             Some((DrawCommand::Close, 0)),
@@ -263,7 +259,7 @@ impl Context {
         };
 
         let submit_id = upload_draw_list(
-            &self.device,
+            self.device,
             &self.draw_list,
             frame,
             &image,
@@ -281,10 +277,10 @@ impl Context {
     }
 }
 
-impl Drop for Context {
+impl Drop for Context<'_> {
     fn drop(&mut self) {
         // technically, wait for the most recent present to complete
-        self.device.wait_for_idle();
+        self.device.idle();
     }
 }
 
@@ -301,8 +297,8 @@ pub struct Frame {
 }
 
 impl Frame {
-    fn new(device: &Device) -> Self {
-        let buffer = device.alloc_buffer(DEFAULT_DRAW_BUFFER_SIZE);
+    fn new(device: &Device_) -> Self {
+        let buffer = device.create_buffer(DEFAULT_DRAW_BUFFER_SIZE);
 
         let buffer_ptr = {
             let mut mapped = std::ptr::null_mut();
@@ -391,7 +387,7 @@ pub fn resize_swapchain(
 
 #[allow(clippy::too_many_lines)]
 fn upload_draw_list(
-    device: &Device,
+    device: &Device_,
     content: &DrawList,
     frame: &mut Frame,
     target: &ID3D12Resource,
@@ -412,7 +408,7 @@ fn upload_draw_list(
         if frame.buffer_size < buffer_size {
             let _ = frame.buffer.take();
 
-            let buffer = device.alloc_buffer(buffer_size);
+            let buffer = device.create_buffer(buffer_size);
 
             frame.buffer_ptr = {
                 let mut mapped = std::ptr::null_mut();
@@ -477,11 +473,13 @@ fn upload_draw_list(
         }]);
     }
 
+    println!("{:?}", content.prims);
+
     let mut rect_start = 0;
     for command in it.by_ref() {
         match command {
             Command::Begin(_) => unreachable!(),
-            Command::Close => unreachable!(),
+            Command::Close => break,
             Command::Clear(color) => unsafe {
                 frame
                     .command_list
@@ -492,7 +490,7 @@ fn upload_draw_list(
                     &frame.command_list,
                     frame.buffer.as_ref().unwrap(),
                     viewport_scale,
-                    f32::from(target_size.width),
+                    f32::from(target_size.height),
                 );
 
                 unsafe { frame.command_list.DrawInstanced(4, count, 0, rect_start) };
@@ -500,8 +498,6 @@ fn upload_draw_list(
             }
         }
     }
-
-    assert_eq!(it.next(), Some(Command::Close));
 
     image_barrier(
         &frame.command_list,

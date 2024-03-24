@@ -1,48 +1,109 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 
+use parking_lot::{
+    lock_api::{MappedMutexGuard, MutexGuard},
+    Mutex, RawMutex,
+};
 use windows::{
     core::{Interface, PCSTR},
-    Win32::Graphics::{
-        Direct3D::D3D_FEATURE_LEVEL_12_0,
-        Direct3D12::{
-            D3D12CreateDevice, D3D12GetDebugInterface, ID3D12CommandList, ID3D12CommandQueue,
-            ID3D12Debug1, ID3D12Debug5, ID3D12Device, ID3D12Fence, ID3D12GraphicsCommandList,
-            ID3D12InfoQueue1, ID3D12Resource, D3D12_COMMAND_LIST_TYPE,
-            D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_QUEUE_DESC,
-            D3D12_COMMAND_QUEUE_FLAG_NONE, D3D12_CPU_PAGE_PROPERTY_UNKNOWN, D3D12_FENCE_FLAG_NONE,
-            D3D12_HEAP_FLAG_NONE, D3D12_HEAP_PROPERTIES, D3D12_HEAP_TYPE_DEFAULT,
-            D3D12_HEAP_TYPE_UPLOAD, D3D12_MEMORY_POOL_UNKNOWN, D3D12_MESSAGE_CALLBACK_FLAG_NONE,
-            D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_ID, D3D12_MESSAGE_SEVERITY,
-            D3D12_MESSAGE_SEVERITY_CORRUPTION, D3D12_MESSAGE_SEVERITY_ERROR,
-            D3D12_MESSAGE_SEVERITY_INFO, D3D12_MESSAGE_SEVERITY_MESSAGE,
-            D3D12_MESSAGE_SEVERITY_WARNING, D3D12_RESOURCE_DESC, D3D12_RESOURCE_DIMENSION_BUFFER,
-            D3D12_RESOURCE_DIMENSION_TEXTURE2D, D3D12_RESOURCE_FLAG_NONE,
-            D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-            D3D12_TEXTURE_LAYOUT_ROW_MAJOR, D3D12_TEXTURE_LAYOUT_UNKNOWN,
-        },
-        Dxgi::{
-            Common::{DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC},
-            CreateDXGIFactory2, IDXGIFactory2, IDXGISwapChain1, DXGI_CREATE_FACTORY_DEBUG,
-            DXGI_SWAP_CHAIN_DESC1,
+    Win32::{
+        Foundation::HWND,
+        Graphics::{
+            Direct3D::D3D_FEATURE_LEVEL_12_0,
+            Direct3D12::{
+                D3D12CreateDevice, D3D12GetDebugInterface, ID3D12CommandList, ID3D12CommandQueue,
+                ID3D12Debug1, ID3D12Debug5, ID3D12Device, ID3D12Fence, ID3D12GraphicsCommandList,
+                ID3D12InfoQueue1, ID3D12Resource, D3D12_COMMAND_LIST_TYPE,
+                D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_QUEUE_DESC,
+                D3D12_COMMAND_QUEUE_FLAG_NONE, D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
+                D3D12_FENCE_FLAG_NONE, D3D12_HEAP_FLAG_NONE, D3D12_HEAP_PROPERTIES,
+                D3D12_HEAP_TYPE_DEFAULT, D3D12_HEAP_TYPE_UPLOAD, D3D12_MEMORY_POOL_UNKNOWN,
+                D3D12_MESSAGE_CALLBACK_FLAG_NONE, D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_ID,
+                D3D12_MESSAGE_SEVERITY, D3D12_MESSAGE_SEVERITY_CORRUPTION,
+                D3D12_MESSAGE_SEVERITY_ERROR, D3D12_MESSAGE_SEVERITY_INFO,
+                D3D12_MESSAGE_SEVERITY_MESSAGE, D3D12_MESSAGE_SEVERITY_WARNING,
+                D3D12_RESOURCE_DESC, D3D12_RESOURCE_DIMENSION_BUFFER,
+                D3D12_RESOURCE_DIMENSION_TEXTURE2D, D3D12_RESOURCE_FLAG_NONE,
+                D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+                D3D12_TEXTURE_LAYOUT_ROW_MAJOR, D3D12_TEXTURE_LAYOUT_UNKNOWN,
+            },
+            DirectComposition::{DCompositionCreateDevice2, IDCompositionDevice},
+            Dxgi::{
+                Common::{DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC},
+                CreateDXGIFactory2, IDXGIFactory2, IDXGISwapChain1, DXGI_CREATE_FACTORY_DEBUG,
+                DXGI_SWAP_CHAIN_DESC1,
+            },
         },
     },
 };
 
 use crate::{
+    core::static_slot_map::SlotMap,
     geometry::{Extent, Texel},
-    graphics::{backend::SubmitId, Format, GraphicsConfig, Layout},
+    graphics::{
+        backend::{SubmitId, TextureId},
+        Format, GraphicsConfig, Layout,
+    },
 };
 
-use super::{shaders::RectShader, to_dxgi_format};
+use super::{shaders::RectShader, to_dxgi_format, Uploader, WindowContext};
 
 pub struct Device {
+    pub(super) inner: Arc<Device_>,
+}
+
+impl Device {
+    pub fn new(config: &GraphicsConfig) -> Self {
+        Self {
+            inner: Arc::new(Device_::new(config)),
+        }
+    }
+
+    /// Causes the CPU to wait until the given submission has completed.
+    ///
+    /// # Returns
+    ///
+    /// `true` if the CPU had to wait, `false` if the submission has already completed.
+    pub fn wait(&self, submit_id: SubmitId) -> bool {
+        self.inner.queue.wait(submit_id)
+    }
+
+    pub fn create_uploader(&self) -> Uploader {
+        Uploader::new(self.inner.clone(), 1024 * 1024 * 64)
+    }
+
+    pub fn create_context(&self, hwnd: HWND) -> WindowContext {
+        WindowContext::new(&self.inner, hwnd)
+    }
+
+    pub fn create_texture(
+        &self,
+        extent: Extent<Texel>,
+        layout: Layout,
+        format: Format,
+    ) -> TextureId {
+        self.inner.create_texture(extent, layout, format)
+    }
+
+    pub fn idle(&self) {
+        self.inner.queue.wait_idle();
+    }
+}
+
+pub struct Device_ {
     dxgi: IDXGIFactory2,
     pub handle: ID3D12Device,
     queue: Queue,
     pub rect_shader: RectShader,
+    pub compositor: IDCompositionDevice,
+
+    images: Mutex<SlotMap<1024, ID3D12Resource, TextureId>>,
 }
 
-impl Device {
+impl Device_ {
     pub fn new(config: &GraphicsConfig) -> Self {
         let dxgi: IDXGIFactory2 = {
             let mut dxgi_flags = 0;
@@ -97,12 +158,29 @@ impl Device {
 
         let rect_shader = RectShader::new(&device);
 
+        let compositor = unsafe { DCompositionCreateDevice2(None) }.unwrap();
+
+        let images = Mutex::new(SlotMap::new());
+
         Self {
             dxgi,
             handle: device,
             queue,
             rect_shader,
+            compositor,
+            images,
         }
+    }
+
+    pub fn create_swapchain(&self, desc: &DXGI_SWAP_CHAIN_DESC1) -> IDXGISwapChain1 {
+        unsafe {
+            self.dxgi
+                .CreateSwapChainForComposition(&self.queue.handle, desc, None)
+        }
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to create swapchain: {:?}", e);
+            panic!();
+        })
     }
 
     /// Causes the CPU to wait until the given submission has completed.
@@ -114,7 +192,7 @@ impl Device {
         self.queue.wait(submit_id)
     }
 
-    pub fn wait_for_idle(&self) {
+    pub fn idle(&self) {
         self.queue.wait_idle();
     }
 
@@ -122,7 +200,7 @@ impl Device {
         self.queue.submit(&command_list.cast().unwrap())
     }
 
-    pub fn alloc_buffer(&self, size: u64) -> ID3D12Resource {
+    pub fn create_buffer(&self, size: u64) -> ID3D12Resource {
         let heap_desc = D3D12_HEAP_PROPERTIES {
             Type: D3D12_HEAP_TYPE_UPLOAD,
             CPUPageProperty: D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
@@ -164,12 +242,21 @@ impl Device {
         buffer.unwrap()
     }
 
-    pub fn alloc_image(
+    pub(super) fn get_texture(&self, id: TextureId) -> MappedMutexGuard<RawMutex, ID3D12Resource> {
+        let lock = self.images.lock();
+
+        let resource: MappedMutexGuard<RawMutex, ID3D12Resource> =
+            MutexGuard::map::<ID3D12Resource, _>(lock, |images| images.get_mut(id).unwrap());
+
+        resource
+    }
+
+    pub fn create_texture(
         &self,
         extent: Extent<Texel>,
         layout: Layout,
         format: Format,
-    ) -> ID3D12Resource {
+    ) -> TextureId {
         let heap_desc = D3D12_HEAP_PROPERTIES {
             Type: D3D12_HEAP_TYPE_DEFAULT,
             CPUPageProperty: D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
@@ -208,18 +295,7 @@ impl Device {
         }
         .unwrap();
 
-        image.unwrap()
-    }
-
-    pub fn create_swapchain(&self, desc: &DXGI_SWAP_CHAIN_DESC1) -> IDXGISwapChain1 {
-        unsafe {
-            self.dxgi
-                .CreateSwapChainForComposition(&self.queue.handle, desc, None)
-        }
-        .unwrap_or_else(|e| {
-            eprintln!("Failed to create swapchain: {:?}", e);
-            panic!();
-        })
+        self.images.lock().insert(image.unwrap()).unwrap()
     }
 }
 

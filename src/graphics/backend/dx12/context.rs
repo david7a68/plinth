@@ -345,6 +345,18 @@ pub fn resize_swapchain(
     let width = u32::try_from(size.width).unwrap();
     let height = u32::try_from(size.height).unwrap();
 
+    let resize = |width, height| unsafe {
+        swapchain
+            .ResizeBuffers(
+                0,
+                width,
+                height,
+                DXGI_FORMAT_UNKNOWN,
+                DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT.0 as _,
+            )
+            .unwrap();
+    };
+
     if let Some(flex) = flex {
         let mut desc = DXGI_SWAP_CHAIN_DESC1::default();
         unsafe { swapchain.GetDesc1(&mut desc) }.unwrap();
@@ -357,31 +369,13 @@ pub fn resize_swapchain(
             let h = (f64::from(height) * f64::from(flex)).min(f64::from(max_dim.height.0)) as u32;
 
             idle();
-            unsafe {
-                swapchain.ResizeBuffers(
-                    0,
-                    w,
-                    h,
-                    DXGI_FORMAT_UNKNOWN,
-                    DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT.0 as _,
-                )
-            }
-            .unwrap();
+            resize(w, h);
         }
 
         unsafe { swapchain.SetSourceSize(width, height) }.unwrap();
     } else {
         idle();
-        unsafe {
-            swapchain.ResizeBuffers(
-                0,
-                width,
-                height,
-                DXGI_FORMAT_UNKNOWN,
-                DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT.0 as _,
-            )
-        }
-        .unwrap();
+        resize(width, height);
     }
 }
 

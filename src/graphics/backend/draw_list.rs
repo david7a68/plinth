@@ -125,7 +125,7 @@ pub struct Canvas<'a> {
 }
 
 impl<'a> Canvas<'a> {
-    pub fn new(draw_list: &'a mut DrawList, region: Rect<Pixel>) -> Self {
+    pub(super) fn new(draw_list: &'a mut DrawList, region: Rect<Pixel>) -> Self {
         draw_list.clear();
         draw_list.areas.push(region);
         draw_list.commands.push((DrawCommand::Begin, 0));

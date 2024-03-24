@@ -1,7 +1,4 @@
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
-};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use parking_lot::{
     lock_api::{MappedMutexGuard, MutexGuard},
@@ -9,33 +6,29 @@ use parking_lot::{
 };
 use windows::{
     core::{Interface, PCSTR},
-    Win32::{
-        Foundation::HWND,
-        Graphics::{
-            Direct3D::D3D_FEATURE_LEVEL_12_0,
-            Direct3D12::{
-                D3D12CreateDevice, D3D12GetDebugInterface, ID3D12CommandList, ID3D12CommandQueue,
-                ID3D12Debug1, ID3D12Debug5, ID3D12Device, ID3D12Fence, ID3D12GraphicsCommandList,
-                ID3D12InfoQueue1, ID3D12Resource, D3D12_COMMAND_LIST_TYPE,
-                D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_QUEUE_DESC,
-                D3D12_COMMAND_QUEUE_FLAG_NONE, D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
-                D3D12_FENCE_FLAG_NONE, D3D12_HEAP_FLAG_NONE, D3D12_HEAP_PROPERTIES,
-                D3D12_HEAP_TYPE_DEFAULT, D3D12_HEAP_TYPE_UPLOAD, D3D12_MEMORY_POOL_UNKNOWN,
-                D3D12_MESSAGE_CALLBACK_FLAG_NONE, D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_ID,
-                D3D12_MESSAGE_SEVERITY, D3D12_MESSAGE_SEVERITY_CORRUPTION,
-                D3D12_MESSAGE_SEVERITY_ERROR, D3D12_MESSAGE_SEVERITY_INFO,
-                D3D12_MESSAGE_SEVERITY_MESSAGE, D3D12_MESSAGE_SEVERITY_WARNING,
-                D3D12_RESOURCE_DESC, D3D12_RESOURCE_DIMENSION_BUFFER,
-                D3D12_RESOURCE_DIMENSION_TEXTURE2D, D3D12_RESOURCE_FLAG_NONE,
-                D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
-                D3D12_TEXTURE_LAYOUT_ROW_MAJOR, D3D12_TEXTURE_LAYOUT_UNKNOWN,
-            },
-            DirectComposition::{DCompositionCreateDevice2, IDCompositionDevice},
-            Dxgi::{
-                Common::{DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC},
-                CreateDXGIFactory2, IDXGIFactory2, IDXGISwapChain1, DXGI_CREATE_FACTORY_DEBUG,
-                DXGI_SWAP_CHAIN_DESC1,
-            },
+    Win32::Graphics::{
+        Direct3D::D3D_FEATURE_LEVEL_12_0,
+        Direct3D12::{
+            D3D12CreateDevice, D3D12GetDebugInterface, ID3D12CommandList, ID3D12CommandQueue,
+            ID3D12Debug1, ID3D12Debug5, ID3D12Device, ID3D12Fence, ID3D12GraphicsCommandList,
+            ID3D12InfoQueue1, ID3D12Resource, D3D12_COMMAND_LIST_TYPE,
+            D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_QUEUE_DESC,
+            D3D12_COMMAND_QUEUE_FLAG_NONE, D3D12_CPU_PAGE_PROPERTY_UNKNOWN, D3D12_FENCE_FLAG_NONE,
+            D3D12_HEAP_FLAG_NONE, D3D12_HEAP_PROPERTIES, D3D12_HEAP_TYPE_DEFAULT,
+            D3D12_HEAP_TYPE_UPLOAD, D3D12_MEMORY_POOL_UNKNOWN, D3D12_MESSAGE_CALLBACK_FLAG_NONE,
+            D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_ID, D3D12_MESSAGE_SEVERITY,
+            D3D12_MESSAGE_SEVERITY_CORRUPTION, D3D12_MESSAGE_SEVERITY_ERROR,
+            D3D12_MESSAGE_SEVERITY_INFO, D3D12_MESSAGE_SEVERITY_MESSAGE,
+            D3D12_MESSAGE_SEVERITY_WARNING, D3D12_RESOURCE_DESC, D3D12_RESOURCE_DIMENSION_BUFFER,
+            D3D12_RESOURCE_DIMENSION_TEXTURE2D, D3D12_RESOURCE_FLAG_NONE,
+            D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+            D3D12_TEXTURE_LAYOUT_ROW_MAJOR, D3D12_TEXTURE_LAYOUT_UNKNOWN,
+        },
+        DirectComposition::{DCompositionCreateDevice2, IDCompositionDevice},
+        Dxgi::{
+            Common::{DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC},
+            CreateDXGIFactory2, IDXGIFactory2, IDXGISwapChain1, DXGI_CREATE_FACTORY_DEBUG,
+            DXGI_SWAP_CHAIN_DESC1,
         },
     },
 };
@@ -49,49 +42,7 @@ use crate::{
     },
 };
 
-use super::{shaders::RectShader, to_dxgi_format, Uploader, WindowContext};
-
-pub struct Device {
-    pub(super) inner: Arc<Device_>,
-}
-
-impl Device {
-    pub fn new(config: &GraphicsConfig) -> Self {
-        Self {
-            inner: Arc::new(Device_::new(config)),
-        }
-    }
-
-    /// Causes the CPU to wait until the given submission has completed.
-    ///
-    /// # Returns
-    ///
-    /// `true` if the CPU had to wait, `false` if the submission has already completed.
-    pub fn wait(&self, submit_id: SubmitId) -> bool {
-        self.inner.queue.wait(submit_id)
-    }
-
-    pub fn create_uploader(&self) -> Uploader {
-        Uploader::new(self.inner.clone(), 1024 * 1024 * 64)
-    }
-
-    pub fn create_context(&self, hwnd: HWND) -> WindowContext {
-        WindowContext::new(&self.inner, hwnd)
-    }
-
-    pub fn create_texture(
-        &self,
-        extent: Extent<Texel>,
-        layout: Layout,
-        format: Format,
-    ) -> TextureId {
-        self.inner.create_texture(extent, layout, format)
-    }
-
-    pub fn idle(&self) {
-        self.inner.queue.wait_idle();
-    }
-}
+use super::{shaders::RectShader, to_dxgi_format};
 
 pub struct Device_ {
     dxgi: IDXGIFactory2,

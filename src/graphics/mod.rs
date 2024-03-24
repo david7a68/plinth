@@ -6,7 +6,6 @@ mod primitives;
 use windows::Win32::Foundation::HWND;
 
 use crate::{
-    core::static_slot_map::Key,
     geometry::{Extent, Point},
     graphics::image::PackedKey,
     system::power::PowerPreference,

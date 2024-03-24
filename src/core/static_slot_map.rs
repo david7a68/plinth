@@ -1,10 +1,13 @@
 use std::{marker::PhantomData, mem::MaybeUninit};
 
 pub trait Key: Clone + Copy + PartialEq + Sized {
+    #[must_use]
     fn new(index: u32, epoch: u32) -> Self;
 
+    #[must_use]
     fn index(&self) -> u32;
 
+    #[must_use]
     fn epoch(&self) -> u32;
 }
 
@@ -17,15 +20,21 @@ macro_rules! new_key_type {
         }
 
         impl $name {
-            fn new(index: u32, epoch: u32) -> Self {
+            #[allow(dead_code)]
+            #[must_use]
+            pub fn new(index: u32, epoch: u32) -> Self {
                 Self { index, epoch }
             }
 
-            fn index(&self) -> u32 {
+            #[allow(dead_code)]
+            #[must_use]
+            pub fn index(&self) -> u32 {
                 self.index
             }
 
-            fn epoch(&self) -> u32 {
+            #[allow(dead_code)]
+            #[must_use]
+            pub fn epoch(&self) -> u32 {
                 self.epoch
             }
         }

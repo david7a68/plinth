@@ -56,20 +56,6 @@ impl Device {
             Self::Dx12(device) => Uploader::Dx12(device.create_uploader()),
         }
     }
-
-    pub fn wait(&self, id: SubmitId) -> bool {
-        match self {
-            Self::Null => false,
-            Self::Dx12(device) => device.wait(id),
-        }
-    }
-
-    pub fn idle(&self) {
-        match self {
-            Self::Null => {}
-            Self::Dx12(device) => device.idle(),
-        }
-    }
 }
 
 pub enum Uploader {

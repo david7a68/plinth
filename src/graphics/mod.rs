@@ -159,6 +159,10 @@ impl WindowContext {
 
         callback(&mut canvas, &timing);
 
+        // Just in case the user forgot to call finish. This is a no-op if the
+        // user did call finish.
+        canvas.finish();
+
         context.end_draw();
     }
 }
@@ -187,6 +191,20 @@ impl Canvas<'_> {
         match &mut self.canvas {
             #[cfg(target_os = "windows")]
             CanvasImpl::Dx12(canvas) => canvas.draw_rect(rect),
+        }
+    }
+
+    pub fn finish(&mut self) {
+        match &mut self.canvas {
+            #[cfg(target_os = "windows")]
+            CanvasImpl::Dx12(canvas) => canvas.finish(),
+        }
+    }
+
+    pub fn skip_draw_and_finish(&mut self) {
+        match &mut self.canvas {
+            #[cfg(target_os = "windows")]
+            CanvasImpl::Dx12(canvas) => canvas.skip_draw_and_finish(),
         }
     }
 }

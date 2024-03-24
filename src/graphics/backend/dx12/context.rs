@@ -31,7 +31,10 @@ use windows::{
 use crate::{
     geometry::{Extent, Pixel, Rect, Scale, Wixel},
     graphics::{
-        backend::{dx12::image_barrier, SubmitId},
+        backend::{
+            dx12::{canvas::Command, image_barrier},
+            SubmitId,
+        },
         FrameInfo,
     },
     limits,
@@ -240,6 +243,12 @@ impl Context {
     }
 
     pub fn end_draw(&mut self) {
+        assert_eq!(
+            self.draw_list.commands.last().cloned(),
+            Some((DrawCommand::Close, 0)),
+            "Call Canvas::finish() or Canvas::skip_draw_and_finish() before calling end_draw()"
+        );
+
         let image: ID3D12Resource = {
             let index = unsafe { self.swapchain.GetCurrentBackBufferIndex() };
             unsafe { self.swapchain.GetBuffer(index) }.unwrap()
@@ -252,8 +261,6 @@ impl Context {
                 .handle
                 .CreateRenderTargetView(&image, None, self.swapchain_rtv);
         };
-
-        self.draw_list.finish();
 
         let submit_id = upload_draw_list(
             &self.device,
@@ -399,7 +406,7 @@ fn upload_draw_list(
         #[cfg(feature = "profile")]
         let _s = tracing_tracy::client::span!("copy rects to buffer");
 
-        let rects_size = std::mem::size_of_val(content.rects.as_slice());
+        let rects_size = std::mem::size_of_val(content.prims.as_slice());
         let buffer_size = rects_size as u64;
 
         if frame.buffer_size < buffer_size {
@@ -419,99 +426,93 @@ fn upload_draw_list(
 
         unsafe {
             std::ptr::copy_nonoverlapping(
-                content.rects.as_ptr().cast(),
+                content.prims.as_ptr().cast(),
                 frame.buffer_ptr,
                 rects_size,
             );
         }
     }
 
-    assert!(content.commands[0].0 == DrawCommand::Begin);
-
     let viewport_scale = [
         1.0 / f32::from(target_size.width),
         1.0 / f32::from(target_size.height),
     ];
 
-    let mut rect_idx = 0;
-    // let mut area_idx = 0;
-    let mut color_idx = 0;
+    let mut it = content.iter();
 
-    for (command, idx) in &content.commands {
+    assert_eq!(it.next(), Some(Command::Begin(content.areas[0])));
+
+    unsafe {
+        frame.command_list_mem.Reset().unwrap();
+        frame
+            .command_list
+            .Reset(&frame.command_list_mem, None)
+            .unwrap();
+
+        image_barrier(
+            &frame.command_list,
+            target,
+            D3D12_RESOURCE_STATE_PRESENT,
+            D3D12_RESOURCE_STATE_RENDER_TARGET,
+        );
+
+        frame
+            .command_list
+            .OMSetRenderTargets(1, Some(&target_rtv), false, None);
+
+        frame.command_list.RSSetViewports(&[D3D12_VIEWPORT {
+            TopLeftX: 0.0,
+            TopLeftY: 0.0,
+            Width: f32::from(target_size.width),
+            Height: f32::from(target_size.height),
+            MinDepth: 0.0,
+            MaxDepth: 1.0,
+        }]);
+
+        frame.command_list.RSSetScissorRects(&[RECT {
+            left: 0,
+            top: 0,
+            right: i32::from(target_size.width),
+            bottom: i32::from(target_size.height),
+        }]);
+    }
+
+    let mut rect_start = 0;
+    for command in it.by_ref() {
         match command {
-            DrawCommand::Begin => unsafe {
-                frame.command_list_mem.Reset().unwrap();
+            Command::Begin(_) => unreachable!(),
+            Command::Close => unreachable!(),
+            Command::Clear(color) => unsafe {
                 frame
                     .command_list
-                    .Reset(&frame.command_list_mem, None)
-                    .unwrap();
-
-                image_barrier(
-                    &frame.command_list,
-                    target,
-                    D3D12_RESOURCE_STATE_PRESENT,
-                    D3D12_RESOURCE_STATE_RENDER_TARGET,
-                );
-
-                frame
-                    .command_list
-                    .OMSetRenderTargets(1, Some(&target_rtv), false, None);
-
-                frame.command_list.RSSetViewports(&[D3D12_VIEWPORT {
-                    TopLeftX: 0.0,
-                    TopLeftY: 0.0,
-                    Width: f32::from(target_size.width),
-                    Height: f32::from(target_size.height),
-                    MinDepth: 0.0,
-                    MaxDepth: 1.0,
-                }]);
-
-                frame.command_list.RSSetScissorRects(&[RECT {
-                    left: 0,
-                    top: 0,
-                    right: i32::from(target_size.width),
-                    bottom: i32::from(target_size.height),
-                }]);
+                    .ClearRenderTargetView(target_rtv, &color.to_array_f32(), None);
             },
-            DrawCommand::End => unsafe {
-                image_barrier(
-                    &frame.command_list,
-                    target,
-                    D3D12_RESOURCE_STATE_RENDER_TARGET,
-                    D3D12_RESOURCE_STATE_PRESENT,
-                );
-                frame.command_list.Close().unwrap();
-            },
-            DrawCommand::Clear => {
-                unsafe {
-                    frame.command_list.ClearRenderTargetView(
-                        target_rtv,
-                        &content.clears[color_idx].to_array_f32(),
-                        None,
-                    );
-                }
-                color_idx += 1;
-            }
-            DrawCommand::DrawRects => {
-                let num_rects = *idx - rect_idx;
-
+            Command::Rects(_image, count) => {
                 device.rect_shader.bind(
                     &frame.command_list,
                     frame.buffer.as_ref().unwrap(),
                     viewport_scale,
-                    f32::from(target_size.height),
+                    f32::from(target_size.width),
                 );
 
-                unsafe { frame.command_list.DrawInstanced(4, num_rects, 0, rect_idx) };
-
-                rect_idx = *idx;
+                unsafe { frame.command_list.DrawInstanced(4, count, 0, rect_start) };
+                rect_start += count;
             }
         }
     }
 
+    assert_eq!(it.next(), Some(Command::Close));
+
+    image_barrier(
+        &frame.command_list,
+        target,
+        D3D12_RESOURCE_STATE_RENDER_TARGET,
+        D3D12_RESOURCE_STATE_PRESENT,
+    );
+
+    unsafe { frame.command_list.Close() }.unwrap();
+
     let submit_id = device.submit(&frame.command_list);
-
     frame.submit_id = Some(submit_id);
-
     submit_id
 }

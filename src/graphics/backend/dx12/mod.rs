@@ -97,5 +97,9 @@ fn to_dxgi_format(layout: Layout, format: Format) -> DXGI_FORMAT {
         (Layout::Bgra8, Format::Linear) => DXGI_FORMAT_B8G8R8A8_UNORM,
         (Layout::Alpha8, Format::Linear) => DXGI_FORMAT_R8_UNORM,
         (Layout::Alpha8, Format::Srgb) => panic!("Alpha8 is not supported in SRGB format"),
+        (Layout::Alpha8Vector, Format::Srgb) => {
+            panic!("Alpha8Vector is not supported in SRGB format")
+        }
+        (Layout::Alpha8Vector, Format::Linear) => DXGI_FORMAT_R8_UNORM,
     }
 }

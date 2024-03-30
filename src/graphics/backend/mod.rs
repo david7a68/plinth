@@ -5,7 +5,7 @@ use crate::{
 
 use self::{draw_list::Canvas, texture_atlas::TextureCache};
 
-use super::{Backend, Format, FrameInfo, GraphicsConfig, Layout, PixelBuf};
+use super::{Backend, Format, FrameInfo, GraphicsConfig, Layout, RasterBuf};
 
 #[cfg(target_os = "windows")]
 pub mod dx12;
@@ -65,7 +65,7 @@ pub enum Uploader {
 }
 
 impl Uploader {
-    pub fn upload_image(&mut self, target: TextureId, pixels: &PixelBuf, origin: Point<Texel>) {
+    pub fn upload_image(&mut self, target: TextureId, pixels: &RasterBuf, origin: Point<Texel>) {
         match self {
             Self::Null => {}
             Self::Dx12(uploader) => uploader.upload_image(target, pixels, origin),

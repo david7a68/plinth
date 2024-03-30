@@ -11,7 +11,8 @@ struct Rect
     float4 uvwh;
     float4 color;
     int texture_id;
-    float3 padding;
+    uint flags;
+    float2 padding;
 };
 
 cbuffer properties : register(b0, space0)
@@ -74,5 +75,15 @@ static const int2 positions[4] = {
 float4 ps_main(VS_OUT input) : SV_TARGET
 {
     Rect rect = rects[input.instance];
-    return rect.color * textures[rect.texture_id].Sample(point_sampler, input.uv);
+
+    if (rect.flags & 1)
+    {
+        // linear filtering
+        return rect.color * textures[rect.texture_id].Sample(linear_sampler, input.uv);
+    }
+    else
+    {
+        // point filtering
+        return rect.color * textures[rect.texture_id].Sample(point_sampler, input.uv);
+    }
 }

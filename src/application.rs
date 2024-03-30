@@ -1,5 +1,7 @@
 use std::{collections::HashMap, marker::PhantomData};
 
+use windows::Win32::Graphics::Direct3D::D3D_NAME_CULLPRIMITIVE;
+
 use crate::{
     core::PassthroughBuildHasher,
     geometry::{Extent, Pixel, Point, Scale, Wixel},
@@ -50,12 +52,17 @@ impl Application {
         let mut resources =
             HashMap::with_capacity_and_hasher(MAX_IMAGE_COUNT.get(), PassthroughBuildHasher::new());
 
+        // use a thread pool a la rayon to load resources in parallel
+
         for resource in config.resources {
             match resource {
-                StaticResource::Image(name, pixels) => {
-                    let image = graphics.create_image(pixels.info()).unwrap();
-                    graphics.upload_image(image, pixels).unwrap();
+                StaticResource::Raster(name, pixels) => {
+                    let image = graphics.create_raster_image(pixels.info()).unwrap();
+                    graphics.upload_raster_image(image, pixels).unwrap();
                     resources.insert(name.hash, Resource::Image(image));
+                }
+                StaticResource::Vector(name, vectors) => {
+                    //
                 }
             }
         }

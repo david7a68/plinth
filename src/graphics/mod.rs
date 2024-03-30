@@ -1,12 +1,13 @@
 mod backend;
 mod color;
 mod image;
+pub mod limits;
 mod primitives;
 
 use windows::Win32::Foundation::HWND;
 
 use crate::{
-    geometry::{Extent, Point},
+    geometry::{Extent, Pixel, Point},
     graphics::image::PackedKey,
     system::power::PowerPreference,
     time::{FramesPerSecond, PresentPeriod, PresentTime},
@@ -21,7 +22,10 @@ pub use self::{
     backend::draw_list::Canvas,
     backend::WindowContext,
     color::Color,
-    image::{Error as ImageError, Format, Image, Info as ImageInfo, Layout, PixelBuf},
+    image::{
+        Command, Error as ImageError, Format, Image, Info as ImageInfo, Layout, RasterBuf,
+        VectorBuf,
+    },
     primitives::RoundRect,
 };
 
@@ -90,7 +94,7 @@ impl Graphics {
 
         uploader.upload_image(
             white_pixel,
-            &PixelBuf::new(
+            &RasterBuf::new(
                 ImageInfo {
                     extent: Extent::new(1, 1),
                     layout: Layout::Rgba8,
@@ -114,7 +118,7 @@ impl Graphics {
         self.device.create_context(hwnd)
     }
 
-    pub fn create_image(&mut self, info: &ImageInfo) -> Result<Image, ImageError> {
+    pub fn create_raster_image(&mut self, info: &ImageInfo) -> Result<Image, ImageError> {
         let (_, texture_id) = self.textures.insert_rect(
             info.extent,
             info.layout,
@@ -132,10 +136,36 @@ impl Graphics {
         Ok(image)
     }
 
+    pub fn create_vector_image(
+        &mut self,
+        buf: VectorBuf,
+        format: Format,
+        layout: Layout,
+        initial_size: Option<Extent<Pixel>>,
+    ) -> Result<Image, ImageError> {
+        // calculate broad bounds for the image, use that as exent
+
+        if let Some(size) = initial_size {
+            // rasterize immediately
+
+            // self.textures.insert_rect(...);
+
+            todo!()
+        }
+
+        // layout and format are the same as the input
+
+        todo!()
+    }
+
     /// Uploads pixels for an image.
     ///
     /// The pixel buffer must be the same size as the image.
-    pub fn upload_image(&mut self, image: Image, pixels: &PixelBuf) -> Result<(), ImageError> {
+    pub fn upload_raster_image(
+        &mut self,
+        image: Image,
+        pixels: &RasterBuf,
+    ) -> Result<(), ImageError> {
         let cache_id = CachedTextureId::new(image.key.index(), image.key.epoch());
         let (texture, rect) = self.textures.get_rect(cache_id);
 
@@ -148,7 +178,7 @@ impl Graphics {
     ///
     /// The image may continue to be used in the background until any pending
     /// drawing operations that use this image have completed.
-    pub fn remove_image(&mut self, image: Image) {
+    pub fn delete_image(&mut self, image: Image) {
         let _ = image;
         todo!()
     }

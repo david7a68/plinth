@@ -1,5 +1,5 @@
 use crate::{
-    graphics::{Image, PixelBuf},
+    graphics::{Image, RasterBuf, VectorBuf},
     HashedStr,
 };
 
@@ -26,6 +26,7 @@ pub enum Resource {
 
 #[derive(Debug)]
 pub enum StaticResource {
-    Image(HashedStr<'static>, PixelBuf<'static>),
+    Raster(HashedStr<'static>, RasterBuf<'static>),
+    Vector(HashedStr<'static>, VectorBuf<'static>),
     // Video(HashedStr<'static>, VideoBuf<'static>), // maybe?
 }

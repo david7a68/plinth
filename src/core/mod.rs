@@ -1,6 +1,7 @@
 use std::hash::{BuildHasher, Hasher};
 
 pub mod arena;
+pub mod limits;
 pub mod static_slot_map;
 
 pub struct PassthroughBuildHasher {}

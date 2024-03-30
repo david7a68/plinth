@@ -3,22 +3,22 @@ use core::panic;
 use crate::{
     geometry::{Pixel, Rect, UV},
     graphics::{backend::texture_atlas::CachedTextureId, Color, RoundRect},
-    limits::enforce_draw_list_max_commands_u32,
+    limits::DRAW_LIST_MAX_RUN_SIZE,
 };
 
 use super::{texture_atlas::TextureCache, TextureId};
 
-#[repr(u8)]
+#[repr(u32)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-enum TextureFilter {
+pub enum TextureFilter {
     #[default]
     Point,
     Linear,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-struct Sampler {
-    filter: TextureFilter,
+pub struct Sampler {
+    pub filter: TextureFilter,
 }
 
 #[repr(C)]
@@ -176,10 +176,11 @@ impl<'a> Canvas<'a> {
             DrawCommand::Close => panic!("Canvas state Close -> Clear is a bug."),
         }
 
-        self.draw_list.commands.push((
-            DrawCommand::Clear,
-            enforce_draw_list_max_commands_u32(self.draw_list.colors.len()),
-        ));
+        DRAW_LIST_MAX_RUN_SIZE.check(&self.draw_list.colors.len());
+
+        self.draw_list
+            .commands
+            .push((DrawCommand::Clear, self.draw_list.colors.len() as u32));
 
         self.draw_list.colors.push(color);
         self.state = DrawCommand::Clear;
@@ -210,6 +211,8 @@ impl<'a> Canvas<'a> {
             texture_id.index(),
             Sampler::default(),
         ));
+
+        DRAW_LIST_MAX_RUN_SIZE.check(&self.rect_batch_count);
 
         self.rect_batch_count += 1;
         self.rect_batch_image = texture_id;

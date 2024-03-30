@@ -13,7 +13,7 @@ use crate::{
     geometry::{Point, Texel},
     graphics::{
         backend::dx12::{image_barrier, to_dxgi_format},
-        PixelBuf,
+        RasterBuf,
     },
 };
 
@@ -34,7 +34,7 @@ impl Uploader {
         }
     }
 
-    pub fn upload_image(&mut self, target: TextureId, pixels: &PixelBuf, origin: Point<Texel>) {
+    pub fn upload_image(&mut self, target: TextureId, pixels: &RasterBuf, origin: Point<Texel>) {
         self.inner
             .upload_image(&self.device, target, pixels, origin);
     }
@@ -108,7 +108,7 @@ impl UploaderImpl {
         &mut self,
         device: &Device_,
         target: TextureId,
-        pixels: &PixelBuf,
+        pixels: &RasterBuf,
         origin: Point<Texel>,
     ) {
         let row_size = pixels.row_size(false);
@@ -137,7 +137,7 @@ impl UploaderImpl {
                 row_size_aligned
             );
 
-        let copy = |pixels: &PixelBuf, mut buffer: MappedSlice, target: &ID3D12Resource| {
+        let copy = |pixels: &RasterBuf, mut buffer: MappedSlice, target: &ID3D12Resource| {
             if pad_rows {
                 let mut offset = 0;
                 for row in pixels.by_rows() {

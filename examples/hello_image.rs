@@ -1,7 +1,7 @@
 use plinth::{
     geometry::{Extent, Texel},
     graphics::{
-        Canvas, Color, Format, FrameInfo, GraphicsConfig, ImageInfo, Layout, PixelBuf, RoundRect,
+        Canvas, Color, Format, FrameInfo, GraphicsConfig, ImageInfo, Layout, RasterBuf, RoundRect,
     },
     resource::StaticResource,
     static_str,
@@ -10,7 +10,7 @@ use plinth::{
 };
 
 #[rustfmt::skip]
-const IMAGE: PixelBuf<'static> = PixelBuf::new(
+const IMAGE: RasterBuf<'static> = RasterBuf::new(
     ImageInfo {
         extent: Extent {width: Texel(3), height: Texel(1)},
         format: Format::Linear,
@@ -24,7 +24,7 @@ const IMAGE: PixelBuf<'static> = PixelBuf::new(
     ],
 );
 
-const RESOURCES: &[StaticResource] = &[StaticResource::Image(static_str!("image"), IMAGE)];
+const RESOURCES: &[StaticResource] = &[StaticResource::Raster(static_str!("image"), IMAGE)];
 
 fn main() {
     let config = Config {

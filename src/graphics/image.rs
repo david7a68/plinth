@@ -1,9 +1,11 @@
 use std::{fmt::Debug, ptr::addr_of};
 
 use crate::{
-    geometry::{Extent, Texel},
+    geometry::{Extent, Pixel, Point, Rect, Texel},
     limits::MAX_IMAGE_COUNT,
 };
+
+use super::Color;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -23,6 +25,7 @@ pub enum Layout {
     Rgba8Vector,
     Bgra8,
     Alpha8,
+    Alpha8Vector,
 }
 
 impl Layout {
@@ -32,6 +35,7 @@ impl Layout {
             Layout::Rgba8Vector => 4,
             Layout::Bgra8 => 4,
             Layout::Alpha8 => 1,
+            Layout::Alpha8Vector => 1,
         }
     }
 }
@@ -135,15 +139,15 @@ impl Debug for Image {
 
 /// Non-owning reference to pixel data.
 #[derive(Clone, PartialEq, Eq, Hash)]
-pub struct PixelBuf<'a> {
+pub struct RasterBuf<'a> {
     info: Info,
     data: &'a [u8],
 }
 
-impl<'a> PixelBuf<'a> {
+impl<'a> RasterBuf<'a> {
     #[must_use]
-    pub const fn new(info: Info, data: &[u8]) -> PixelBuf {
-        PixelBuf { info, data }
+    pub const fn new(info: Info, data: &[u8]) -> RasterBuf {
+        RasterBuf { info, data }
     }
 
     #[must_use]
@@ -207,14 +211,14 @@ impl<'a> PixelBuf<'a> {
         let (left, right) = self.data.split_at(left_size);
 
         (
-            PixelBuf::new(
+            RasterBuf::new(
                 Info {
                     extent: Extent::new(self.info.extent.width, left_height),
                     ..self.info
                 },
                 left,
             ),
-            PixelBuf::new(
+            RasterBuf::new(
                 Info {
                     extent: Extent::new(self.info.extent.width, right_height),
                     ..self.info
@@ -270,7 +274,7 @@ impl<'a> PixelBuf<'a> {
     }
 }
 
-impl Debug for PixelBuf<'_> {
+impl Debug for RasterBuf<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PixelBuf")
             .field("info", &self.info)
@@ -289,7 +293,7 @@ pub struct PixelRowIter<'a> {
 }
 
 impl<'a> Iterator for PixelRowIter<'a> {
-    type Item = PixelBuf<'a>;
+    type Item = RasterBuf<'a>;
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         let len = usize::try_from(unsafe { self.sentinel.offset_from(self.next_ptr) }).unwrap();
@@ -306,7 +310,70 @@ impl<'a> Iterator for PixelRowIter<'a> {
             Some(row)
         }?;
 
-        Some(PixelBuf::new(self.info, slice))
+        Some(RasterBuf::new(self.info, slice))
+    }
+}
+
+#[repr(u8)]
+#[derive(Debug)]
+pub enum Winding {
+    NonZero,
+    EvenOdd,
+}
+
+#[repr(u8)]
+#[derive(Debug)]
+pub enum Join {
+    Bevel,
+    Miter,
+    Round,
+}
+
+#[repr(u8)]
+#[derive(Debug)]
+pub enum Cap {
+    Butt,
+    Square,
+    Round,
+}
+
+#[derive(Debug)]
+pub struct FillStyle {
+    pub color: Color,
+    pub winding: Winding,
+}
+
+#[derive(Debug)]
+pub struct StrokeStyle {
+    pub width: f32,
+    pub color: Color,
+    pub dash_length: f32,
+    pub join: Join,
+    pub cap: Cap,
+    pub scale_width: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Command {
+    MoveTo(Point<Pixel>),
+    LineTo(Point<Pixel>),
+    CurveTo(Point<Pixel>, Point<Pixel>, Point<Pixel>),
+    QuadTo(Point<Pixel>, Point<Pixel>),
+    Close,
+    Fill(u32),
+    Stroke(u32),
+}
+
+#[derive(Debug)]
+pub struct VectorBuf<'a> {
+    commands: &'a [Command],
+    strokes: &'a [StrokeStyle],
+    fills: &'a [FillStyle],
+}
+
+impl VectorBuf<'_> {
+    pub fn bounds(&self) -> Rect<Pixel> {
+        todo!()
     }
 }
 
@@ -327,11 +394,8 @@ pub(crate) struct PackedInfo {
 
 #[bitfield_struct::bitfield(u32)]
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
-
 pub(crate) struct PackedKey {
-    #[bits(2)]
-    _empty: u8,
-    #[bits(10)] // max index: 1024, could take 1 bit from _empty for 2048
+    #[bits(12)] // max index: 4095
     pub index: u32,
     #[bits(20)] // max epoch: 1048576
     pub epoch: u32,

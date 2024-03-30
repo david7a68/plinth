@@ -570,7 +570,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState<'_>, 
         let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
         let (meta, mut wn) = window.split();
 
-        meta.context.draw(|canvas, frame| {
+        self.graphics.draw(&mut meta.context, |canvas, frame| {
             self.client.repaint(&mut cx, &mut wn, canvas, frame);
         });
     }

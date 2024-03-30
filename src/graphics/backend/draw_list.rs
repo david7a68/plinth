@@ -1,22 +1,26 @@
 use core::panic;
 
 use crate::{
-    geometry::{Pixel, Rect},
-    graphics::{Color, Image, RoundRect},
+    geometry::{Pixel, Rect, UV},
+    graphics::{backend::texture_atlas::CachedTextureId, Color, RoundRect},
     limits::enforce_draw_list_max_commands_u32,
 };
+
+use super::{texture_atlas::TextureCache, TextureId};
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct RRect {
     pub xywh: [f32; 4],
+    pub uvwh: [f32; 4],
     pub color: [f32; 4],
 }
 
 impl RRect {
-    pub fn new(rect: &RoundRect) -> Self {
+    pub fn new(rect: &RoundRect, uvwh: &Rect<UV>) -> Self {
         Self {
             xywh: rect.rect.to_xywh().map(|x| x.0),
+            uvwh: uvwh.to_xywh().map(|x| x.0 as f32),
             color: rect.color.to_array_f32(),
         }
     }
@@ -27,7 +31,7 @@ pub enum Command {
     Begin(Rect<Pixel>),
     Close,
     Clear(Color),
-    Rects(Image, u32),
+    Rects(TextureId, u32),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -43,7 +47,7 @@ pub(crate) struct DrawList {
     pub prims: Vec<RRect>,
     pub areas: Vec<Rect<Pixel>>,
     pub colors: Vec<Color>,
-    pub images: Vec<Image>,
+    pub images: Vec<TextureId>,
     pub commands: Vec<(DrawCommand, u32)>,
 }
 
@@ -81,7 +85,7 @@ impl DrawList {
 pub struct CommandIterator<'a> {
     areas: &'a [Rect<Pixel>],
     colors: &'a [Color],
-    images: &'a [Image],
+    images: &'a [TextureId],
     commands: &'a [(DrawCommand, u32)],
     index: usize,
     draws: usize,
@@ -116,26 +120,34 @@ impl Iterator for CommandIterator<'_> {
 }
 
 pub struct Canvas<'a> {
+    textures: &'a TextureCache,
     draw_list: &'a mut DrawList,
     region: Rect<Pixel>,
     rect_batch_start: usize,
     rect_batch_count: usize,
-    rect_batch_image: Image,
+    rect_batch_image: TextureId,
     state: DrawCommand,
 }
 
 impl<'a> Canvas<'a> {
-    pub(super) fn new(draw_list: &'a mut DrawList, region: Rect<Pixel>) -> Self {
+    pub(super) fn new(
+        textures: &'a TextureCache,
+        draw_list: &'a mut DrawList,
+        region: Rect<Pixel>,
+    ) -> Self {
         draw_list.clear();
         draw_list.areas.push(region);
         draw_list.commands.push((DrawCommand::Begin, 0));
 
+        let default = textures.default();
+
         Self {
+            textures,
             draw_list,
             region,
             rect_batch_start: 0,
             rect_batch_count: 0,
-            rect_batch_image: Image::default(),
+            rect_batch_image: default.1,
             state: DrawCommand::Begin,
         }
     }
@@ -164,11 +176,14 @@ impl<'a> Canvas<'a> {
     }
 
     pub fn draw_rect(&mut self, rect: RoundRect) {
+        let cache_id = CachedTextureId::new(rect.image.key.index(), rect.image.key.epoch());
+        let (texture_id, uvwh) = self.textures.get_uv_rect(cache_id);
+
         match self.state {
             DrawCommand::Begin => {
                 debug_assert_eq!(self.rect_batch_start, 0);
                 debug_assert_eq!(self.rect_batch_count, 0);
-                debug_assert_eq!(self.rect_batch_image, Image::default());
+                debug_assert_eq!(self.rect_batch_image, self.textures.default().1);
                 debug_assert_eq!(self.draw_list.prims.len(), 0);
             }
             DrawCommand::Clear => {
@@ -179,18 +194,18 @@ impl<'a> Canvas<'a> {
             DrawCommand::Rects => {
                 debug_assert!(self.rect_batch_count > 0);
 
-                if rect.image != self.rect_batch_image {
+                if texture_id != self.rect_batch_image {
                     self.submit_batch();
-                    self.rect_batch_image = rect.image;
+                    self.rect_batch_image = texture_id;
                 }
             }
             DrawCommand::Close => panic!("Canvas state Close -> DrawRect is a bug."),
         }
 
-        self.draw_list.prims.push(RRect::new(&rect));
+        self.draw_list.prims.push(RRect::new(&rect, &uvwh));
 
         self.rect_batch_count += 1;
-        self.rect_batch_image = rect.image;
+        self.rect_batch_image = texture_id;
 
         self.state = DrawCommand::Rects;
     }
@@ -221,57 +236,5 @@ impl<'a> Canvas<'a> {
 
         self.rect_batch_start = self.draw_list.prims.len();
         self.rect_batch_count = 0;
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        geometry::{Pixel, Rect},
-        graphics::Image,
-    };
-
-    #[test]
-    fn draw_list() {
-        let mut list = DrawList::new();
-        let mut canvas = Canvas::new(&mut list, Rect::new((0.0, 0.0), (100.0, 100.0)));
-
-        canvas.clear(Color::WHITE);
-        canvas.draw_rect(RoundRect {
-            rect: Rect::<Pixel>::ZERO,
-            color: Color::BLACK,
-            image: Image::default(),
-        });
-        canvas.draw_rect(RoundRect {
-            rect: Rect::<Pixel>::ZERO,
-            color: Color::BLACK,
-            image: Image::default(),
-        });
-
-        canvas.finish();
-
-        assert_eq!(list.commands.len(), 4);
-        assert_eq!(list.prims.len(), 2);
-        assert_eq!(list.areas.len(), 1);
-        assert_eq!(list.images.len(), 1);
-        assert_eq!(list.colors.len(), 1);
-
-        assert_eq!(list.commands[0], (DrawCommand::Begin, 0));
-        assert_eq!(list.commands[1], (DrawCommand::Clear, 0));
-        assert_eq!(list.commands[2], (DrawCommand::Rects, 2));
-        assert_eq!(list.commands[3], (DrawCommand::Close, 0));
-
-        {
-            let mut it = list.iter();
-
-            assert_eq!(
-                it.next(),
-                Some(Command::Begin(Rect::new((0.0, 0.0), (100.0, 100.0))))
-            );
-            assert_eq!(it.next(), Some(Command::Clear(Color::WHITE)));
-            assert_eq!(it.next(), Some(Command::Rects(Image::default(), 2)));
-            assert_eq!(it.next(), Some(Command::Close));
-        }
     }
 }

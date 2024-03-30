@@ -126,6 +126,20 @@ impl<T: Num> Extent<T> {
     }
 }
 
+impl<T: Num> Div for Extent<T>
+where
+    T: Div<Output = T>,
+{
+    type Output = Self;
+
+    fn div(self, other: Self) -> Self {
+        Self {
+            width: self.width / other.width,
+            height: self.height / other.height,
+        }
+    }
+}
+
 impl<T: Num, I: Into<T>> From<(I, I)> for Extent<T> {
     fn from((width, height): (I, I)) -> Self {
         Self::new(width.into(), height.into())
@@ -422,11 +436,35 @@ impl_num!(
     Into()
 );
 
+impl From<Extent<Texel>> for Extent<f32> {
+    fn from(value: Extent<Texel>) -> Self {
+        Extent::new(value.width.0 as f32, value.height.0 as f32)
+    }
+}
+
+impl From<Texel> for Extent<f32> {
+    fn from(value: Texel) -> Self {
+        Extent::new(value.0 as f32, value.0 as f32)
+    }
+}
+
 impl TryFrom<Texel> for u64 {
     type Error = std::num::TryFromIntError;
 
     fn try_from(value: Texel) -> Result<Self, Self::Error> {
         value.0.try_into()
+    }
+}
+
+impl_num!(
+    UV(f32):
+    From(),
+    Into()
+);
+
+impl ScaleTo<Texel, UV> for Texel {
+    fn scale(&self, factor: Scale<Texel, UV>) -> UV {
+        UV(self.0 as f32 * factor.factor)
     }
 }
 

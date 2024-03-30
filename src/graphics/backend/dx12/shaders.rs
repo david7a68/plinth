@@ -6,9 +6,9 @@ use windows::Win32::{
             ID3D12Device, ID3D12GraphicsCommandList, ID3D12PipelineState, ID3D12Resource,
             ID3D12RootSignature, D3D12_BLEND_DESC, D3D12_BLEND_INV_SRC_ALPHA, D3D12_BLEND_ONE,
             D3D12_BLEND_OP_ADD, D3D12_COLOR_WRITE_ENABLE_ALL, D3D12_CULL_MODE_BACK,
-            D3D12_DEPTH_STENCIL_DESC, D3D12_FILL_MODE_SOLID, D3D12_GRAPHICS_PIPELINE_STATE_DESC,
-            D3D12_INPUT_ELEMENT_DESC, D3D12_INPUT_LAYOUT_DESC, D3D12_LOGIC_OP_NOOP,
-            D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE, D3D12_RASTERIZER_DESC,
+            D3D12_DEPTH_STENCIL_DESC, D3D12_FILL_MODE_SOLID, D3D12_GPU_DESCRIPTOR_HANDLE,
+            D3D12_GRAPHICS_PIPELINE_STATE_DESC, D3D12_INPUT_ELEMENT_DESC, D3D12_INPUT_LAYOUT_DESC,
+            D3D12_LOGIC_OP_NOOP, D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE, D3D12_RASTERIZER_DESC,
             D3D12_RENDER_TARGET_BLEND_DESC, D3D12_SHADER_BYTECODE,
         },
         Dxgi::Common::{DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC},
@@ -103,6 +103,7 @@ impl RectShader {
         &self,
         command_list: &ID3D12GraphicsCommandList,
         rects: &ID3D12Resource,
+        texture_descriptors: D3D12_GPU_DESCRIPTOR_HANDLE,
         viewport_scale: [f32; 2],
         viewport_height: f32,
     ) {
@@ -117,8 +118,16 @@ impl RectShader {
                     .cast(),
                 0,
             );
-            command_list.SetGraphicsRootShaderResourceView(1, rects.GetGPUVirtualAddress());
+            command_list.SetGraphicsRoot32BitConstant(1, 0, 0);
+            command_list.SetGraphicsRootShaderResourceView(2, rects.GetGPUVirtualAddress());
+            command_list.SetGraphicsRootDescriptorTable(3, texture_descriptors);
             command_list.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
+        }
+    }
+
+    pub fn set_texture_id(&self, command_list: &ID3D12GraphicsCommandList, id: u32) {
+        unsafe {
+            command_list.SetGraphicsRoot32BitConstant(1, id, 0);
         }
     }
 }

@@ -8,7 +8,7 @@ use plinth::{
 fn main() {
     let config = Config {
         graphics: GraphicsConfig {
-            debug_mode: false,
+            debug_mode: true,
             ..Default::default()
         },
         ..Default::default()

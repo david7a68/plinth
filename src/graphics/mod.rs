@@ -6,13 +6,16 @@ mod primitives;
 use windows::Win32::Foundation::HWND;
 
 use crate::{
-    geometry::{Extent, Point},
+    geometry::{Extent, Point, Rect},
     graphics::image::PackedKey,
     system::power::PowerPreference,
     time::{FramesPerSecond, PresentPeriod, PresentTime},
 };
 
-use self::backend::{Device, TextureId, Uploader};
+use self::backend::{
+    texture_atlas::{CachedTextureId, TextureCache},
+    Device, Uploader,
+};
 pub use self::{
     backend::draw_list::Canvas,
     backend::WindowContext,
@@ -66,6 +69,7 @@ pub struct FrameInfo {
 pub(crate) struct Graphics {
     device: Device,
     uploader: Uploader,
+    textures: TextureCache,
 }
 
 impl Graphics {
@@ -74,7 +78,14 @@ impl Graphics {
 
         let mut uploader = device.create_uploader();
 
-        let white_pixel = device.create_texture(Extent::new(1, 1), Layout::Rgba8, Format::Linear);
+        let textures = TextureCache::new(
+            Extent::new(1, 1),
+            Layout::Rgba8,
+            Format::Linear,
+            |extent, layout, format| device.create_texture(extent, layout, format),
+        );
+
+        let (_, white_pixel) = textures.default();
 
         uploader.upload_image(
             white_pixel,
@@ -90,7 +101,11 @@ impl Graphics {
             Point::new(0, 0),
         );
 
-        Self { device, uploader }
+        Self {
+            device,
+            uploader,
+            textures,
+        }
     }
 
     #[cfg(target_os = "windows")]
@@ -98,17 +113,19 @@ impl Graphics {
         self.device.create_context(hwnd)
     }
 
-    /// Creates a new image.
     pub fn create_image(&mut self, info: &ImageInfo) -> Result<Image, ImageError> {
-        let texture = self
-            .device
-            .create_texture(info.extent, info.layout, info.format);
+        let (texture_id, uvwh) = self.textures.insert_rect(
+            info.extent,
+            info.layout,
+            info.format,
+            |extent, layout, format| self.device.create_texture(extent, layout, format),
+        );
 
         let image = Image {
             info: info.pack(),
             key: PackedKey::new()
-                .with_index(texture.index())
-                .with_epoch(texture.epoch()),
+                .with_index(texture_id.index())
+                .with_epoch(texture_id.epoch()),
         };
 
         Ok(image)
@@ -118,10 +135,10 @@ impl Graphics {
     ///
     /// The pixel buffer must be the same size as the image.
     pub fn upload_image(&mut self, image: Image, pixels: &PixelBuf) -> Result<(), ImageError> {
-        let texture = TextureId::new(image.key.index(), image.key.epoch());
+        let cache_id = CachedTextureId::new(image.key.index(), image.key.epoch());
+        let (texture, rect) = self.textures.get_rect(cache_id);
 
-        self.uploader
-            .upload_image(texture, pixels, Point::new(0, 0));
+        self.uploader.upload_image(texture, pixels, rect.origin);
 
         Ok(())
     }
@@ -140,5 +157,9 @@ impl Graphics {
     /// This does not block.
     pub fn flush_upload_buffer(&mut self) {
         self.uploader.flush_upload_buffer();
+    }
+
+    pub fn draw(&self, window: &mut WindowContext, callback: impl FnMut(&mut Canvas, &FrameInfo)) {
+        window.draw(&self.textures, callback);
     }
 }

@@ -3,7 +3,7 @@ use crate::{
     geometry::{Extent, Pixel, Point, Scale, Texel, Wixel},
 };
 
-use self::draw_list::Canvas;
+use self::{draw_list::Canvas, texture_atlas::TextureCache};
 
 use super::{Backend, Format, FrameInfo, GraphicsConfig, Layout, PixelBuf};
 
@@ -11,6 +11,7 @@ use super::{Backend, Format, FrameInfo, GraphicsConfig, Layout, PixelBuf};
 pub mod dx12;
 
 pub mod draw_list;
+pub mod texture_atlas;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SubmitId(pub(crate) u64);
@@ -100,10 +101,14 @@ impl WindowContext<'_> {
         }
     }
 
-    pub fn draw(&mut self, callback: impl FnMut(&mut Canvas, &FrameInfo)) {
+    pub(super) fn draw(
+        &mut self,
+        texture_cache: &TextureCache,
+        callback: impl FnMut(&mut Canvas, &FrameInfo),
+    ) {
         match self {
             Self::Null => {}
-            Self::Dx12(context) => context.draw(callback),
+            Self::Dx12(context) => context.draw(texture_cache, callback),
         }
     }
 }

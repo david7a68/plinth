@@ -7,8 +7,10 @@ use windows::{
                 ID3D12CommandAllocator, ID3D12DescriptorHeap, ID3D12GraphicsCommandList,
                 ID3D12Resource, D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_CPU_DESCRIPTOR_HANDLE,
                 D3D12_DESCRIPTOR_HEAP_DESC, D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
-                D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_RESOURCE_STATE_PRESENT,
-                D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_VIEWPORT,
+                D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_DESCRIPTOR_RANGE,
+                D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND, D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
+                D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET,
+                D3D12_ROOT_DESCRIPTOR_TABLE, D3D12_VIEWPORT,
             },
             DirectComposition::{IDCompositionTarget, IDCompositionVisual},
             Dxgi::{
@@ -32,6 +34,7 @@ use crate::{
         backend::{
             draw_list::{Command, DrawCommand, DrawList},
             dx12::image_barrier,
+            texture_atlas::TextureCache,
             SubmitId,
         },
         Canvas, FrameInfo,
@@ -183,7 +186,11 @@ impl<'a> Context<'a> {
         self.deferred_resize = Some((size, scale, None));
     }
 
-    pub fn draw(&mut self, mut callback: impl FnMut(&mut Canvas, &FrameInfo)) {
+    pub fn draw(
+        &mut self,
+        texture_cache: &TextureCache,
+        mut callback: impl FnMut(&mut Canvas, &FrameInfo),
+    ) {
         // todo: how to handle multiple repaint events in a single frame (when
         // animating and resizing at the same time)? -dz
 
@@ -200,7 +207,11 @@ impl<'a> Context<'a> {
 
         let mut canvas = {
             let scaled = self.size.scale_to(self.scale);
-            Canvas::new(&mut self.draw_list, Rect::from_extent(scaled))
+            Canvas::new(
+                texture_cache,
+                &mut self.draw_list,
+                Rect::from_extent(scaled),
+            )
         };
 
         let timings = {
@@ -465,9 +476,19 @@ fn upload_draw_list(
             right: i32::from(target_size.width),
             bottom: i32::from(target_size.height),
         }]);
+
+        frame
+            .command_list
+            .SetDescriptorHeaps(&[Some(device.texture_descriptors.handle.clone())]);
     }
 
-    println!("{:?}", content.prims);
+    device.rect_shader.bind(
+        &frame.command_list,
+        frame.buffer.as_ref().unwrap(),
+        device.texture_descriptors.gpu_base,
+        viewport_scale,
+        f32::from(target_size.height),
+    );
 
     let mut rect_start = 0;
     for command in it.by_ref() {
@@ -479,13 +500,10 @@ fn upload_draw_list(
                     .command_list
                     .ClearRenderTargetView(target_rtv, &color.to_array_f32(), None);
             },
-            Command::Rects(_image, count) => {
-                device.rect_shader.bind(
-                    &frame.command_list,
-                    frame.buffer.as_ref().unwrap(),
-                    viewport_scale,
-                    f32::from(target_size.height),
-                );
+            Command::Rects(image, count) => {
+                device
+                    .rect_shader
+                    .set_texture_id(&frame.command_list, image.index());
 
                 unsafe { frame.command_list.DrawInstanced(4, count, 0, rect_start) };
                 rect_start += count;

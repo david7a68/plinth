@@ -10,18 +10,24 @@ use windows::{
         Direct3D::D3D_FEATURE_LEVEL_12_0,
         Direct3D12::{
             D3D12CreateDevice, D3D12GetDebugInterface, ID3D12CommandList, ID3D12CommandQueue,
-            ID3D12Debug1, ID3D12Debug5, ID3D12Device, ID3D12Fence, ID3D12GraphicsCommandList,
-            ID3D12InfoQueue1, ID3D12Resource, D3D12_COMMAND_LIST_TYPE,
+            ID3D12Debug1, ID3D12Debug5, ID3D12DescriptorHeap, ID3D12Device, ID3D12Fence,
+            ID3D12GraphicsCommandList, ID3D12InfoQueue1, ID3D12Resource, D3D12_COMMAND_LIST_TYPE,
             D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_COMMAND_QUEUE_DESC,
-            D3D12_COMMAND_QUEUE_FLAG_NONE, D3D12_CPU_PAGE_PROPERTY_UNKNOWN, D3D12_FENCE_FLAG_NONE,
-            D3D12_HEAP_FLAG_NONE, D3D12_HEAP_PROPERTIES, D3D12_HEAP_TYPE_DEFAULT,
-            D3D12_HEAP_TYPE_UPLOAD, D3D12_MEMORY_POOL_UNKNOWN, D3D12_MESSAGE_CALLBACK_FLAG_NONE,
-            D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_ID, D3D12_MESSAGE_SEVERITY,
-            D3D12_MESSAGE_SEVERITY_CORRUPTION, D3D12_MESSAGE_SEVERITY_ERROR,
-            D3D12_MESSAGE_SEVERITY_INFO, D3D12_MESSAGE_SEVERITY_MESSAGE,
-            D3D12_MESSAGE_SEVERITY_WARNING, D3D12_RESOURCE_DESC, D3D12_RESOURCE_DIMENSION_BUFFER,
-            D3D12_RESOURCE_DIMENSION_TEXTURE2D, D3D12_RESOURCE_FLAG_NONE,
-            D3D12_RESOURCE_STATE_GENERIC_READ, D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,
+            D3D12_COMMAND_QUEUE_FLAG_NONE, D3D12_CPU_DESCRIPTOR_HANDLE,
+            D3D12_CPU_PAGE_PROPERTY_UNKNOWN, D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING,
+            D3D12_DESCRIPTOR_HEAP_DESC, D3D12_DESCRIPTOR_HEAP_FLAGS,
+            D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE, D3D12_DESCRIPTOR_HEAP_TYPE,
+            D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV, D3D12_FENCE_FLAG_NONE,
+            D3D12_GPU_DESCRIPTOR_HANDLE, D3D12_HEAP_FLAG_NONE, D3D12_HEAP_PROPERTIES,
+            D3D12_HEAP_TYPE_DEFAULT, D3D12_HEAP_TYPE_UPLOAD, D3D12_MEMORY_POOL_UNKNOWN,
+            D3D12_MESSAGE_CALLBACK_FLAG_NONE, D3D12_MESSAGE_CATEGORY, D3D12_MESSAGE_ID,
+            D3D12_MESSAGE_SEVERITY, D3D12_MESSAGE_SEVERITY_CORRUPTION,
+            D3D12_MESSAGE_SEVERITY_ERROR, D3D12_MESSAGE_SEVERITY_INFO,
+            D3D12_MESSAGE_SEVERITY_MESSAGE, D3D12_MESSAGE_SEVERITY_WARNING, D3D12_RESOURCE_DESC,
+            D3D12_RESOURCE_DIMENSION_BUFFER, D3D12_RESOURCE_DIMENSION_TEXTURE2D,
+            D3D12_RESOURCE_FLAG_NONE, D3D12_RESOURCE_STATE_GENERIC_READ,
+            D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE, D3D12_SHADER_RESOURCE_VIEW_DESC,
+            D3D12_SHADER_RESOURCE_VIEW_DESC_0, D3D12_SRV_DIMENSION_TEXTURE2D, D3D12_TEX2D_SRV,
             D3D12_TEXTURE_LAYOUT_ROW_MAJOR, D3D12_TEXTURE_LAYOUT_UNKNOWN,
         },
         DirectComposition::{DCompositionCreateDevice2, IDCompositionDevice},
@@ -51,7 +57,8 @@ pub struct Device_ {
     pub rect_shader: RectShader,
     pub compositor: IDCompositionDevice,
 
-    images: Mutex<SlotMap<1024, ID3D12Resource, TextureId>>,
+    textures: Mutex<SlotMap<1024, ID3D12Resource, TextureId>>,
+    pub texture_descriptors: DescriptorHeap,
 }
 
 impl Device_ {
@@ -111,7 +118,14 @@ impl Device_ {
 
         let compositor = unsafe { DCompositionCreateDevice2(None) }.unwrap();
 
-        let images = Mutex::new(SlotMap::new());
+        let textures = Mutex::new(SlotMap::new());
+
+        let texture_descriptors = DescriptorHeap::new(
+            &device,
+            D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,
+            1024,
+            D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE,
+        );
 
         Self {
             dxgi,
@@ -119,7 +133,8 @@ impl Device_ {
             queue,
             rect_shader,
             compositor,
-            images,
+            textures,
+            texture_descriptors,
         }
     }
 
@@ -194,7 +209,7 @@ impl Device_ {
     }
 
     pub(super) fn get_texture(&self, id: TextureId) -> MappedMutexGuard<RawMutex, ID3D12Resource> {
-        let lock = self.images.lock();
+        let lock = self.textures.lock();
 
         let resource: MappedMutexGuard<RawMutex, ID3D12Resource> =
             MutexGuard::map::<ID3D12Resource, _>(lock, |images| images.get_mut(id).unwrap());
@@ -208,6 +223,8 @@ impl Device_ {
         layout: Layout,
         format: Format,
     ) -> TextureId {
+        let format = to_dxgi_format(layout, format);
+
         let heap_desc = D3D12_HEAP_PROPERTIES {
             Type: D3D12_HEAP_TYPE_DEFAULT,
             CPUPageProperty: D3D12_CPU_PAGE_PROPERTY_UNKNOWN,
@@ -218,12 +235,12 @@ impl Device_ {
 
         let image_desc = D3D12_RESOURCE_DESC {
             Dimension: D3D12_RESOURCE_DIMENSION_TEXTURE2D,
-            Alignment: 4096,
+            Alignment: 0,
             Width: extent.width.0 as u64,
             Height: extent.height.0 as u32,
             DepthOrArraySize: 1,
             MipLevels: 1,
-            Format: to_dxgi_format(layout, format),
+            Format: format,
             SampleDesc: DXGI_SAMPLE_DESC {
                 Count: 1,
                 Quality: 0,
@@ -246,7 +263,23 @@ impl Device_ {
         }
         .unwrap();
 
-        self.images.lock().insert(image.unwrap()).unwrap()
+        let id = self
+            .textures
+            .lock()
+            .create(|key| {
+                let image = image.unwrap();
+                let descriptor = self.texture_descriptors.cpu(key.index());
+
+                unsafe {
+                    self.handle
+                        .CreateShaderResourceView(&image, None, descriptor)
+                };
+
+                image
+            })
+            .unwrap();
+
+        id
     }
 }
 
@@ -377,5 +410,52 @@ unsafe extern "system" fn dx12_debug_callback(
         D3D12_MESSAGE_SEVERITY_INFO => eprintln!("D3D12 {}", description.display()),
         D3D12_MESSAGE_SEVERITY_MESSAGE => eprintln!("D3D12 {}", description.display()),
         _ => {}
+    }
+}
+
+pub struct DescriptorHeap {
+    pub handle: ID3D12DescriptorHeap,
+    capacity: u32,
+    size: u32,
+    cpu_base: usize,
+    pub gpu_base: D3D12_GPU_DESCRIPTOR_HANDLE,
+}
+
+impl DescriptorHeap {
+    pub fn new(
+        device: &ID3D12Device,
+        kind: D3D12_DESCRIPTOR_HEAP_TYPE,
+        capacity: u32,
+        flags: D3D12_DESCRIPTOR_HEAP_FLAGS,
+    ) -> Self {
+        let desc = D3D12_DESCRIPTOR_HEAP_DESC {
+            Type: kind,
+            NumDescriptors: capacity,
+            Flags: flags,
+            NodeMask: 0,
+        };
+
+        let handle: ID3D12DescriptorHeap = unsafe { device.CreateDescriptorHeap(&desc) }.unwrap();
+
+        let cpu_base = unsafe { handle.GetCPUDescriptorHandleForHeapStart().ptr };
+
+        let gpu_base = unsafe { handle.GetGPUDescriptorHandleForHeapStart() };
+
+        let size = unsafe { device.GetDescriptorHandleIncrementSize(kind) };
+
+        Self {
+            handle,
+            capacity,
+            size,
+            cpu_base,
+            gpu_base,
+        }
+    }
+
+    pub fn cpu(&self, index: u32) -> D3D12_CPU_DESCRIPTOR_HANDLE {
+        assert!(index < self.capacity);
+
+        let ptr = self.cpu_base + (index as usize * self.size as usize);
+        D3D12_CPU_DESCRIPTOR_HANDLE { ptr }
     }
 }

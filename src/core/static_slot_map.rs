@@ -13,7 +13,7 @@ pub trait Key: Clone + Copy + PartialEq + Sized {
 
 macro_rules! new_key_type {
     ($name:ident) => {
-        #[derive(Clone, Copy, PartialEq)]
+        #[derive(Clone, Copy, Debug, PartialEq)]
         pub struct $name {
             index: u32,
             epoch: u32,
@@ -63,7 +63,7 @@ pub struct SlotMap<const CAPACITY: usize, V, K: Key = DefaultKey> {
     slots: [Slot<V>; CAPACITY],
     next_free: u32,
     num_free: u32,
-    num_alloc: u32,
+    num_used: u32,
     _phantom: PhantomData<K>,
 }
 
@@ -81,25 +81,33 @@ impl<const CAPACITY: usize, V, K: Key> SlotMap<CAPACITY, V, K> {
             value: MaybeUninit::uninit(),
         });
 
-        let next_free = 1;
+        let next_free = 0;
 
-        for (i, slot) in slots[1..].iter_mut().enumerate() {
+        for (i, slot) in slots[0..].iter_mut().enumerate() {
             slot.next = (i + 1) as u32;
         }
 
-        slots.last_mut().unwrap().next = 0;
+        slots.last_mut().unwrap().next = u32::MAX;
 
         Self {
             slots,
             next_free,
-            num_free: CAPACITY as u32 - 1,
-            num_alloc: 1,
+            num_free: CAPACITY as u32,
+            num_used: 0,
             _phantom: PhantomData,
         }
     }
 
+    pub fn has_key(&self, key: K) -> bool {
+        let Some(slot) = self.slots.get(key.index() as usize) else {
+            return false;
+        };
+
+        slot.epoch == key.epoch()
+    }
+
     pub fn has_capacity(&self, capacity: usize) -> bool {
-        u32::from(self.num_free) >= capacity as u32
+        self.num_free >= capacity as u32
     }
 
     pub fn get(&self, key: K) -> Option<&V> {
@@ -123,18 +131,22 @@ impl<const CAPACITY: usize, V, K: Key> SlotMap<CAPACITY, V, K> {
     }
 
     pub fn insert(&mut self, value: V) -> Result<K, V> {
-        if self.next_free == 0 {
-            return Err(value);
+        self.create(|_| value)
+    }
+
+    pub fn create(&mut self, f: impl FnOnce(K) -> V) -> Result<K, V> {
+        if self.next_free == u32::MAX {
+            return Err(f(Key::new(0, 0)));
         }
 
         let index = self.next_free as usize;
         let slot = &mut self.slots[index];
 
         self.next_free = slot.next;
-        slot.value.write(value);
+        slot.value = MaybeUninit::new(f(Key::new(index as u32, slot.epoch)));
 
-        self.num_free.checked_sub(1).unwrap();
-        self.num_alloc.checked_add(1).unwrap();
+        self.num_free = self.num_free.checked_sub(1).unwrap();
+        self.num_used = self.num_used.checked_add(1).unwrap();
 
         Ok(Key::new(index as u32, slot.epoch))
     }
@@ -158,7 +170,7 @@ impl<const CAPACITY: usize, V, K: Key> SlotMap<CAPACITY, V, K> {
             }
         }
 
-        self.num_alloc.checked_sub(1).unwrap();
+        self.num_used = self.num_used.checked_sub(1).unwrap();
 
         Some(unsafe { slot.value.assume_init_read() })
     }
@@ -168,4 +180,27 @@ struct Slot<V> {
     next: u32,
     epoch: u32,
     value: MaybeUninit<V>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn quick() {
+        let mut map = SlotMap::<2, u32>::new();
+        let key = map.insert(1).unwrap();
+        assert_eq!(*map.get(key).unwrap(), 1);
+
+        let key = map.insert(255).unwrap();
+        assert_eq!(*map.get(key).unwrap(), 255);
+
+        *map.get_mut(key).unwrap() = u32::MAX;
+        assert_eq!(*map.get(key).unwrap(), u32::MAX);
+
+        assert!(map.insert(0).is_err());
+
+        assert_eq!(map.remove(key), Some(u32::MAX));
+        assert_eq!(map.remove(key), None);
+    }
 }

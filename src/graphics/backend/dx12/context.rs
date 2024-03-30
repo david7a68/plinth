@@ -7,10 +7,8 @@ use windows::{
                 ID3D12CommandAllocator, ID3D12DescriptorHeap, ID3D12GraphicsCommandList,
                 ID3D12Resource, D3D12_COMMAND_LIST_TYPE_DIRECT, D3D12_CPU_DESCRIPTOR_HANDLE,
                 D3D12_DESCRIPTOR_HEAP_DESC, D3D12_DESCRIPTOR_HEAP_FLAG_NONE,
-                D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_DESCRIPTOR_RANGE,
-                D3D12_DESCRIPTOR_RANGE_OFFSET_APPEND, D3D12_DESCRIPTOR_RANGE_TYPE_SRV,
-                D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET,
-                D3D12_ROOT_DESCRIPTOR_TABLE, D3D12_VIEWPORT,
+                D3D12_DESCRIPTOR_HEAP_TYPE_RTV, D3D12_RESOURCE_STATE_PRESENT,
+                D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_VIEWPORT,
             },
             DirectComposition::{IDCompositionTarget, IDCompositionVisual},
             Dxgi::{
@@ -74,6 +72,7 @@ pub struct Context<'a> {
 
     /// A resize event. Deferred until repaint to consolidate graphics work and
     /// in case multiple resize events are received in a single frame.
+    #[allow(clippy::type_complexity)]
     deferred_resize: Option<(Extent<Wixel>, Scale<Wixel, Pixel>, Option<f32>)>,
 }
 
@@ -191,9 +190,6 @@ impl<'a> Context<'a> {
         texture_cache: &TextureCache,
         mut callback: impl FnMut(&mut Canvas, &FrameInfo),
     ) {
-        // todo: how to handle multiple repaint events in a single frame (when
-        // animating and resizing at the same time)? -dz
-
         unsafe { WaitForSingleObjectEx(self.swapchain_ready, u32::MAX, true) };
 
         if let Some((size, dpi, flex)) = self.deferred_resize.take() {
@@ -500,11 +496,7 @@ fn upload_draw_list(
                     .command_list
                     .ClearRenderTargetView(target_rtv, &color.to_array_f32(), None);
             },
-            Command::Rects(image, count) => {
-                device
-                    .rect_shader
-                    .set_texture_id(&frame.command_list, image.index());
-
+            Command::Rects(count) => {
                 unsafe { frame.command_list.DrawInstanced(4, count, 0, rect_start) };
                 rect_start += count;
             }

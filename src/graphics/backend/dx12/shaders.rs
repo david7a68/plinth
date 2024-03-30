@@ -118,16 +118,9 @@ impl RectShader {
                     .cast(),
                 0,
             );
-            command_list.SetGraphicsRoot32BitConstant(1, 0, 0);
-            command_list.SetGraphicsRootShaderResourceView(2, rects.GetGPUVirtualAddress());
-            command_list.SetGraphicsRootDescriptorTable(3, texture_descriptors);
+            command_list.SetGraphicsRootShaderResourceView(1, rects.GetGPUVirtualAddress());
+            command_list.SetGraphicsRootDescriptorTable(2, texture_descriptors);
             command_list.IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP);
-        }
-    }
-
-    pub fn set_texture_id(&self, command_list: &ID3D12GraphicsCommandList, id: u32) {
-        unsafe {
-            command_list.SetGraphicsRoot32BitConstant(1, id, 0);
         }
     }
 }

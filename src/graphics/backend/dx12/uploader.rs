@@ -1,4 +1,4 @@
-use std::{mem::ManuallyDrop, sync::Arc};
+use std::sync::Arc;
 
 use windows::Win32::Graphics::Direct3D12::{
     ID3D12CommandAllocator, ID3D12GraphicsCommandList, ID3D12Resource,
@@ -337,7 +337,7 @@ impl MappedSlice<'_> {
     }
 }
 
-pub struct UploadBuffer {
+struct UploadBuffer {
     cmda: ID3D12CommandAllocator,
     base: *mut u8,
     stop: *mut u8,

@@ -15,7 +15,7 @@ impl RoundRect {
 
         Self {
             rect,
-            color: Color::BLACK,
+            color: Color::WHITE,
             image: Image::default(),
         }
     }

@@ -8,20 +8,38 @@ use crate::{
 
 use super::{texture_atlas::TextureCache, TextureId};
 
+#[repr(u8)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+enum TextureFilter {
+    #[default]
+    Point,
+    Linear,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Sampler {
+    filter: TextureFilter,
+}
+
 #[repr(C)]
+#[repr(align(16))]
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct RRect {
     pub xywh: [f32; 4],
     pub uvwh: [f32; 4],
     pub color: [f32; 4],
+    pub texture_id: u32,
+    pub sampler: Sampler,
 }
 
 impl RRect {
-    pub fn new(rect: &RoundRect, uvwh: &Rect<UV>) -> Self {
+    pub fn new(rect: &RoundRect, uvwh: &Rect<UV>, texture_id: u32, sampler: Sampler) -> Self {
         Self {
             xywh: rect.rect.to_xywh().map(|x| x.0),
-            uvwh: uvwh.to_xywh().map(|x| x.0 as f32),
+            uvwh: uvwh.to_xywh().map(|x| x.0),
             color: rect.color.to_array_f32(),
+            texture_id,
+            sampler,
         }
     }
 }
@@ -31,7 +49,7 @@ pub enum Command {
     Begin(Rect<Pixel>),
     Close,
     Clear(Color),
-    Rects(TextureId, u32),
+    Rects(u32),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -42,12 +60,12 @@ pub enum DrawCommand {
     Rects,
 }
 
+#[derive(Debug)]
 #[repr(align(16))]
 pub(crate) struct DrawList {
     pub prims: Vec<RRect>,
     pub areas: Vec<Rect<Pixel>>,
     pub colors: Vec<Color>,
-    pub images: Vec<TextureId>,
     pub commands: Vec<(DrawCommand, u32)>,
 }
 
@@ -57,7 +75,6 @@ impl DrawList {
             prims: Vec::new(),
             areas: Vec::new(),
             colors: Vec::new(),
-            images: Vec::new(),
             commands: Vec::new(),
         }
     }
@@ -66,7 +83,6 @@ impl DrawList {
         self.prims.clear();
         self.areas.clear();
         self.colors.clear();
-        self.images.clear();
         self.commands.clear();
     }
 
@@ -74,7 +90,6 @@ impl DrawList {
         CommandIterator {
             areas: &self.areas,
             colors: &self.colors,
-            images: &self.images,
             commands: &self.commands,
             index: 0,
             draws: 0,
@@ -85,7 +100,6 @@ impl DrawList {
 pub struct CommandIterator<'a> {
     areas: &'a [Rect<Pixel>],
     colors: &'a [Color],
-    images: &'a [TextureId],
     commands: &'a [(DrawCommand, u32)],
     index: usize,
     draws: usize,
@@ -107,10 +121,8 @@ impl Iterator for CommandIterator<'_> {
             (DrawCommand::Close, _) => Command::Close,
             (DrawCommand::Clear, color_i) => Command::Clear(self.colors[color_i as usize]),
             (DrawCommand::Rects, count) => {
-                let image = self.images[self.draws];
                 self.draws += 1;
-
-                Command::Rects(image, count)
+                Command::Rects(count)
             }
         };
 
@@ -159,9 +171,7 @@ impl<'a> Canvas<'a> {
     pub fn clear(&mut self, color: Color) {
         match self.state {
             DrawCommand::Begin => {}
-            DrawCommand::Clear => {
-                // todo: might be an error? maybe surface in log. -dz (2024-03-24)
-            }
+            DrawCommand::Clear => {} // todo: might be an error? maybe surface in log. -dz (2024-03-24)
             DrawCommand::Rects => self.submit_batch(),
             DrawCommand::Close => panic!("Canvas state Close -> Clear is a bug."),
         }
@@ -176,9 +186,6 @@ impl<'a> Canvas<'a> {
     }
 
     pub fn draw_rect(&mut self, rect: RoundRect) {
-        let cache_id = CachedTextureId::new(rect.image.key.index(), rect.image.key.epoch());
-        let (texture_id, uvwh) = self.textures.get_uv_rect(cache_id);
-
         match self.state {
             DrawCommand::Begin => {
                 debug_assert_eq!(self.rect_batch_start, 0);
@@ -188,21 +195,21 @@ impl<'a> Canvas<'a> {
             }
             DrawCommand::Clear => {
                 debug_assert_eq!(self.rect_batch_count, 0);
-
                 self.rect_batch_start = self.draw_list.prims.len();
             }
-            DrawCommand::Rects => {
-                debug_assert!(self.rect_batch_count > 0);
-
-                if texture_id != self.rect_batch_image {
-                    self.submit_batch();
-                    self.rect_batch_image = texture_id;
-                }
-            }
+            DrawCommand::Rects => {} // no-op
             DrawCommand::Close => panic!("Canvas state Close -> DrawRect is a bug."),
         }
 
-        self.draw_list.prims.push(RRect::new(&rect, &uvwh));
+        let cache_id = CachedTextureId::new(rect.image.key.index(), rect.image.key.epoch());
+        let (texture_id, uvwh) = self.textures.get_uv_rect(cache_id);
+
+        self.draw_list.prims.push(RRect::new(
+            &rect,
+            &uvwh,
+            texture_id.index(),
+            Sampler::default(),
+        ));
 
         self.rect_batch_count += 1;
         self.rect_batch_image = texture_id;
@@ -231,8 +238,6 @@ impl<'a> Canvas<'a> {
         self.draw_list
             .commands
             .push((DrawCommand::Rects, self.rect_batch_count as u32));
-
-        self.draw_list.images.push(self.rect_batch_image);
 
         self.rect_batch_start = self.draw_list.prims.len();
         self.rect_batch_count = 0;

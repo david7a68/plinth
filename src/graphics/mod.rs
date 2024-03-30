@@ -6,7 +6,7 @@ mod primitives;
 use windows::Win32::Foundation::HWND;
 
 use crate::{
-    geometry::{Extent, Point, Rect},
+    geometry::{Extent, Point},
     graphics::image::PackedKey,
     system::power::PowerPreference,
     time::{FramesPerSecond, PresentPeriod, PresentTime},
@@ -16,6 +16,7 @@ use self::backend::{
     texture_atlas::{CachedTextureId, TextureCache},
     Device, Uploader,
 };
+
 pub use self::{
     backend::draw_list::Canvas,
     backend::WindowContext,
@@ -114,7 +115,7 @@ impl Graphics {
     }
 
     pub fn create_image(&mut self, info: &ImageInfo) -> Result<Image, ImageError> {
-        let (texture_id, uvwh) = self.textures.insert_rect(
+        let (_, texture_id) = self.textures.insert_rect(
             info.extent,
             info.layout,
             info.format,

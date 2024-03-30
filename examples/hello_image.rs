@@ -46,9 +46,6 @@ impl EventHandler<AppWindow> for App {
     fn start(&mut self, app: &mut AppContext<AppWindow>) {
         app.create_window(WindowAttributes::default(), |_| AppWindow {})
             .unwrap();
-
-        app.create_window(WindowAttributes::default(), |_| AppWindow {})
-            .unwrap();
     }
 
     fn stop(&mut self) {
@@ -76,7 +73,7 @@ impl EventHandler<AppWindow> for App {
     ) {
         let image = app.load_image(static_str!("image")).unwrap();
 
-        canvas.clear(Color::BLACK);
+        canvas.clear(Color::WHITE);
         canvas.draw_rect(RoundRect::new((50.0, 100.0, 40.0, 70.0)).with_image(image));
         canvas.draw_rect(RoundRect::new((100.0, 100.0, 40.0, 70.0)).with_color(Color::RED));
     }

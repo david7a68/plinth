@@ -49,6 +49,27 @@ impl<T: Num> Point<T> {
     {
         Point::new(self.x.scale(factor), self.y.scale(factor))
     }
+
+    pub const fn as_extent(&self) -> Extent<T> {
+        Extent {
+            width: self.x,
+            height: self.y,
+        }
+    }
+
+    pub fn min(&self, other: &Self) -> Self {
+        Self {
+            x: self.x.min(other.x),
+            y: self.y.min(other.y),
+        }
+    }
+
+    pub fn max(&self, other: &Self) -> Self {
+        Self {
+            x: self.x.max(other.x),
+            y: self.y.max(other.y),
+        }
+    }
 }
 
 impl<T: Num, I: Into<T>> From<(I, I)> for Point<T> {
@@ -105,20 +126,14 @@ impl<T: Num> Extent<T> {
         Extent::new(self.width.scale(factor), self.height.scale(factor))
     }
 
-    pub fn min(&self, other: &Self) -> Self
-    where
-        T: Ord,
-    {
+    pub fn min(&self, other: &Self) -> Self {
         Self {
             width: self.width.min(other.width),
             height: self.height.min(other.height),
         }
     }
 
-    pub fn max(&self, other: &Self) -> Self
-    where
-        T: Ord,
-    {
+    pub fn max(&self, other: &Self) -> Self {
         Self {
             width: self.width.max(other.width),
             height: self.height.max(other.height),
@@ -277,6 +292,10 @@ pub trait Num: Copy + Default + Add + Sub + Mul + Div + PartialOrd + PartialEq {
 
     const MIN: Self;
     const MAX: Self;
+
+    fn min(self, other: Self) -> Self;
+
+    fn max(self, other: Self) -> Self;
 }
 
 pub trait ScaleTo<T: Num, U: Num> {
@@ -423,6 +442,14 @@ macro_rules! impl_num {
 
             const MIN: Self = Self(<$int_ty>::MIN);
             const MAX: Self = Self(<$int_ty>::MAX);
+
+            fn min(self, other: Self) -> Self {
+                Self(<$int_ty as Num>::min(self.0, other.0))
+            }
+
+            fn max(self, other: Self) -> Self {
+                Self(<$int_ty as Num>::max(self.0, other.0))
+            }
         }
     };
 }
@@ -436,9 +463,15 @@ impl_num!(
     Into()
 );
 
-impl From<Extent<Texel>> for Extent<f32> {
-    fn from(value: Extent<Texel>) -> Self {
-        Extent::new(value.width.0 as f32, value.height.0 as f32)
+impl From<Texel> for f32 {
+    fn from(value: Texel) -> Self {
+        value.0 as f32
+    }
+}
+
+impl From<Texel> for Pixel {
+    fn from(value: Texel) -> Self {
+        Pixel(value.0 as f32)
     }
 }
 
@@ -531,6 +564,14 @@ macro_rules! impl_prim {
 
                 const MIN: Self = Self::MIN;
                 const MAX: Self = Self::MAX;
+
+                fn min(self, other: Self) -> Self {
+                    <$t as std::cmp::Ord>::min(self, other)
+                }
+
+                fn max(self, other: Self) -> Self {
+                    <$t as std::cmp::Ord>::max(self, other)
+                }
             }
         )+
     };
@@ -544,6 +585,14 @@ impl Num for f32 {
 
     const MIN: Self = Self::MIN;
     const MAX: Self = Self::MAX;
+
+    fn min(self, other: Self) -> Self {
+        self.min(other)
+    }
+
+    fn max(self, other: Self) -> Self {
+        self.max(other)
+    }
 }
 
 impl Num for f64 {
@@ -552,4 +601,12 @@ impl Num for f64 {
 
     const MIN: Self = Self::MIN;
     const MAX: Self = Self::MAX;
+
+    fn min(self, other: Self) -> Self {
+        self.min(other)
+    }
+
+    fn max(self, other: Self) -> Self {
+        self.max(other)
+    }
 }

@@ -111,7 +111,7 @@ impl UploaderImpl {
         pixels: &RasterBuf,
         origin: Point<Texel>,
     ) {
-        let row_size = pixels.row_size(false);
+        let row_size = pixels.row_size();
         let row_size_aligned =
             row_size.next_multiple_of(D3D12_TEXTURE_DATA_PITCH_ALIGNMENT as usize);
         debug_assert_eq!(

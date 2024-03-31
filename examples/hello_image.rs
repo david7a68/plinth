@@ -15,7 +15,6 @@ const IMAGE: RasterBuf<'static> = RasterBuf::new(
         extent: Extent {width: Texel(3), height: Texel(1)},
         format: Format::Linear,
         layout: Layout::Rgba8,
-        stride: 1,
     },
     &[
         255, 0, 0, 255,

@@ -23,8 +23,8 @@ pub use self::{
     backend::WindowContext,
     color::Color,
     image::{
-        Command, Error as ImageError, Format, Image, Info as ImageInfo, Layout, RasterBuf,
-        VectorBuf,
+        Command as PathCommand, CommandIter as PathCommandIter, Error as ImageError, Format, Image,
+        Info as ImageInfo, Layout, PathIter, PathRef, RasterBuf, VectorBuf, Verb as PathVerb,
     },
     primitives::RoundRect,
 };
@@ -99,7 +99,6 @@ impl Graphics {
                     extent: Extent::new(1, 1),
                     layout: Layout::Rgba8,
                     format: Format::Linear,
-                    stride: 1,
                 },
                 &[0xFF, 0xFF, 0xFF, 0xFF],
             ),
@@ -118,7 +117,7 @@ impl Graphics {
         self.device.create_context(hwnd)
     }
 
-    pub fn create_raster_image(&mut self, info: &ImageInfo) -> Result<Image, ImageError> {
+    pub fn create_raster_image(&mut self, info: ImageInfo) -> Result<Image, ImageError> {
         let (_, texture_id) = self.textures.insert_rect(
             info.extent,
             info.layout,
@@ -139,8 +138,6 @@ impl Graphics {
     pub fn create_vector_image(
         &mut self,
         buf: VectorBuf,
-        format: Format,
-        layout: Layout,
         initial_size: Option<Extent<Pixel>>,
     ) -> Result<Image, ImageError> {
         // calculate broad bounds for the image, use that as exent

@@ -45,8 +45,8 @@ use crate::{
     core::static_slot_map::SlotMap,
     geometry::{Extent, Point, Texel},
     graphics::{
-        backend::{dx12::image_barrier, SubmitId, TextureId},
         draw_list::Command,
+        gl::{dx12::image_barrier, SubmitId, TextureId},
         DrawList, Format, GraphicsConfig, Layout, RasterBuf,
     },
 };

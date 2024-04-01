@@ -1,9 +1,10 @@
-mod backend;
 mod color;
 mod draw_list;
+mod gl;
 mod image;
 pub(crate) mod limits;
 mod primitives;
+mod text;
 mod texture_atlas;
 
 use windows::Win32::Foundation::HWND;
@@ -16,16 +17,16 @@ use crate::{
 };
 
 use self::{
-    backend::Device,
+    gl::Device,
     texture_atlas::{CachedTextureId, TextureCache},
 };
 
-pub(crate) use self::backend::Swapchain;
+pub(crate) use self::gl::Swapchain;
 
 pub use self::{
-    backend::RenderTarget,
     color::Color,
     draw_list::{Canvas, DrawList},
+    gl::RenderTarget,
     image::{Error as ImageError, Format, Image, Info as ImageInfo, Layout, RasterBuf},
     primitives::RoundRect,
 };

@@ -13,7 +13,7 @@ use windows::{
 use crate::{
     geometry::{Point, Texel},
     graphics::{
-        backend::dx12::{image_barrier, to_dxgi_format},
+        gl::dx12::{image_barrier, to_dxgi_format},
         RasterBuf,
     },
 };

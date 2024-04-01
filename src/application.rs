@@ -41,15 +41,15 @@ impl Application {
     ///
     /// This will fail if the event loop could not be initialized, or if an
     /// application has already been initialized.
-    pub fn new(config: Config) -> Result<Self, Error> {
-        limits::GFX_IMAGE_COUNT.check(&config.resources.len());
+    pub fn new(config: &Config) -> Result<Self, Error> {
+        limits::GFX_IMAGE_COUNT.check(config.resources.len());
 
         let mut graphics = Graphics::new(&config.graphics);
 
         let mut resources =
             HashMap::with_capacity_and_hasher(GFX_IMAGE_COUNT.get(), PassthroughBuildHasher::new());
 
-        // use a thread pool a la rayon to load resources in parallel
+        // todo: use a thread pool a la rayon to load resources in parallel
 
         for resource in config.resources {
             match resource {

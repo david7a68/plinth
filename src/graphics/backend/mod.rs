@@ -84,24 +84,10 @@ pub enum Swapchain<'device> {
 }
 
 impl<'device> Swapchain<'device> {
-    pub fn extent(&self) -> Extent<Wixel> {
-        match self {
-            Self::Null => Extent::new(0, 0),
-            Self::Dx12(context) => context.extent(),
-        }
-    }
-
     pub fn resize(&mut self, extent: Extent<Wixel>) {
         match self {
             Self::Null => {}
             Self::Dx12(context) => context.resize(extent),
-        }
-    }
-
-    pub fn frame_info(&self) -> FrameInfo {
-        match self {
-            Self::Null => FrameInfo::default(),
-            Self::Dx12(context) => context.frame_info(),
         }
     }
 
@@ -160,6 +146,7 @@ pub enum RenderTarget {
 }
 
 impl RenderTarget {
+    #[must_use]
     pub fn extent(&self) -> Extent<Texel> {
         match self {
             Self::Null => Extent::new(0, 0),

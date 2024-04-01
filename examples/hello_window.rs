@@ -17,7 +17,7 @@ pub fn main() {
         ..Default::default()
     };
 
-    let mut event_loop = Application::new(config).unwrap();
+    let mut event_loop = Application::new(&config).unwrap();
     event_loop.run(App {}).unwrap();
 }
 

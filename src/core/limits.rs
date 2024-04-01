@@ -1,21 +1,25 @@
 use crate::geometry::{Texel, Wixel};
 
-pub struct Limit<T>(pub T);
+pub const MIN: i32 = 0;
+pub const MAX: i32 = 1;
 
-pub struct Usize<const LIMIT: usize> {
-    check: fn(Limit<usize>, &usize) -> bool,
+pub struct Usize<const LIMIT: usize, const KIND: i32> {
     error: &'static str,
 }
 
-impl<const LIMIT: usize> Usize<LIMIT> {
-    pub const fn new(check: fn(Limit<usize>, &usize) -> bool, error: &'static str) -> Self {
-        Self { check, error }
+impl<const LIMIT: usize, const KIND: i32> Usize<LIMIT, KIND> {
+    #[must_use]
+    pub const fn new(error: &'static str) -> Self {
+        Self { error }
     }
 
+    #[must_use]
+    #[allow(clippy::unused_self)]
     pub const fn get(&self) -> usize {
         LIMIT
     }
 
+    #[allow(clippy::unused_self)]
     pub fn test<E>(&self, value: &str, error: E) -> Result<(), E> {
         if value.len() <= LIMIT {
             Ok(())
@@ -24,11 +28,15 @@ impl<const LIMIT: usize> Usize<LIMIT> {
         }
     }
 
-    pub fn check(&self, value: &usize) {
-        assert!((self.check)(Limit(LIMIT), value), "{}", self.error);
+    pub fn check(&self, value: usize) {
+        if KIND == MIN {
+            assert!(value >= LIMIT, "{}", self.error);
+        } else {
+            assert!(value <= LIMIT, "{}", self.error);
+        }
     }
 
-    pub fn check_debug(&self, value: &usize) {
+    pub fn check_debug(&self, value: usize) {
         #[cfg(debug_assertions)]
         self.check(value);
     }
@@ -39,14 +47,18 @@ pub struct StrLen<const LIMIT: usize> {
 }
 
 impl<const LIMIT: usize> StrLen<LIMIT> {
+    #[must_use]
     pub const fn new(error: &'static str) -> Self {
         Self { error }
     }
 
+    #[must_use]
+    #[allow(clippy::unused_self)]
     pub const fn get(&self) -> usize {
         LIMIT
     }
 
+    #[allow(clippy::unused_self)]
     pub fn test<E>(&self, value: &str, error: E) -> Result<(), E> {
         if value.len() <= LIMIT {
             Ok(())
@@ -55,14 +67,18 @@ impl<const LIMIT: usize> StrLen<LIMIT> {
         }
     }
 
+    #[allow(clippy::unused_self)]
     pub const fn check(&self, value: &str) {
         assert!(value.len() <= LIMIT, "{}", self.error);
     }
 
+    #[must_use]
+    #[allow(clippy::unused_self)]
     pub fn clamp<'a>(&self, value: &'a str) -> &'a str {
         &value[..LIMIT]
     }
 
+    #[allow(clippy::unused_self)]
     pub fn check_debug(&self, value: &str) {
         #[cfg(debug_assertions)]
         self.check(value);
@@ -71,7 +87,7 @@ impl<const LIMIT: usize> StrLen<LIMIT> {
 
 impl<const LIMIT: usize> std::fmt::Display for StrLen<LIMIT> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", LIMIT)
+        write!(f, "{LIMIT}")
     }
 }
 

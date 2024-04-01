@@ -29,13 +29,11 @@ pub enum Layout {
 }
 
 impl Layout {
+    #[must_use]
     pub const fn bytes_per_pixel(self) -> usize {
         match self {
-            Layout::Rgba8 => 4,
-            Layout::Rgba8Vector => 4,
-            Layout::Bgra8 => 4,
-            Layout::Alpha8 => 1,
-            Layout::Alpha8Vector => 1,
+            Self::Rgba8 | Self::Rgba8Vector | Self::Bgra8 => 4,
+            Self::Alpha8 | Self::Alpha8Vector => 1,
         }
     }
 }
@@ -43,11 +41,11 @@ impl Layout {
 impl From<u8> for Layout {
     fn from(value: u8) -> Self {
         match value {
-            0 => Layout::Rgba8,
-            1 => Layout::Rgba8Vector,
-            2 => Layout::Bgra8,
-            3 => Layout::Alpha8,
-            _ => panic!("Invalid layout value: {}", value),
+            0 => Self::Rgba8,
+            1 => Self::Rgba8Vector,
+            2 => Self::Bgra8,
+            3 => Self::Alpha8,
+            _ => panic!("Invalid layout value: {value}"),
         }
     }
 }
@@ -64,10 +62,10 @@ pub enum Format {
 impl From<u8> for Format {
     fn from(value: u8) -> Self {
         match value {
-            0 => Format::Unkown,
-            1 => Format::Srgb,
-            2 => Format::Linear,
-            _ => panic!("Invalid format value: {}", value),
+            0 => Self::Unkown,
+            1 => Self::Srgb,
+            2 => Self::Linear,
+            _ => panic!("Invalid format value: {value}"),
         }
     }
 }
@@ -80,13 +78,14 @@ pub struct Info {
 }
 
 impl Info {
+    #[must_use]
     pub const fn row_size(&self) -> usize {
         self.extent.width.0 as usize * self.layout.bytes_per_pixel()
     }
 }
 
 impl Info {
-    pub(crate) fn pack(&self) -> PackedInfo {
+    pub(crate) fn pack(self) -> PackedInfo {
         PackedInfo::new()
             .with_width(self.extent.width.0)
             .with_height(self.extent.height.0)
@@ -105,19 +104,23 @@ pub struct Image {
 }
 
 impl Image {
+    #[must_use]
     pub fn extent(&self) -> Extent<Texel> {
         Extent::new(Texel(self.info.width()), Texel(self.info.height()))
     }
 
+    #[must_use]
     pub fn layout(&self) -> Layout {
         self.info.layout().into()
     }
 
+    #[must_use]
     pub fn format(&self) -> Format {
         self.info.format().into()
     }
 }
 
+#[allow(clippy::missing_fields_in_debug)]
 impl Debug for Image {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Image")
@@ -143,9 +146,10 @@ impl<'a> RasterBuf<'a> {
         GFX_IMAGE_EXTENT.check(info.extent);
 
         let row_size = info.row_size();
-        if data.len() % row_size != 0 {
-            panic!("Size error");
-        }
+        assert!(
+            data.len() % row_size == 0,
+            "Data size does not agree with info."
+        );
 
         RasterBuf { info, data }
     }

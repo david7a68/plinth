@@ -83,8 +83,7 @@ impl Uploader {
 
         assert!(
                 row_size <= buffer_size,
-                "Image too large to upload. Increase buffer size to at least the size of a single row of pixels ({} bytes).",
-                row_size_aligned
+                "Image too large to upload. Increase buffer size to at least the size of a single row of pixels ({row_size_aligned} bytes).",
             );
 
         {
@@ -107,7 +106,7 @@ impl Uploader {
         let rows_per_chunk = buffer_size / row_size_aligned;
         let bytes_per_chunk = rows_per_chunk * row_size;
 
-        let mut advancing_y = origin.y.0 as usize;
+        let mut y_offset = origin.y.0 as u32;
 
         let fmt = to_dxgi_format(pixels.info().layout, pixels.info().format);
 
@@ -155,14 +154,14 @@ impl Uploader {
                 self.command_list.CopyTextureRegion(
                     &dst,
                     origin.x.0 as u32,
-                    advancing_y as u32,
+                    y_offset,
                     0,
                     &src,
                     None,
-                )
-            };
+                );
+            }
 
-            advancing_y += rows_per_chunk;
+            y_offset += rows_per_chunk as u32;
         }
 
         image_barrier(

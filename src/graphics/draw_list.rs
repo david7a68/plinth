@@ -70,6 +70,7 @@ pub struct DrawList {
 }
 
 impl DrawList {
+    #[must_use]
     pub fn new() -> Self {
         Self {
             prims: Vec::new(),
@@ -97,7 +98,16 @@ impl DrawList {
     }
 }
 
-pub(super) struct DrawIter<'a> {
+impl<'a> IntoIterator for &'a DrawList {
+    type Item = Command;
+    type IntoIter = DrawIter<'a>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+pub struct DrawIter<'a> {
     areas: &'a [Rect<Pixel>],
     colors: &'a [Color],
     commands: &'a [(DrawCommand, u32)],
@@ -160,19 +170,19 @@ impl<'a> Canvas<'a> {
         }
     }
 
+    #[must_use]
     pub fn region(&self) -> Rect<Pixel> {
         self.region
     }
 
     pub fn clear(&mut self, color: Color) {
         match self.state {
-            DrawCommand::Begin => {}
-            DrawCommand::Clear => {} // todo: might be an error? maybe surface in log. -dz (2024-03-24)
+            DrawCommand::Begin | DrawCommand::Clear => {}
             DrawCommand::Rects => self.submit_batch(),
             DrawCommand::Close => panic!("Canvas state Close -> Clear is a bug."),
         }
 
-        GFX_DRAW_PRIM_COUNT.check(&self.draw_list.colors.len());
+        GFX_DRAW_PRIM_COUNT.check(self.draw_list.colors.len());
 
         self.draw_list
             .commands
@@ -182,7 +192,7 @@ impl<'a> Canvas<'a> {
         self.state = DrawCommand::Clear;
     }
 
-    pub fn draw_rect(&mut self, rect: RoundRect) {
+    pub fn draw_rect(&mut self, rect: &RoundRect) {
         match self.state {
             DrawCommand::Begin => {
                 debug_assert_eq!(self.rect_batch_start, 0);
@@ -201,13 +211,13 @@ impl<'a> Canvas<'a> {
         let (texture_id, uvwh) = self.textures.get_uv_rect(cache_id);
 
         self.draw_list.prims.push(RRect::new(
-            &rect,
+            rect,
             &uvwh,
             texture_id.index(),
             Sampler::default(),
         ));
 
-        GFX_DRAW_PRIM_COUNT.check(&self.rect_batch_count);
+        GFX_DRAW_PRIM_COUNT.check(self.rect_batch_count);
 
         self.rect_batch_count += 1;
 
@@ -216,8 +226,7 @@ impl<'a> Canvas<'a> {
 
     pub fn finish(&mut self) {
         match self.state {
-            DrawCommand::Begin => {}
-            DrawCommand::Clear => {}
+            DrawCommand::Begin | DrawCommand::Clear => {}
             DrawCommand::Rects => self.submit_batch(),
             DrawCommand::Close => return,
         }

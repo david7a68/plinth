@@ -19,7 +19,7 @@ pub fn main() {
         ..Default::default()
     };
 
-    Application::new(config).unwrap().run(App {}).unwrap();
+    Application::new(&config).unwrap().run(App {}).unwrap();
 }
 
 pub struct AppWindow {

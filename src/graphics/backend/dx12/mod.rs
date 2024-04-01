@@ -67,6 +67,7 @@ pub fn image_barrier(
 }
 
 fn to_dxgi_format(layout: Layout, format: Format) -> DXGI_FORMAT {
+    #[allow(clippy::match_same_arms)]
     match (layout, format) {
         (_, Format::Unkown) => panic!("Unknown format"),
         (Layout::Rgba8, Format::Srgb) => DXGI_FORMAT_R8G8B8A8_UNORM_SRGB,

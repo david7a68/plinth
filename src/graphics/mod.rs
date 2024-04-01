@@ -176,6 +176,6 @@ impl Graphics {
     }
 
     pub fn draw(&self, draw_list: &DrawList, target: &mut RenderTarget) {
-        self.device.draw(draw_list, target)
+        self.device.draw(draw_list, target);
     }
 }

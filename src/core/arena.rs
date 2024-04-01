@@ -26,9 +26,8 @@ pub struct Arena<'a> {
 }
 
 impl Arena<'static> {
-    #[must_use]
     pub fn new(size: usize) -> Result<Self, Error> {
-        assert!(size <= isize::MAX as usize, "size exceeds isize::MAX");
+        assert!(isize::try_from(size).is_ok(), "size exceeds isize::MAX");
 
         let root = {
             let layout = Layout::from_size_align(size, 8).unwrap();
@@ -67,7 +66,6 @@ impl<'a> Arena<'a> {
 }
 
 impl<'a> Arena<'a> {
-    #[must_use]
     pub fn alloc(&self, layout: Layout) -> Result<NonNull<u8>, Error> {
         let align = self.next.get().align_offset(layout.align());
 
@@ -76,7 +74,7 @@ impl<'a> Arena<'a> {
 
         let required = align + layout.size();
 
-        debug_assert!(required <= isize::MAX as usize);
+        debug_assert!(isize::try_from(required).is_ok());
         if required as isize > capacity {
             eprintln!("Attempted to allocate {required} bytes but only had {capacity} bytes free");
             return Err(Error::InsufficientCapacity);
@@ -121,8 +119,8 @@ impl<'a> Arena<'a> {
         })
     }
 
-    pub fn make_array<'this, T>(&'this self, cap: usize) -> Result<Array<'this, T>, Error> {
-        assert!(cap <= u32::MAX as usize, "len exceeds u32::MAX");
+    pub fn make_array<T>(&self, cap: usize) -> Result<Array<'_, T>, Error> {
+        assert!(u32::try_from(cap).is_ok(), "len exceeds u32::MAX");
 
         let ptr = self.alloc(Layout::array::<T>(cap).unwrap())?;
         debug_assert_eq!(ptr.as_ptr().align_offset(align_of::<T>()), 0, "alignment");
@@ -142,7 +140,7 @@ impl<'a> Arena<'a> {
         len: usize,
         f: impl Fn(usize) -> T,
     ) -> Result<Array<T>, Error> {
-        assert!(len <= u32::MAX as usize, "len exceeds u32::MAX");
+        assert!(u32::try_from(len).is_ok(), "len exceeds u32::MAX");
 
         let mut array = self.make_array::<T>(len)?;
 
@@ -168,7 +166,7 @@ impl<'a> Arena<'a> {
         let mut len = 0;
         let mut err = false;
 
-        for value in iter.into_iter() {
+        for value in iter {
             let capacity = unsafe { self.next.get().offset_from(self.stop) };
 
             if capacity < size as isize {
@@ -244,7 +242,7 @@ impl<'a> Arena<'a> {
         // array.cap, then return new capacity. allocate whatever's left in the
         // arena.
 
-        assert!(new_cap <= u32::MAX as usize, "len exceeds u32::MAX");
+        assert!(u32::try_from(new_cap).is_ok(), "len exceeds u32::MAX");
 
         let is_last_alloc =
             unsafe { array.ptr.as_ptr().add(array.len as usize) }.cast() == self.next.get();
@@ -263,12 +261,10 @@ impl<'a> Arena<'a> {
             let ptr = self
                 .alloc(Layout::array::<T>(new_cap).unwrap())?
                 .cast::<T>();
-            debug_assert_eq!(ptr.as_ptr().align_offset(align_of::<T>()), 0, "alignment");
 
-            unsafe {
-                ptr.as_ptr()
-                    .copy_from_nonoverlapping(array.ptr.as_ptr(), array.len())
-            };
+            let ptr_ = ptr.as_ptr();
+            debug_assert_eq!(ptr_.align_offset(align_of::<T>()), 0, "alignment");
+            unsafe { ptr_.copy_from_nonoverlapping(array.ptr.as_ptr(), array.len()) };
 
             array.ptr = ptr;
             array.cap = new_cap as u32;

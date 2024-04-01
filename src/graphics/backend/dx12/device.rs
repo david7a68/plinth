@@ -232,12 +232,9 @@ impl Device {
             .borrow_mut()
             .create(|key| {
                 let image = image.unwrap();
-                let descriptor = self.texture_descriptors.cpu(key.index());
+                let view = self.texture_descriptors.cpu(key.index());
 
-                unsafe {
-                    self.handle
-                        .CreateShaderResourceView(&image, None, descriptor)
-                };
+                unsafe { self.handle.CreateShaderResourceView(&image, None, view) };
 
                 image
             })
@@ -436,6 +433,7 @@ unsafe extern "system" fn dx12_debug_callback(
     description: PCSTR,
     _context: *mut std::ffi::c_void,
 ) {
+    #[allow(clippy::match_same_arms)]
     match severity {
         D3D12_MESSAGE_SEVERITY_CORRUPTION => eprintln!("D3D12 {}", description.display()),
         D3D12_MESSAGE_SEVERITY_ERROR => eprintln!("D3D12 {}", description.display()),

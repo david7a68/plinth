@@ -105,6 +105,7 @@ impl<T: Num> Extent<T> {
         height: T::MAX,
     };
 
+    #[must_use]
     pub fn new(width: impl Into<T>, height: impl Into<T>) -> Self {
         Self {
             width: width.into(),
@@ -112,6 +113,7 @@ impl<T: Num> Extent<T> {
         }
     }
 
+    #[must_use]
     pub fn cast<U: Num + From<T>>(self) -> Extent<U> {
         Extent {
             width: U::from(self.width),
@@ -119,6 +121,7 @@ impl<T: Num> Extent<T> {
         }
     }
 
+    #[must_use]
     pub fn scale_to<U: Num>(self, factor: Scale<T, U>) -> Extent<U>
     where
         T: ScaleTo<T, U>,
@@ -126,6 +129,7 @@ impl<T: Num> Extent<T> {
         Extent::new(self.width.scale(factor), self.height.scale(factor))
     }
 
+    #[must_use]
     pub fn min(&self, other: &Self) -> Self {
         Self {
             width: self.width.min(other.width),
@@ -133,6 +137,7 @@ impl<T: Num> Extent<T> {
         }
     }
 
+    #[must_use]
     pub fn max(&self, other: &Self) -> Self {
         Self {
             width: self.width.max(other.width),
@@ -278,6 +283,7 @@ pub struct Scale<T: Num, U: Num> {
 }
 
 impl<T: Num, U: Num> Scale<T, U> {
+    #[must_use]
     pub fn new(factor: f32) -> Self {
         Self {
             factor,
@@ -302,8 +308,10 @@ pub trait Num: Copy + Default + Add + Sub + Mul + Div + PartialOrd + PartialEq {
     const MIN: Self;
     const MAX: Self;
 
+    #[must_use]
     fn min(self, other: Self) -> Self;
 
+    #[must_use]
     fn max(self, other: Self) -> Self;
 }
 
@@ -524,6 +532,7 @@ impl ScaleTo<Texel, UV> for Texel {
 
 pub use wixel::Wixel;
 mod wixel {
+    #[allow(clippy::wildcard_imports)]
     use super::*;
 
     impl_num!(

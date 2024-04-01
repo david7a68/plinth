@@ -1,12 +1,9 @@
 //! Static limits and constraints.
 
-use crate::core::limits::{Limit, StrLen, Usize, WixelExtent};
+use crate::core::limits::{StrLen, Usize, WixelExtent, MAX};
 
 /// Maximum number of windows that can be open at once.
-pub const SYS_MAX_WINDOWS: Usize<8> = Usize::new(
-    |Limit(limit), value| *value < limit,
-    "Too many windows open",
-);
+pub const SYS_MAX_WINDOWS: Usize<8, MAX> = Usize::new("Too many windows open");
 
 /// The maximum number of UTF-8 bytes that can be used to represent a window title.
 pub const SYS_TITLE_LENGTH: StrLen<256> = StrLen::new("Window title too long");

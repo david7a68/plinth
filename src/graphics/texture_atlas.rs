@@ -77,7 +77,7 @@ impl TextureCache {
 
     pub fn get_uv_rect(&self, image: CachedTextureId) -> (TextureId, Rect<UV>) {
         let cached = self.cache.get(image).unwrap();
-        let scale = Scale::new(1.0 / ATLAS_EXTENT.0 as f32);
+        let scale = Scale::new(1.0 / f32::from(ATLAS_EXTENT.0));
         (cached.texture, cached.rect.scale_to(scale))
     }
 }

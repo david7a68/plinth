@@ -71,11 +71,11 @@ impl<const CAPACITY: usize, V, K: Key> SlotMap<CAPACITY, V, K> {
     pub fn new() -> Self {
         assert!(CAPACITY > 0, "capacity must be greater than 0");
         assert!(
-            CAPACITY <= u32::MAX as usize,
+            u32::try_from(CAPACITY).is_ok(),
             "capacity must be less than u32::MAX"
         );
 
-        let mut slots = [(); CAPACITY].map(|_| Slot {
+        let mut slots = [(); CAPACITY].map(|()| Slot {
             next: 0,
             epoch: 0,
             value: MaybeUninit::uninit(),
@@ -83,6 +83,7 @@ impl<const CAPACITY: usize, V, K: Key> SlotMap<CAPACITY, V, K> {
 
         let next_free = 0;
 
+        #[allow(clippy::cast_possible_truncation)]
         for (i, slot) in slots[0..].iter_mut().enumerate() {
             slot.next = (i + 1) as u32;
         }
@@ -107,7 +108,7 @@ impl<const CAPACITY: usize, V, K: Key> SlotMap<CAPACITY, V, K> {
     }
 
     pub fn has_capacity(&self, capacity: usize) -> bool {
-        self.num_free >= capacity as u32
+        usize::try_from(self.num_free).unwrap() >= capacity
     }
 
     pub fn get(&self, key: K) -> Option<&V> {
@@ -143,12 +144,12 @@ impl<const CAPACITY: usize, V, K: Key> SlotMap<CAPACITY, V, K> {
         let slot = &mut self.slots[index];
 
         self.next_free = slot.next;
-        slot.value = MaybeUninit::new(f(Key::new(index as u32, slot.epoch)));
+        slot.value = MaybeUninit::new(f(Key::new(u32::try_from(index).unwrap(), slot.epoch)));
 
         self.num_free = self.num_free.checked_sub(1).unwrap();
         self.num_used = self.num_used.checked_add(1).unwrap();
 
-        Ok(Key::new(index as u32, slot.epoch))
+        Ok(Key::new(u32::try_from(index).unwrap(), slot.epoch))
     }
 
     pub fn remove(&mut self, key: K) -> Option<V> {
@@ -158,16 +159,13 @@ impl<const CAPACITY: usize, V, K: Key> SlotMap<CAPACITY, V, K> {
             return None;
         }
 
-        match slot.epoch.checked_add(1) {
-            Some(epoch) => {
-                slot.epoch = epoch;
-                slot.next = self.next_free;
-                self.next_free = key.index();
-                self.num_free.checked_add(1).unwrap();
-            }
-            None => {
-                // retire the slot, so don't add it to the free list
-            }
+        if let Some(epoch) = slot.epoch.checked_add(1) {
+            slot.epoch = epoch;
+            slot.next = self.next_free;
+            self.next_free = key.index();
+            self.num_free.checked_add(1).unwrap();
+        } else {
+            // no-op: epoch saturation, retire the slot
         }
 
         self.num_used = self.num_used.checked_sub(1).unwrap();

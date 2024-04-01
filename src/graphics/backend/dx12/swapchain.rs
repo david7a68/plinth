@@ -68,16 +68,16 @@ impl SwapchainImage<'_, '_> {
 pub struct Swapchain<'a> {
     device: &'a Device,
 
-    swapchain: IDXGISwapChain3,
+    handle: IDXGISwapChain3,
     #[allow(dead_code)]
     target: IDCompositionTarget,
     #[allow(dead_code)]
     visual: IDCompositionVisual,
-    swapchain_ready: HANDLE,
+    waitable_object: HANDLE,
 
     #[allow(dead_code)]
-    swapchain_rtv_heap: ID3D12DescriptorHeap,
-    swapchain_rtv: D3D12_CPU_DESCRIPTOR_HANDLE,
+    rtv_heap: ID3D12DescriptorHeap,
+    rtv: D3D12_CPU_DESCRIPTOR_HANDLE,
 
     size: Extent<Wixel>,
 
@@ -126,14 +126,13 @@ impl<'device> Swapchain<'device> {
                 )
             }
             .unwrap_or_else(|e| {
-                eprintln!("Failed to create swapchain: {:?}", e);
+                eprintln!("Failed to create swapchain: {e:?}");
                 panic!();
             })
             .cast::<IDXGISwapChain3>()
             .unwrap_or_else(|e| {
                 eprintln!(
-                    "The running version of windows doesn't support IDXGISwapchain3. Error: {:?}",
-                    e
+                    "The running version of windows doesn't support IDXGISwapchain3. Error: {e:?}",
                 );
                 panic!()
             });
@@ -164,7 +163,7 @@ impl<'device> Swapchain<'device> {
             };
 
             unsafe { device.handle.CreateDescriptorHeap(&heap_desc) }.unwrap_or_else(|e| {
-                eprintln!("Failed to create descriptor heap: {:?}", e);
+                eprintln!("Failed to create descriptor heap: {e:?}");
                 panic!()
             })
         };
@@ -175,13 +174,13 @@ impl<'device> Swapchain<'device> {
 
         Self {
             device,
-            swapchain,
+            handle: swapchain,
             target,
             visual,
-            swapchain_ready: latency_event,
+            waitable_object: latency_event,
             size: Extent::default(),
-            swapchain_rtv_heap,
-            swapchain_rtv,
+            rtv_heap: swapchain_rtv_heap,
+            rtv: swapchain_rtv,
             target_frame_rate: None,
             is_visible: false,
             composition_rate: FramesPerSecond::default(),
@@ -189,12 +188,8 @@ impl<'device> Swapchain<'device> {
         }
     }
 
-    pub fn extent(&self) -> Extent<Wixel> {
-        self.size
-    }
-
     pub fn resize(&mut self, size: Extent<Wixel>) {
-        resize_swapchain(&self.swapchain, size, None, || {
+        resize_swapchain(&self.handle, size, None, || {
             self.device.idle();
         });
 
@@ -204,7 +199,7 @@ impl<'device> Swapchain<'device> {
     pub fn frame_info(&self) -> FrameInfo {
         let prev_present_time = {
             let mut stats = DXGI_FRAME_STATISTICS::default();
-            unsafe { self.swapchain.GetFrameStatistics(&mut stats) }
+            unsafe { self.handle.GetFrameStatistics(&mut stats) }
                 .ok()
                 .map_or(PresentTime::default(), |()| {
                     #[allow(clippy::cast_sign_loss)]
@@ -234,17 +229,17 @@ impl<'device> Swapchain<'device> {
     }
 
     pub fn next_image<'this>(&'this mut self) -> SwapchainImage<'this, 'device> {
-        unsafe { WaitForSingleObjectEx(self.swapchain_ready, u32::MAX, true) };
+        unsafe { WaitForSingleObjectEx(self.waitable_object, u32::MAX, true) };
 
         let image: ID3D12Resource = {
-            let index = unsafe { self.swapchain.GetCurrentBackBufferIndex() };
-            unsafe { self.swapchain.GetBuffer(index) }.unwrap()
+            let index = unsafe { self.handle.GetCurrentBackBufferIndex() };
+            unsafe { self.handle.GetBuffer(index) }.unwrap()
         };
 
         unsafe {
             self.device
                 .handle
-                .CreateRenderTargetView(&image, None, self.swapchain_rtv);
+                .CreateRenderTargetView(&image, None, self.rtv);
         };
 
         let rt = RenderTarget {
@@ -252,7 +247,7 @@ impl<'device> Swapchain<'device> {
             size: self.size.cast(),
             state: D3D12_RESOURCE_STATE_PRESENT,
             resource: image,
-            descriptor: self.swapchain_rtv,
+            descriptor: self.rtv,
         };
 
         let fi = self.frame_info();
@@ -265,7 +260,7 @@ impl<'device> Swapchain<'device> {
     }
 
     fn present(&mut self) {
-        unsafe { self.swapchain.Present(1, 0) }.unwrap();
+        unsafe { self.handle.Present(1, 0) }.unwrap();
     }
 }
 

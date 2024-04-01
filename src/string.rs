@@ -11,6 +11,7 @@ pub struct HashedStr<'a> {
 }
 
 impl<'a> HashedStr<'a> {
+    #[must_use]
     pub fn new(string: &'a str) -> Self {
         HashedStr {
             // todo: this should not use const_fnv1a_hash, a faster implementation should be used instead
@@ -34,10 +35,9 @@ impl PartialOrd for HashedStr<'_> {
 
 impl<'a, S: Deref<Target = &'a str>> From<S> for HashedStr<'a> {
     fn from(val: S) -> Self {
-        let val = val.deref();
         HashedStr {
-            hash: const_fnv1a_hash::fnv1a_hash_str_64(val),
-            string: val,
+            hash: const_fnv1a_hash::fnv1a_hash_str_64(&val),
+            string: &val,
         }
     }
 }

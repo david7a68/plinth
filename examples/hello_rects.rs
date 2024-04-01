@@ -14,7 +14,7 @@ fn main() {
         ..Default::default()
     };
 
-    Application::new(config).unwrap().run(App {}).unwrap();
+    Application::new(&config).unwrap().run(App {}).unwrap();
 }
 
 pub struct AppWindow {}
@@ -55,10 +55,10 @@ impl EventHandler<AppWindow> for App {
     ) {
         canvas.clear(Color::BLACK);
         canvas.draw_rect(
-            RoundRect::new(Rect::new((50.0, 100.0), (40.0, 70.0))).with_color(Color::BLUE),
+            &RoundRect::new(Rect::new((50.0, 100.0), (40.0, 70.0))).with_color(Color::BLUE),
         );
         canvas.draw_rect(
-            RoundRect::new(Rect::new((100.0, 100.0), (40.0, 70.0))).with_color(Color::RED),
+            &RoundRect::new(Rect::new((100.0, 100.0), (40.0, 70.0))).with_color(Color::RED),
         );
     }
 }

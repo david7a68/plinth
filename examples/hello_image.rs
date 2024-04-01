@@ -34,7 +34,7 @@ fn main() {
         resources: RESOURCES,
     };
 
-    Application::new(config).unwrap().run(App {}).unwrap();
+    Application::new(&config).unwrap().run(App {}).unwrap();
 }
 
 pub struct AppWindow {}
@@ -73,7 +73,7 @@ impl EventHandler<AppWindow> for App {
         let image = app.load_image(hashed_str!("image")).unwrap();
 
         canvas.clear(Color::WHITE);
-        canvas.draw_rect(RoundRect::new((50.0, 100.0, 40.0, 70.0)).with_image(image));
-        canvas.draw_rect(RoundRect::new((100.0, 100.0, 40.0, 70.0)).with_color(Color::RED));
+        canvas.draw_rect(&RoundRect::new((50.0, 100.0, 40.0, 70.0)).with_image(image));
+        canvas.draw_rect(&RoundRect::new((100.0, 100.0, 40.0, 70.0)).with_color(Color::RED));
     }
 }

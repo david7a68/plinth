@@ -1,11 +1,11 @@
 use crate::{
-    graphics::{Image, RasterBuf, VectorBuf},
+    graphics::{Image, RasterBuf},
     HashedStr,
 };
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("The resource path exceeds {} UTF-8 bytes.", crate::limits::MAX_RESOURCE_PATH_LENGTH.get())]
+    #[error("The resource path exceeds {} UTF-8 bytes.", crate::limits::RES_PATH_LENGTH.get())]
     PathTooLong,
 
     #[error("The path does not point to an image.")]
@@ -27,6 +27,5 @@ pub enum Resource {
 #[derive(Debug)]
 pub enum StaticResource {
     Raster(HashedStr<'static>, RasterBuf<'static>),
-    Vector(HashedStr<'static>, VectorBuf<'static>),
     // Video(HashedStr<'static>, VideoBuf<'static>), // maybe?
 }

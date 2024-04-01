@@ -2,9 +2,8 @@ use plinth::{
     geometry::{Extent, Pixel, Point, Scale, Wixel},
     graphics::{Canvas, FrameInfo, GraphicsConfig},
     system::{
-        input::{ButtonState, KeyCode, ModifierKeys, MouseButton, ScrollAxis},
-        power::{MonitorState, PowerPreference, PowerSource},
-        window::{Window, WindowAttributes},
+        ButtonState, KeyCode, ModifierKeys, MonitorState, MouseButton, PowerPreference,
+        PowerSource, ScrollAxis, Window, WindowAttributes,
     },
     AppContext, Application, Config, EventHandler,
 };

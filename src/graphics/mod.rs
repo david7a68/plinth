@@ -1,31 +1,29 @@
 mod backend;
 mod color;
+mod draw_list;
 mod image;
-pub mod limits;
+pub(crate) mod limits;
 mod primitives;
 
 use windows::Win32::Foundation::HWND;
 
 use crate::{
-    geometry::{Extent, Pixel, Point},
+    geometry::{Extent, Pixel, Point, Rect, Scale, Texel},
     graphics::image::PackedKey,
-    system::power::PowerPreference,
+    system::PowerPreference,
     time::{FramesPerSecond, PresentPeriod, PresentTime},
 };
 
 use self::backend::{
     texture_atlas::{CachedTextureId, TextureCache},
-    Device, Uploader,
+    Device,
 };
 
 pub use self::{
-    backend::draw_list::Canvas,
-    backend::WindowContext,
+    backend::{RenderTarget, Swapchain},
     color::Color,
-    image::{
-        Command as PathCommand, CommandIter as PathCommandIter, Error as ImageError, Format, Image,
-        Info as ImageInfo, Layout, PathIter, PathRef, RasterBuf, VectorBuf, Verb as PathVerb,
-    },
+    draw_list::{Canvas, DrawList},
+    image::{Error as ImageError, Format, Image, Info as ImageInfo, Layout, RasterBuf},
     primitives::RoundRect,
 };
 
@@ -33,6 +31,7 @@ pub use self::{
 pub enum Backend {
     #[default]
     Auto,
+    Null,
     #[cfg(target_os = "windows")]
     Dx12,
 }
@@ -54,7 +53,7 @@ impl Default for GraphicsConfig {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FrameInfo {
     /// The target refresh rate, if a frame rate has been set.
     pub target_frame_rate: Option<FramesPerSecond>,
@@ -71,17 +70,14 @@ pub struct FrameInfo {
     pub prev_target_present_time: PresentTime,
 }
 
-pub(crate) struct Graphics {
+pub struct Graphics {
     device: Device,
-    uploader: Uploader,
     textures: TextureCache,
 }
 
 impl Graphics {
-    pub fn new(config: &GraphicsConfig) -> Self {
+    pub(crate) fn new(config: &GraphicsConfig) -> Self {
         let device = Device::new(config);
-
-        let mut uploader = device.create_uploader();
 
         let textures = TextureCache::new(
             Extent::new(1, 1),
@@ -92,7 +88,7 @@ impl Graphics {
 
         let (_, white_pixel) = textures.default();
 
-        uploader.upload_image(
+        device.copy_raster_to_texture(
             white_pixel,
             &RasterBuf::new(
                 ImageInfo {
@@ -105,16 +101,12 @@ impl Graphics {
             Point::new(0, 0),
         );
 
-        Self {
-            device,
-            uploader,
-            textures,
-        }
+        Self { device, textures }
     }
 
     #[cfg(target_os = "windows")]
-    pub fn create_window_context(&self, hwnd: HWND) -> WindowContext {
-        self.device.create_context(hwnd)
+    pub(crate) fn create_swapchain(&self, hwnd: HWND) -> Swapchain {
+        self.device.create_swapchain(hwnd)
     }
 
     pub fn create_raster_image(&mut self, info: ImageInfo) -> Result<Image, ImageError> {
@@ -135,26 +127,6 @@ impl Graphics {
         Ok(image)
     }
 
-    pub fn create_vector_image(
-        &mut self,
-        buf: VectorBuf,
-        initial_size: Option<Extent<Pixel>>,
-    ) -> Result<Image, ImageError> {
-        // calculate broad bounds for the image, use that as exent
-
-        if let Some(size) = initial_size {
-            // rasterize immediately
-
-            // self.textures.insert_rect(...);
-
-            todo!()
-        }
-
-        // layout and format are the same as the input
-
-        todo!()
-    }
-
     /// Uploads pixels for an image.
     ///
     /// The pixel buffer must be the same size as the image.
@@ -166,7 +138,8 @@ impl Graphics {
         let cache_id = CachedTextureId::new(image.key.index(), image.key.epoch());
         let (texture, rect) = self.textures.get_rect(cache_id);
 
-        self.uploader.upload_image(texture, pixels, rect.origin);
+        self.device
+            .copy_raster_to_texture(texture, pixels, rect.origin);
 
         Ok(())
     }
@@ -184,10 +157,20 @@ impl Graphics {
     ///
     /// This does not block.
     pub fn flush_upload_buffer(&mut self) {
-        self.uploader.flush_upload_buffer();
+        self.device.flush_upload_buffer();
     }
 
-    pub fn draw(&self, window: &mut WindowContext, callback: impl FnMut(&mut Canvas, &FrameInfo)) {
-        window.draw(&self.textures, callback);
+    pub fn create_canvas<'a>(
+        &'a self,
+        target: &'a RenderTarget,
+        draw_list: &'a mut DrawList,
+        scale: Scale<Texel, Pixel>,
+    ) -> Canvas<'a> {
+        let rect = Rect::new(Point::ZERO, target.extent().scale_to(scale));
+        Canvas::new(&self.textures, draw_list, rect)
+    }
+
+    pub fn draw(&self, draw_list: &DrawList, target: &mut RenderTarget) {
+        self.device.draw(draw_list, target)
     }
 }

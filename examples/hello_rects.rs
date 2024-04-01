@@ -1,7 +1,7 @@
 use plinth::{
     geometry::Rect,
     graphics::{Canvas, Color, FrameInfo, GraphicsConfig, RoundRect},
-    system::window::{Window, WindowAttributes},
+    system::{Window, WindowAttributes},
     AppContext, Application, Config, EventHandler,
 };
 

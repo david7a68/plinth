@@ -3,9 +3,9 @@ use plinth::{
     graphics::{
         Canvas, Color, Format, FrameInfo, GraphicsConfig, ImageInfo, Layout, RasterBuf, RoundRect,
     },
+    hashed_str,
     resource::StaticResource,
-    static_str,
-    system::window::{Window, WindowAttributes},
+    system::{Window, WindowAttributes},
     AppContext, Application, Config, EventHandler,
 };
 
@@ -23,7 +23,7 @@ const IMAGE: RasterBuf<'static> = RasterBuf::new(
     ],
 );
 
-const RESOURCES: &[StaticResource] = &[StaticResource::Raster(static_str!("image"), IMAGE)];
+const RESOURCES: &[StaticResource] = &[StaticResource::Raster(hashed_str!("image"), IMAGE)];
 
 fn main() {
     let config = Config {
@@ -70,7 +70,7 @@ impl EventHandler<AppWindow> for App {
         canvas: &mut Canvas,
         _frame: &FrameInfo,
     ) {
-        let image = app.load_image(static_str!("image")).unwrap();
+        let image = app.load_image(hashed_str!("image")).unwrap();
 
         canvas.clear(Color::WHITE);
         canvas.draw_rect(RoundRect::new((50.0, 100.0, 40.0, 70.0)).with_image(image));

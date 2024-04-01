@@ -10,6 +10,16 @@ pub struct HashedStr<'a> {
     pub string: &'a str,
 }
 
+impl<'a> HashedStr<'a> {
+    pub fn new(string: &'a str) -> Self {
+        HashedStr {
+            // todo: this should not use const_fnv1a_hash, a faster implementation should be used instead
+            hash: const_fnv1a_hash::fnv1a_hash_str_64(string),
+            string,
+        }
+    }
+}
+
 impl PartialEq for HashedStr<'_> {
     fn eq(&self, other: &Self) -> bool {
         self.hash == other.hash
@@ -40,12 +50,12 @@ impl Deref for HashedStr<'_> {
     }
 }
 
-/// Macro to create a [`StaticStr`] from a compile-time expression.
+/// Macro to create a [`HashedStr`] from a compile-time expression.
 ///
 /// This was preferred over a function because it enforces the use of a
 /// compile-time expression.
 #[macro_export]
-macro_rules! static_str {
+macro_rules! hashed_str {
     ($s:expr) => {{
         let string: &'static str = $s;
         plinth::HashedStr {

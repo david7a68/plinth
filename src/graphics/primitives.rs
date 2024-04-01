@@ -1,6 +1,6 @@
 use crate::geometry::{Pixel, Rect};
 
-use super::{Color, Image};
+use super::{color::Color, image::Image};
 
 pub struct RoundRect {
     pub rect: Rect<Pixel>,

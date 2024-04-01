@@ -1,8 +1,15 @@
 pub(crate) mod event_loop;
-pub mod input;
-pub mod power;
+
+mod input;
+pub use input::*;
+
+mod power;
+pub use power::*;
+
 pub(crate) mod time;
-pub mod window;
+
+mod window;
+pub use window::*;
 
 #[cfg(target_os = "windows")]
 #[path = "win32/mod.rs"]

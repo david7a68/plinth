@@ -2,11 +2,11 @@ use core::panic;
 
 use crate::{
     geometry::{Pixel, Rect, UV},
-    graphics::{backend::texture_atlas::CachedTextureId, Color, RoundRect},
-    limits::DRAW_LIST_MAX_RUN_SIZE,
+    graphics::{backend::texture_atlas::CachedTextureId, color::Color, primitives::RoundRect},
+    limits::GFX_DRAW_PRIM_COUNT,
 };
 
-use super::{texture_atlas::TextureCache, TextureId};
+use super::backend::texture_atlas::TextureCache;
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -60,13 +60,13 @@ pub enum DrawCommand {
     Rects,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 #[repr(align(16))]
-pub(crate) struct DrawList {
-    pub prims: Vec<RRect>,
-    pub areas: Vec<Rect<Pixel>>,
-    pub colors: Vec<Color>,
-    pub commands: Vec<(DrawCommand, u32)>,
+pub struct DrawList {
+    pub(super) prims: Vec<RRect>,
+    pub(super) areas: Vec<Rect<Pixel>>,
+    pub(super) colors: Vec<Color>,
+    pub(super) commands: Vec<(DrawCommand, u32)>,
 }
 
 impl DrawList {
@@ -86,8 +86,8 @@ impl DrawList {
         self.commands.clear();
     }
 
-    pub fn iter(&self) -> CommandIterator<'_> {
-        CommandIterator {
+    pub(super) fn iter(&self) -> DrawIter<'_> {
+        DrawIter {
             areas: &self.areas,
             colors: &self.colors,
             commands: &self.commands,
@@ -97,7 +97,7 @@ impl DrawList {
     }
 }
 
-pub struct CommandIterator<'a> {
+pub(super) struct DrawIter<'a> {
     areas: &'a [Rect<Pixel>],
     colors: &'a [Color],
     commands: &'a [(DrawCommand, u32)],
@@ -105,7 +105,7 @@ pub struct CommandIterator<'a> {
     draws: usize,
 }
 
-impl Iterator for CommandIterator<'_> {
+impl Iterator for DrawIter<'_> {
     type Item = Command;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -137,7 +137,6 @@ pub struct Canvas<'a> {
     region: Rect<Pixel>,
     rect_batch_start: usize,
     rect_batch_count: usize,
-    rect_batch_image: TextureId,
     state: DrawCommand,
 }
 
@@ -151,15 +150,12 @@ impl<'a> Canvas<'a> {
         draw_list.areas.push(region);
         draw_list.commands.push((DrawCommand::Begin, 0));
 
-        let default = textures.default();
-
         Self {
             textures,
             draw_list,
             region,
             rect_batch_start: 0,
             rect_batch_count: 0,
-            rect_batch_image: default.1,
             state: DrawCommand::Begin,
         }
     }
@@ -176,7 +172,7 @@ impl<'a> Canvas<'a> {
             DrawCommand::Close => panic!("Canvas state Close -> Clear is a bug."),
         }
 
-        DRAW_LIST_MAX_RUN_SIZE.check(&self.draw_list.colors.len());
+        GFX_DRAW_PRIM_COUNT.check(&self.draw_list.colors.len());
 
         self.draw_list
             .commands
@@ -191,7 +187,6 @@ impl<'a> Canvas<'a> {
             DrawCommand::Begin => {
                 debug_assert_eq!(self.rect_batch_start, 0);
                 debug_assert_eq!(self.rect_batch_count, 0);
-                debug_assert_eq!(self.rect_batch_image, self.textures.default().1);
                 debug_assert_eq!(self.draw_list.prims.len(), 0);
             }
             DrawCommand::Clear => {
@@ -212,10 +207,9 @@ impl<'a> Canvas<'a> {
             Sampler::default(),
         ));
 
-        DRAW_LIST_MAX_RUN_SIZE.check(&self.rect_batch_count);
+        GFX_DRAW_PRIM_COUNT.check(&self.rect_batch_count);
 
         self.rect_batch_count += 1;
-        self.rect_batch_image = texture_id;
 
         self.state = DrawCommand::Rects;
     }

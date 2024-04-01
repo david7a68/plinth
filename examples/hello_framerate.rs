@@ -1,6 +1,6 @@
 use plinth::{
     graphics::{Canvas, Color, FrameInfo, GraphicsConfig},
-    system::window::{Window, WindowAttributes},
+    system::{Window, WindowAttributes},
     time::{FramesPerSecond, PresentTime},
     AppContext, Application, Config, EventHandler,
 };

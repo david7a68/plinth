@@ -1,16 +1,15 @@
+use std::ops::{Deref, DerefMut};
+
 use crate::{
     core::static_slot_map::new_key_type,
-    geometry::{Extent, Pixel, Point, Scale, Texel, Wixel},
+    geometry::{Extent, Point, Texel, Wixel},
 };
 
-use self::{draw_list::Canvas, texture_atlas::TextureCache};
-
-use super::{Backend, Format, FrameInfo, GraphicsConfig, Layout, RasterBuf};
+use super::{Backend, DrawList, Format, FrameInfo, GraphicsConfig, Layout, RasterBuf};
 
 #[cfg(target_os = "windows")]
 pub mod dx12;
 
-pub mod draw_list;
 pub mod texture_atlas;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -18,6 +17,7 @@ pub struct SubmitId(pub(crate) u64);
 
 new_key_type!(TextureId);
 
+#[allow(clippy::large_enum_variant)]
 pub enum Device {
     Null,
     Dx12(dx12::Device),
@@ -26,16 +26,17 @@ pub enum Device {
 impl Device {
     pub fn new(config: &GraphicsConfig) -> Self {
         match config.backend {
+            Backend::Null => Device::Null,
             #[cfg(target_os = "windows")]
             Backend::Auto | Backend::Dx12 => Device::Dx12(dx12::Device::new(config)),
         }
     }
 
     #[cfg(target_os = "windows")]
-    pub fn create_context(&self, hwnd: windows::Win32::Foundation::HWND) -> WindowContext {
+    pub fn create_swapchain(&self, hwnd: windows::Win32::Foundation::HWND) -> Swapchain {
         match self {
-            Self::Null => WindowContext::Null,
-            Self::Dx12(device) => WindowContext::Dx12(device.create_context(hwnd)),
+            Self::Null => Swapchain::Null,
+            Self::Dx12(device) => Swapchain::Dx12(device.create_swapchain(hwnd)),
         }
     }
 
@@ -51,42 +52,47 @@ impl Device {
         }
     }
 
-    pub fn create_uploader(&self) -> Uploader {
-        match self {
-            Self::Null => Uploader::Null,
-            Self::Dx12(device) => Uploader::Dx12(device.create_uploader()),
-        }
-    }
-}
-
-pub enum Uploader {
-    Null,
-    Dx12(dx12::Uploader),
-}
-
-impl Uploader {
-    pub fn upload_image(&mut self, target: TextureId, pixels: &RasterBuf, origin: Point<Texel>) {
+    pub fn copy_raster_to_texture(
+        &self,
+        target: TextureId,
+        pixels: &RasterBuf,
+        origin: Point<Texel>,
+    ) {
         match self {
             Self::Null => {}
-            Self::Dx12(uploader) => uploader.upload_image(target, pixels, origin),
+            Self::Dx12(device) => device.copy_raster_to_texture(target, pixels, origin),
         }
     }
 
-    pub fn flush_upload_buffer(&mut self) {
+    pub fn flush_upload_buffer(&self) {
         match self {
             Self::Null => {}
-            Self::Dx12(uploader) => uploader.flush_upload_buffer(),
+            Self::Dx12(device) => device.flush_upload_buffer(),
+        }
+    }
+
+    pub fn draw(&self, draw_list: &DrawList, target: &mut RenderTarget) {
+        match (self, target) {
+            (Self::Null, _) => {}
+            (Self::Dx12(device), RenderTarget::Dx12(target)) => device.draw(draw_list, target),
+            _ => panic!("Mismatched device and render target backends"),
         }
     }
 }
 
-#[allow(clippy::large_enum_variant)]
-pub enum WindowContext<'a> {
+pub enum Swapchain<'device> {
     Null,
-    Dx12(dx12::WindowContext<'a>),
+    Dx12(dx12::Swapchain<'device>),
 }
 
-impl WindowContext<'_> {
+impl<'device> Swapchain<'device> {
+    pub fn extent(&self) -> Extent<Wixel> {
+        match self {
+            Self::Null => Extent::new(0, 0),
+            Self::Dx12(context) => context.extent(),
+        }
+    }
+
     pub fn resize(&mut self, extent: Extent<Wixel>) {
         match self {
             Self::Null => {}
@@ -94,21 +100,72 @@ impl WindowContext<'_> {
         }
     }
 
-    pub fn change_dpi(&mut self, size: Extent<Wixel>, scale: Scale<Wixel, Pixel>) {
+    pub fn frame_info(&self) -> FrameInfo {
         match self {
-            Self::Null => {}
-            Self::Dx12(context) => context.change_dpi(size, scale),
+            Self::Null => FrameInfo::default(),
+            Self::Dx12(context) => context.frame_info(),
         }
     }
 
-    pub(super) fn draw(
-        &mut self,
-        texture_cache: &TextureCache,
-        callback: impl FnMut(&mut Canvas, &FrameInfo),
-    ) {
+    pub fn next_image<'this>(&'this mut self) -> SwapchainImage<'this, 'device> {
         match self {
-            Self::Null => {}
-            Self::Dx12(context) => context.draw(texture_cache, callback),
+            Self::Null => SwapchainImage::Null(RenderTarget::Null),
+            Self::Dx12(context) => SwapchainImage::Dx12(context.next_image()),
+        }
+    }
+}
+
+pub enum SwapchainImage<'a, 'b> {
+    Null(RenderTarget),
+    Dx12(dx12::SwapchainImage<'a, 'b>),
+}
+
+impl SwapchainImage<'_, '_> {
+    pub fn frame_info(&self) -> FrameInfo {
+        match self {
+            Self::Null(_) => FrameInfo::default(),
+            Self::Dx12(image) => image.frame_info(),
+        }
+    }
+
+    pub fn present(self) {
+        match self {
+            Self::Null(_) => {}
+            Self::Dx12(image) => image.present(),
+        }
+    }
+}
+
+impl Deref for SwapchainImage<'_, '_> {
+    type Target = RenderTarget;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Null(target) => target,
+            Self::Dx12(image) => image.render_target(),
+        }
+    }
+}
+
+impl DerefMut for SwapchainImage<'_, '_> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        match self {
+            Self::Null(target) => target,
+            Self::Dx12(image) => image.render_target_mut(),
+        }
+    }
+}
+
+pub enum RenderTarget {
+    Null,
+    Dx12(dx12::RenderTarget),
+}
+
+impl RenderTarget {
+    pub fn extent(&self) -> Extent<Texel> {
+        match self {
+            Self::Null => Extent::new(0, 0),
+            Self::Dx12(target) => target.extent(),
         }
     }
 }

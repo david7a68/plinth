@@ -271,7 +271,7 @@ impl<T: Num> Aabb<T> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub struct Scale<T: Num, U: Num> {
     pub factor: f32,
     _phantom: std::marker::PhantomData<(T, U)>,
@@ -281,6 +281,15 @@ impl<T: Num, U: Num> Scale<T, U> {
     pub fn new(factor: f32) -> Self {
         Self {
             factor,
+            _phantom: std::marker::PhantomData,
+        }
+    }
+}
+
+impl<T: Num, U: Num> Default for Scale<T, U> {
+    fn default() -> Self {
+        Self {
+            factor: 1.0,
             _phantom: std::marker::PhantomData,
         }
     }
@@ -456,6 +465,12 @@ macro_rules! impl_num {
 
 impl_num!(Pixel(f32): From(), Into());
 
+impl ScaleTo<Texel, Pixel> for Texel {
+    fn scale(&self, factor: Scale<Texel, Pixel>) -> Pixel {
+        Pixel(self.0 as f32 * factor.factor)
+    }
+}
+
 impl_num!(
     #[derive(Eq, Hash, Ord)]
     Texel(i16):
@@ -472,6 +487,12 @@ impl From<Texel> for f32 {
 impl From<Texel> for Pixel {
     fn from(value: Texel) -> Self {
         Pixel(value.0 as f32)
+    }
+}
+
+impl From<Wixel> for Texel {
+    fn from(value: Wixel) -> Self {
+        Texel(value.0)
     }
 }
 
@@ -517,7 +538,7 @@ mod wixel {
         ///
         /// Defaults to [`WINDOW_EXTENT`](crate::limits::WINDOW_EXTENT)'s minimum extent.
         fn default() -> Self {
-            crate::limits::WINDOW_EXTENT.min()
+            crate::limits::SYS_WINDOW_EXTENT.min()
         }
     }
 

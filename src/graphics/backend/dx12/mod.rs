@@ -1,64 +1,44 @@
-mod context;
 mod device;
 mod shaders;
+mod swapchain;
 mod uploader;
 
-use std::{mem::ManuallyDrop, sync::Arc};
+use std::mem::ManuallyDrop;
 
-use windows::Win32::{
-    Foundation::HWND,
-    Graphics::{
-        Direct3D12::{
-            ID3D12GraphicsCommandList, ID3D12Resource, D3D12_RESOURCE_BARRIER,
-            D3D12_RESOURCE_BARRIER_0, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
-            D3D12_RESOURCE_BARRIER_FLAG_NONE, D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
-            D3D12_RESOURCE_STATES, D3D12_RESOURCE_TRANSITION_BARRIER,
-        },
-        Dxgi::Common::{
-            DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
-            DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DXGI_FORMAT_R8_UNORM,
-        },
+use windows::Win32::Graphics::{
+    Direct3D12::{
+        ID3D12GraphicsCommandList, ID3D12Resource, D3D12_CPU_DESCRIPTOR_HANDLE,
+        D3D12_RESOURCE_BARRIER, D3D12_RESOURCE_BARRIER_0, D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,
+        D3D12_RESOURCE_BARRIER_FLAG_NONE, D3D12_RESOURCE_BARRIER_TYPE_TRANSITION,
+        D3D12_RESOURCE_STATES, D3D12_RESOURCE_TRANSITION_BARRIER,
+    },
+    Dxgi::Common::{
+        DXGI_FORMAT, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
+        DXGI_FORMAT_R8G8B8A8_UNORM, DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DXGI_FORMAT_R8_UNORM,
     },
 };
 
 use crate::{
     geometry::{Extent, Texel},
-    graphics::{Format, GraphicsConfig, Layout},
+    graphics::{Format, Layout},
 };
 
-use self::device::Device_;
+pub use self::device::Device;
+pub use swapchain::{Swapchain, SwapchainImage};
 
-pub use context::Context as WindowContext;
-pub use uploader::Uploader;
+use super::SubmitId;
 
-use super::{SubmitId, TextureId};
-
-pub struct Device {
-    pub(super) inner: Arc<Device_>,
+pub struct RenderTarget {
+    pub draw: Option<SubmitId>,
+    pub size: Extent<Texel>,
+    pub state: D3D12_RESOURCE_STATES,
+    pub resource: ID3D12Resource,
+    pub descriptor: D3D12_CPU_DESCRIPTOR_HANDLE,
 }
 
-impl Device {
-    pub fn new(config: &GraphicsConfig) -> Self {
-        Self {
-            inner: Arc::new(Device_::new(config)),
-        }
-    }
-
-    pub fn create_uploader(&self) -> Uploader {
-        Uploader::new(self.inner.clone(), 1024 * 1024 * 64)
-    }
-
-    pub fn create_context(&self, hwnd: HWND) -> WindowContext {
-        WindowContext::new(&self.inner, hwnd)
-    }
-
-    pub fn create_texture(
-        &self,
-        extent: Extent<Texel>,
-        layout: Layout,
-        format: Format,
-    ) -> TextureId {
-        self.inner.create_texture(extent, layout, format)
+impl RenderTarget {
+    pub fn extent(&self) -> Extent<Texel> {
+        self.size
     }
 }
 

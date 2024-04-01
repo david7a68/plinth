@@ -4,7 +4,7 @@ use crate::{
     core::static_slot_map::{new_key_type, SlotMap},
     geometry::{Extent, Point, Rect, Scale, Texel, UV},
     graphics::{Format, Layout},
-    limits::MAX_IMAGE_COUNT,
+    limits::GFX_IMAGE_COUNT,
 };
 
 use super::TextureId;
@@ -15,7 +15,7 @@ const ATLAS_EXTENT: Texel = Texel(1024);
 
 pub struct TextureCache {
     textures: ArrayVec<AtlasMap, 16>,
-    cache: Box<SlotMap<{ MAX_IMAGE_COUNT.get() }, CachedTexture, CachedTextureId>>,
+    cache: Box<SlotMap<{ GFX_IMAGE_COUNT.get() }, CachedTexture, CachedTextureId>>,
 }
 
 impl TextureCache {

@@ -103,18 +103,31 @@ macro_rules! extent_min_max {
                 }
             }
 
-            pub fn test(&self, value: impl TryInto<crate::geometry::Extent<$num>>) -> bool {
+            pub fn test<E>(
+                &self,
+                value: impl TryInto<crate::geometry::Extent<$num>>,
+                error: E,
+            ) -> Result<(), E> {
                 let Ok(value): Result<crate::geometry::Extent<$num>, _> = value.try_into() else {
-                    return false;
+                    return Err(error);
                 };
 
-                value.width.0 >= MIN_X
+                let ok = value.width.0 >= MIN_X
                     && value.height.0 >= MIN_Y
                     && value.width.0 <= MAX_X
-                    && value.height.0 <= MAX_Y
+                    && value.height.0 <= MAX_Y;
+
+                ok.then(|| ()).ok_or(error)
             }
 
-            pub fn check(&self, value: impl TryInto<crate::geometry::Extent<$num>>) {
+            pub const fn check(&self, value: crate::geometry::Extent<$num>) {
+                assert!(value.width.0 >= MIN_X, "{}", self.error);
+                assert!(value.height.0 >= MIN_Y, "{}", self.error);
+                assert!(value.width.0 <= MAX_X, "{}", self.error);
+                assert!(value.height.0 <= MAX_Y, "{}", self.error);
+            }
+
+            pub fn try_check(&self, value: impl TryInto<crate::geometry::Extent<$num>>) {
                 let Ok(value): Result<crate::geometry::Extent<$num>, _> = value.try_into() else {
                     panic!("{}", self.error)
                 };
@@ -142,7 +155,7 @@ macro_rules! extent_min_max {
 
             pub fn check_debug(&self, value: impl TryInto<crate::geometry::Extent<$num>>) {
                 #[cfg(debug_assertions)]
-                self.check(value);
+                self.try_check(value);
             }
         }
     };

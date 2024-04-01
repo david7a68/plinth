@@ -1,19 +1,16 @@
 use std::{collections::HashMap, marker::PhantomData};
 
-use windows::Win32::Graphics::Direct3D::D3D_NAME_CULLPRIMITIVE;
-
 use crate::{
     core::PassthroughBuildHasher,
     geometry::{Extent, Pixel, Point, Scale, Wixel},
-    graphics::{Canvas, FrameInfo, Graphics, GraphicsConfig, Image, WindowContext},
-    limits::{self, MAX_IMAGE_COUNT},
+    graphics::{Canvas, DrawList, FrameInfo, Graphics, GraphicsConfig, Image, Swapchain},
+    limits::{self, GFX_IMAGE_COUNT},
     resource::{Error as ResourceError, Resource, StaticResource},
     string::HashedStr,
     system::{
         event_loop::{ActiveEventLoop, EventHandler as SysEventHandler, EventLoop, EventLoopError},
-        input::{ButtonState, KeyCode, ModifierKeys, MouseButton, ScrollAxis},
-        power::{MonitorState, PowerPreference, PowerSource},
-        window::{PaintReason, Window, WindowAttributes, WindowError},
+        ButtonState, KeyCode, ModifierKeys, MonitorState, MouseButton, PaintReason,
+        PowerPreference, PowerSource, ScrollAxis, Window, WindowAttributes, WindowError,
     },
 };
 
@@ -45,12 +42,12 @@ impl Application {
     /// This will fail if the event loop could not be initialized, or if an
     /// application has already been initialized.
     pub fn new(config: Config) -> Result<Self, Error> {
-        limits::MAX_IMAGE_COUNT.check(&config.resources.len());
+        limits::GFX_IMAGE_COUNT.check(&config.resources.len());
 
         let mut graphics = Graphics::new(&config.graphics);
 
         let mut resources =
-            HashMap::with_capacity_and_hasher(MAX_IMAGE_COUNT.get(), PassthroughBuildHasher::new());
+            HashMap::with_capacity_and_hasher(GFX_IMAGE_COUNT.get(), PassthroughBuildHasher::new());
 
         // use a thread pool a la rayon to load resources in parallel
 
@@ -60,9 +57,6 @@ impl Application {
                     let image = graphics.create_raster_image(pixels.info()).unwrap();
                     graphics.upload_raster_image(image, pixels).unwrap();
                     resources.insert(name.hash, Resource::Image(image));
-                }
-                StaticResource::Vector(name, vectors) => {
-                    //
                 }
             }
         }
@@ -138,7 +132,7 @@ impl<'a, UserWindowData> AppContext<'a, UserWindowData> {
     ///  is missing or malformed. It may also return an IO error if one is
     ///  encountered.
     pub fn load_image(&mut self, path: HashedStr) -> Result<Image, ResourceError> {
-        limits::MAX_RESOURCE_PATH_LENGTH.test(path.string, ResourceError::PathTooLong)?;
+        limits::RES_PATH_LENGTH.test(path.string, ResourceError::PathTooLong)?;
         match self.resources.entry(path.hash) {
             std::collections::hash_map::Entry::Occupied(entry) => match entry.get() {
                 Resource::Image(image) => Ok(*image),
@@ -167,7 +161,7 @@ impl<'a, UserWindowData> AppContext<'a, UserWindowData> {
     ///  resource is missing or malformed. It may also return an IO error if one
     ///  is encountered.
     pub fn load_resource(&mut self, path: HashedStr) -> Result<Resource, ResourceError> {
-        limits::MAX_RESOURCE_PATH_LENGTH.test(path.string, ResourceError::PathTooLong)?;
+        limits::RES_PATH_LENGTH.test(path.string, ResourceError::PathTooLong)?;
         let _ = path;
         todo!()
     }
@@ -188,9 +182,18 @@ impl<'a, UserWindowData> AppContext<'a, UserWindowData> {
         constructor: impl FnOnce(Window<()>) -> UserWindowData,
     ) -> Result<(), WindowError> {
         self.event_loop.create_window(attributes, |window| {
-            let context = self.graphics.create_window_context(window.hwnd());
+            let swapchain = self.graphics.create_swapchain(window.hwnd());
             let user_data = constructor(window);
-            (WindowState { context }, user_data)
+
+            (
+                WindowState {
+                    swapchain,
+                    draw_list: DrawList::new(),
+                    dpi_scale: Scale::default(),
+                    to_resize: Extent::default(),
+                },
+                user_data,
+            )
         })
     }
 }
@@ -355,7 +358,10 @@ pub trait EventHandler<WindowData> {
 }
 
 struct WindowState<'a> {
-    context: WindowContext<'a>,
+    swapchain: Swapchain<'a>,
+    draw_list: DrawList,
+    dpi_scale: Scale<Wixel, Pixel>,
+    to_resize: Extent<Wixel>,
 }
 
 struct ApplicationEventHandler<'a, UserData, Client: EventHandler<UserData>> {
@@ -469,7 +475,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState<'_>, 
         let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
         let (meta, mut wn) = window.split();
 
-        meta.context.resize(size);
+        meta.to_resize = size;
         self.client.resized(&mut cx, &mut wn, size);
     }
 
@@ -483,7 +489,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState<'_>, 
         let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
         let (meta, mut wn) = window.split();
 
-        meta.context.change_dpi(size, dpi);
+        meta.dpi_scale = dpi;
         self.client.dpi_changed(&mut cx, &mut wn, dpi, size);
     }
 
@@ -577,9 +583,27 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState<'_>, 
         let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
         let (meta, mut wn) = window.split();
 
-        self.graphics.draw(&mut meta.context, |canvas, frame| {
-            self.client.repaint(&mut cx, &mut wn, canvas, frame);
-        });
+        if meta.to_resize != Extent::default() {
+            meta.swapchain.resize(std::mem::take(&mut meta.to_resize));
+        }
+
+        let mut image = meta.swapchain.next_image();
+
+        meta.draw_list.clear();
+
+        // hacky
+        let scale = Scale::new(meta.dpi_scale.factor);
+
+        let mut canvas = self
+            .graphics
+            .create_canvas(&image, &mut meta.draw_list, scale);
+
+        self.client
+            .repaint(&mut cx, &mut wn, &mut canvas, &image.frame_info());
+
+        self.graphics.draw(&meta.draw_list, &mut image);
+
+        image.present();
     }
 
     fn destroyed(

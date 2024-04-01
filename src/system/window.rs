@@ -167,7 +167,7 @@ impl<'a, Data> Window<'a, Data> {
     }
 
     pub fn set_size(&mut self, size: Extent<Wixel>) {
-        limits::WINDOW_EXTENT.check(size);
+        limits::SYS_WINDOW_EXTENT.check(size);
         self.window.set_size(size);
     }
 
@@ -177,7 +177,7 @@ impl<'a, Data> Window<'a, Data> {
     }
 
     pub fn set_min_size(&mut self, min_size: Extent<Wixel>) {
-        limits::WINDOW_EXTENT.check(min_size);
+        limits::SYS_WINDOW_EXTENT.check(min_size);
         self.window.set_min_size(min_size);
     }
 
@@ -187,7 +187,7 @@ impl<'a, Data> Window<'a, Data> {
     }
 
     pub fn set_max_size(&mut self, max_size: Extent<Wixel>) {
-        limits::WINDOW_EXTENT.check(max_size);
+        limits::SYS_WINDOW_EXTENT.check(max_size);
         self.window.set_max_size(max_size);
     }
 

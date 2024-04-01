@@ -113,9 +113,9 @@ pub(crate) struct HandlerContext<'a, WindowData, H: EventHandler<WindowData>> {
 
 impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData, H> {
     pub fn init(&mut self, hwnd: HWND, create_struct: &mut CreateStruct<WindowData>) {
-        limits::MAX_WINDOW_TITLE_LENGTH.check(create_struct.title.as_ref().unwrap());
-        limits::WINDOW_EXTENT.check(create_struct.min_size);
-        limits::WINDOW_EXTENT.check(create_struct.max_size);
+        limits::SYS_TITLE_LENGTH.check(create_struct.title.as_ref().unwrap());
+        limits::SYS_WINDOW_EXTENT.check(create_struct.min_size);
+        limits::SYS_WINDOW_EXTENT.check(create_struct.max_size);
 
         self.hwnd.set(hwnd);
 
@@ -277,8 +277,8 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
         let new_min = min.max(&Extent::new(os_min_x, os_min_y));
         let new_max = max.min(&Extent::new(os_max_x, os_max_y));
 
-        limits::WINDOW_EXTENT.check(new_min);
-        limits::WINDOW_EXTENT.check(new_max);
+        limits::SYS_WINDOW_EXTENT.try_check(new_min);
+        limits::SYS_WINDOW_EXTENT.try_check(new_max);
 
         mmi.ptMinTrackSize.x = new_min.width;
         mmi.ptMinTrackSize.y = new_min.height;

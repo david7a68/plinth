@@ -150,7 +150,6 @@ impl<'a> RasterBuf<'a> {
         RasterBuf { info, data }
     }
 
-    #[must_use]
     pub fn try_new(info: Info, data: &'a [u8]) -> Result<RasterBuf<'a>, Error> {
         GFX_IMAGE_EXTENT.test(info.extent, Error::SizeLimit)?;
 

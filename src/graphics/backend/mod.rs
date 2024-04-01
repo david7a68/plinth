@@ -10,8 +10,6 @@ use super::{Backend, DrawList, Format, FrameInfo, GraphicsConfig, Layout, Raster
 #[cfg(target_os = "windows")]
 pub mod dx12;
 
-pub mod texture_atlas;
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SubmitId(pub(crate) u64);
 

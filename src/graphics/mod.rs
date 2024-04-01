@@ -4,6 +4,7 @@ mod draw_list;
 mod image;
 pub(crate) mod limits;
 mod primitives;
+mod texture_atlas;
 
 use windows::Win32::Foundation::HWND;
 
@@ -14,13 +15,15 @@ use crate::{
     time::{FramesPerSecond, PresentPeriod, PresentTime},
 };
 
-use self::backend::{
+use self::{
+    backend::Device,
     texture_atlas::{CachedTextureId, TextureCache},
-    Device,
 };
 
+pub(crate) use self::backend::Swapchain;
+
 pub use self::{
-    backend::{RenderTarget, Swapchain},
+    backend::RenderTarget,
     color::Color,
     draw_list::{Canvas, DrawList},
     image::{Error as ImageError, Format, Image, Info as ImageInfo, Layout, RasterBuf},
@@ -100,6 +103,8 @@ impl Graphics {
             ),
             Point::new(0, 0),
         );
+
+        device.flush_upload_buffer();
 
         Self { device, textures }
     }

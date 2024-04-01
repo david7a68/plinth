@@ -263,6 +263,8 @@ impl Device {
     }
 
     pub fn draw(&self, draw_list: &DrawList, target: &mut RenderTarget) {
+        self.flush_upload_buffer();
+
         let mut frames = self.frames.borrow_mut();
 
         let mut frame = if let Some(frame) = frames.pop_front() {
@@ -581,9 +583,7 @@ impl Frame {
         target: &RenderTarget,
         textures: &DescriptorHeap,
     ) {
-        // assert queue.is_done(sync);
-
-        let content_size = std::mem::size_of_val(&draw_list.prims);
+        let content_size = std::mem::size_of_val(draw_list.prims.as_slice());
 
         if self.size < content_size {
             self.buffer = None;

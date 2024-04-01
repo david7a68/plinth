@@ -7,7 +7,7 @@ use crate::{
     limits::GFX_IMAGE_COUNT,
 };
 
-use super::TextureId;
+use super::backend::TextureId;
 
 new_key_type!(CachedTextureId);
 

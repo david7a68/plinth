@@ -87,6 +87,16 @@ impl Uploader {
                 row_size_aligned
             );
 
+        {
+            let buffer = &mut self.stages[self.cursor];
+            if let Some(sync) = buffer.sync.take() {
+                queue.wait(sync);
+
+                unsafe { buffer.cmda.Reset() }.unwrap();
+                unsafe { self.command_list.Reset(&buffer.cmda, None) }.unwrap();
+            }
+        }
+
         image_barrier(
             &self.command_list,
             target,
@@ -175,7 +185,7 @@ impl Uploader {
 
         let buffer = &mut self.stages[self.cursor];
 
-        if buffer.sync.is_none() {
+        if buffer.used() == 0 {
             return;
         }
 
@@ -184,6 +194,8 @@ impl Uploader {
 
         self.cursor = (self.cursor + 1) % n_stages; // use var n_stages to satisfy the borrow checker
         buffer.next = buffer.base;
+
+        debug_assert_eq!(buffer.used(), 0);
     }
 
     fn buffer_alloc_bytes(&mut self, queue: &Queue, len: usize) -> MappedSlice {
@@ -238,6 +250,10 @@ impl UploadBuffer {
         (unsafe { self.stop.offset_from(self.base) } as usize)
     }
 
+    pub fn used(&self) -> usize {
+        (unsafe { self.next.offset_from(self.base) } as usize)
+    }
+
     pub fn has_capacity(&self, len: usize) -> bool {
         let alignment = self
             .next
@@ -245,7 +261,7 @@ impl UploadBuffer {
 
         let size = len + alignment;
 
-        (unsafe { self.stop.offset_from(self.next) } as usize) < size
+        usize::try_from(unsafe { self.stop.offset_from(self.next) }).unwrap() >= size
     }
 
     pub fn alloc_bytes(&mut self, len: usize) -> Option<MappedSlice> {

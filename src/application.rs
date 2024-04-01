@@ -601,6 +601,9 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState<'_>, 
         self.client
             .repaint(&mut cx, &mut wn, &mut canvas, &image.frame_info());
 
+        // in case the client didn't call finish
+        canvas.finish();
+
         self.graphics.draw(&meta.draw_list, &mut image);
 
         image.present();

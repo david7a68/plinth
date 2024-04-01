@@ -2,11 +2,11 @@ use core::panic;
 
 use crate::{
     geometry::{Pixel, Rect, UV},
-    graphics::{backend::texture_atlas::CachedTextureId, color::Color, primitives::RoundRect},
+    graphics::{color::Color, primitives::RoundRect, texture_atlas::CachedTextureId},
     limits::GFX_DRAW_PRIM_COUNT,
 };
 
-use super::backend::texture_atlas::TextureCache;
+use super::texture_atlas::TextureCache;
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -223,11 +223,6 @@ impl<'a> Canvas<'a> {
         }
 
         self.draw_list.commands.push((DrawCommand::Close, 0));
-        self.state = DrawCommand::Close;
-    }
-
-    pub fn skip_draw_and_finish(&mut self) {
-        self.draw_list.clear();
         self.state = DrawCommand::Close;
     }
 

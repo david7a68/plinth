@@ -1,32 +1,109 @@
 #![allow(unused)]
 
-use crate::geometry::{Extent, Pixel, Texel};
+use std::{cell::RefCell, ffi::c_void, iter::once, marker::PhantomData};
+
+use smallvec::SmallVec;
+use windows::{
+    core::{implement, Error as WindowsError, IUnknown, PCWSTR},
+    Win32::{
+        Foundation::{GetLastError, BOOL},
+        Graphics::DirectWrite::{
+            DWriteCreateFactory, IDWriteFactory, IDWriteInlineObject, IDWritePixelSnapping_Impl,
+            IDWriteTextFormat, IDWriteTextLayout, IDWriteTextRenderer, IDWriteTextRenderer_Impl,
+            DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_ITALIC,
+            DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STYLE_OBLIQUE, DWRITE_FONT_WEIGHT_BOLD,
+            DWRITE_FONT_WEIGHT_LIGHT, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_GLYPH_RUN,
+            DWRITE_GLYPH_RUN_DESCRIPTION, DWRITE_MATRIX, DWRITE_MEASURING_MODE,
+            DWRITE_STRIKETHROUGH, DWRITE_UNDERLINE,
+        },
+    },
+};
+
+use crate::{
+    core::{arena::Arena, static_lru_cache::LruCache},
+    geometry::{Extent, Pixel, Point, Rect, Scale, Texel},
+    hashed_str, Hash, HashedStr,
+};
 
 use super::{gl::TextureId, Color, DrawList};
 
+pub const CACHE_SIZE: usize = 32;
+
+pub const DEFAULT_FONT: FontOptions<'static> = FontOptions {
+    name: hashed_str!("Arial"),
+    size: Pt(16),
+    weight: Weight::Normal,
+    shape: Shape::Normal,
+    locale: hashed_str!("en-us"),
+};
+
+#[derive(Clone, Copy, Debug)]
 pub enum Error {
+    InvalidFormat,
     GlyphCacheFull,
 }
 
-pub struct TextEngine {}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Pt(pub u8);
+
+impl Pt {
+    pub fn to_dip(self, dpi: f32) -> f32 {
+        const POINTS_PER_INCH: f32 = 72.0;
+        self.0 as f32 * dpi / 72.0
+    }
+}
+
+pub struct TextEngine {
+    factory: IDWriteFactory,
+    default_format: TextFormat,
+    cached_formats: RefCell<LruCache<CACHE_SIZE, TextFormat>>,
+}
 
 impl TextEngine {
-    pub fn new(glyph_cache_texture: TextureId, glyph_cache_texture_size: Extent<Texel>) -> Self {
-        Self {}
+    pub fn new(default_font: FontOptions) -> Self {
+        let factory = unsafe { DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED) }.unwrap();
+
+        let cached_formats = RefCell::new(LruCache::new());
+
+        let default_format = create_format(&factory, default_font, Scale::new(1.0)).unwrap();
+
+        Self {
+            factory,
+            default_format,
+            cached_formats,
+        }
     }
 
-    pub fn get_font(&self, name: &str) -> Option<Font> {
-        None
-    }
+    pub fn layout_text(
+        &self,
+        temp: &mut Arena,
+        text: &str,
+        block: TextBox,
+        style: FontOptions,
+        scale: Scale<f32, f32>,
+    ) -> TextLayout {
+        let chars = {
+            let mut arr = temp.make_array(text.len()).expect("Out of temp memory");
+            arr.extend(temp, text.encode_utf16());
+            arr
+        };
 
-    pub fn layout_text(&self, layout: LayoutOptions) -> TextLayout {
-        TextLayout {}
-    }
+        let mut cache = self.cached_formats.borrow_mut();
+        let (style, _) = cache.get_or_insert_with(Hash::of(&style), || {
+            create_format(&self.factory, style, scale).unwrap()
+        });
 
-    pub fn draw(&self, layout: &TextLayout, draw_list: &mut DrawList) -> Result<(), Error> {
-        // also need position, and a way to rasterize new glyphs
+        let inner = unsafe {
+            self.factory.CreateTextLayout(
+                &chars,
+                &style.inner,
+                block.rect.extent.width.0,
+                block.rect.extent.height.0,
+            )
+        }
+        .unwrap();
 
-        todo!()
+        TextLayout { inner }
     }
 
     pub fn glyph_cache_compact(&self) {
@@ -38,91 +115,199 @@ impl TextEngine {
     }
 }
 
-enum Weight {
+impl Default for TextEngine {
+    fn default() -> Self {
+        Self::new(DEFAULT_FONT)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Weight {
     Light,
     Normal,
     Bold,
 }
 
-enum Style {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Shape {
     Normal,
     Italic,
     Oblique,
 }
 
-enum WrapMode {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum TextWrapMode {
     None,
     Word,
     Character,
 }
 
-pub struct Font {}
-
-impl Font {}
-
-pub struct TextLayout {}
-
-impl TextLayout {}
-
-struct RichText {
-    block: BlockOptions,
-    spans: Vec<SpanOptions>, // should be small vec
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct FontOptions<'a> {
+    pub name: HashedStr<'a>,
+    pub size: Pt,
+    pub weight: Weight,
+    pub shape: Shape,
+    pub locale: HashedStr<'a>,
 }
 
-impl RichText {
-    pub fn layout_options(&self) -> LayoutOptions {
-        LayoutOptions {
-            text: "",
-            block: &self.block,
-            spans: &self.spans,
-        }
+impl Default for FontOptions<'static> {
+    fn default() -> Self {
+        DEFAULT_FONT
     }
 }
 
-struct SimpleText {
-    block: BlockOptions,
-    span: SpanOptions,
+#[derive(Clone)]
+struct TextFormat {
+    inner: IDWriteTextFormat,
 }
 
-impl SimpleText {
-    pub fn layout_options(&self) -> LayoutOptions {
-        LayoutOptions {
-            text: "",
-            block: &self.block,
-            spans: std::slice::from_ref(&self.span),
-        }
+pub struct TextLayout {
+    inner: IDWriteTextLayout,
+}
+
+impl TextLayout {
+    pub fn draw(&self, draw_list: &mut DrawList) {
+        // no-op for now
     }
 }
 
-pub struct LayoutOptions<'a> {
-    text: &'a str,
-    block: &'a BlockOptions,
-    spans: &'a [SpanOptions],
+pub struct TextBox {
+    pub wrap: TextWrapMode,
+    pub rect: Rect<Pixel>,
+    pub line_spacing: f32,
 }
 
-pub struct BlockOptions {
-    wrap: WrapMode,
-    size: Extent<Pixel>,
-    line_spacing: f32,
+fn create_format(
+    factory: &IDWriteFactory,
+    font: FontOptions,
+    dpi: Scale<f32, f32>,
+) -> Result<TextFormat, Error> {
+    let weight = match font.weight {
+        Weight::Light => DWRITE_FONT_WEIGHT_LIGHT,
+        Weight::Normal => DWRITE_FONT_WEIGHT_NORMAL,
+        Weight::Bold => DWRITE_FONT_WEIGHT_BOLD,
+    };
+
+    let shape = match font.shape {
+        Shape::Normal => DWRITE_FONT_STYLE_NORMAL,
+        Shape::Italic => DWRITE_FONT_STYLE_ITALIC,
+        Shape::Oblique => DWRITE_FONT_STYLE_OBLIQUE,
+    };
+
+    let size = font.size.to_dip(dpi.factor * 96.0);
+
+    let mut font_name = font
+        .name
+        .encode_utf16()
+        .chain(once(0))
+        .collect::<SmallVec<[u16; 64]>>();
+
+    let mut locale = font
+        .locale
+        .encode_utf16()
+        .chain(once(0))
+        .collect::<SmallVec<[u16; 64]>>();
+
+    println!(
+        "font size: {:?}, scale: {:?}, pixels: {:?}",
+        font.size, dpi.factor, size
+    );
+
+    let text_format = unsafe {
+        factory.CreateTextFormat(
+            PCWSTR(font_name.as_ptr()),
+            None,
+            weight,
+            shape,
+            DWRITE_FONT_STRETCH_NORMAL,
+            size,
+            PCWSTR(font_name.as_ptr()),
+        )
+    }
+    .map_err(|e| {
+        println!(
+            "error creating text format: HR({:?}) GLE({:?})",
+            e,
+            unsafe { GetLastError() }
+        );
+
+        Error::InvalidFormat
+    })?;
+
+    Ok(TextFormat { inner: text_format })
 }
 
-pub struct SpanOptions {
-    start: u16,
-    bytes: u16,
-    font: Font,
-    style: Style,
-    weight: Weight,
-    size: f32,
-    color: Color,
+#[implement(IDWriteTextRenderer)]
+struct TextRenderer {}
+
+impl IDWritePixelSnapping_Impl for TextRenderer {
+    fn IsPixelSnappingDisabled(
+        &self,
+        clientdrawingcontext: *const c_void,
+    ) -> Result<BOOL, WindowsError> {
+        todo!()
+    }
+
+    fn GetCurrentTransform(
+        &self,
+        clientdrawingcontext: *const c_void,
+        transform: *mut DWRITE_MATRIX,
+    ) -> Result<(), WindowsError> {
+        todo!()
+    }
+
+    fn GetPixelsPerDip(&self, clientdrawingcontext: *const c_void) -> Result<f32, WindowsError> {
+        todo!()
+    }
 }
 
-pub struct GlyphCacheUpdates<'a> {
-    buffer: &'a [u8],
-    updates: &'a [GlyphCacheUpdate],
-}
+impl IDWriteTextRenderer_Impl for TextRenderer {
+    fn DrawGlyphRun(
+        &self,
+        clientdrawingcontext: *const c_void,
+        baselineoriginx: f32,
+        baselineoriginy: f32,
+        measuringmode: DWRITE_MEASURING_MODE,
+        glyphrun: *const DWRITE_GLYPH_RUN,
+        glyphrundescription: *const DWRITE_GLYPH_RUN_DESCRIPTION,
+        clientdrawingeffect: Option<&IUnknown>,
+    ) -> Result<(), WindowsError> {
+        todo!()
+    }
 
-pub struct GlyphCacheUpdate {
-    texture_id: TextureId,
-    byte_offset: u32,
-    size: Extent<Texel>,
+    fn DrawUnderline(
+        &self,
+        clientdrawingcontext: *const c_void,
+        baselineoriginx: f32,
+        baselineoriginy: f32,
+        underline: *const DWRITE_UNDERLINE,
+        clientdrawingeffect: Option<&IUnknown>,
+    ) -> Result<(), WindowsError> {
+        todo!()
+    }
+
+    fn DrawStrikethrough(
+        &self,
+        clientdrawingcontext: *const c_void,
+        baselineoriginx: f32,
+        baselineoriginy: f32,
+        strikethrough: *const DWRITE_STRIKETHROUGH,
+        clientdrawingeffect: Option<&IUnknown>,
+    ) -> Result<(), WindowsError> {
+        todo!()
+    }
+
+    fn DrawInlineObject(
+        &self,
+        clientdrawingcontext: *const ::core::ffi::c_void,
+        originx: f32,
+        originy: f32,
+        inlineobject: Option<&IDWriteInlineObject>,
+        issideways: BOOL,
+        isrighttoleft: BOOL,
+        clientdrawingeffect: Option<&IUnknown>,
+    ) -> Result<(), WindowsError> {
+        todo!()
+    }
 }

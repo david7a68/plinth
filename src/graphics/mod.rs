@@ -10,6 +10,7 @@ mod texture_atlas;
 use windows::Win32::Foundation::HWND;
 
 use crate::{
+    core::arena::Arena,
     geometry::{Extent, Pixel, Point, Rect, Scale, Texel},
     graphics::image::PackedKey,
     system::PowerPreference,
@@ -18,6 +19,7 @@ use crate::{
 
 use self::{
     gl::Device,
+    text::TextEngine,
     texture_atlas::{CachedTextureId, TextureCache},
 };
 
@@ -29,6 +31,10 @@ pub use self::{
     gl::RenderTarget,
     image::{Error as ImageError, Format, Image, Info as ImageInfo, Layout, RasterBuf},
     primitives::RoundRect,
+    text::{
+        Error as TextError, FontOptions, Pt, Shape as FontShape, TextBox, TextWrapMode,
+        Weight as FontWeight,
+    },
 };
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
@@ -77,6 +83,7 @@ pub struct FrameInfo {
 pub struct Graphics {
     device: Device,
     textures: TextureCache,
+    text_engine: TextEngine,
 }
 
 impl Graphics {
@@ -107,7 +114,13 @@ impl Graphics {
 
         device.flush_upload_buffer();
 
-        Self { device, textures }
+        let text_engine = TextEngine::default();
+
+        Self {
+            device,
+            textures,
+            text_engine,
+        }
     }
 
     #[cfg(target_os = "windows")]
@@ -168,12 +181,20 @@ impl Graphics {
 
     pub fn create_canvas<'a>(
         &'a self,
+        arena: &'a mut Arena,
         target: &'a RenderTarget,
         draw_list: &'a mut DrawList,
         scale: Scale<Texel, Pixel>,
     ) -> Canvas<'a> {
         let rect = Rect::new(Point::ZERO, target.extent().scale_to(scale));
-        Canvas::new(&self.textures, draw_list, rect)
+        Canvas::new(
+            &self.textures,
+            &self.text_engine,
+            arena,
+            draw_list,
+            rect,
+            scale,
+        )
     }
 
     pub fn draw(&self, draw_list: &DrawList, target: &mut RenderTarget) {

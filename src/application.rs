@@ -1,12 +1,12 @@
 use std::{collections::HashMap, marker::PhantomData};
 
 use crate::{
-    core::PassthroughBuildHasher,
+    core::{arena::Arena, PassthroughBuildHasher},
     geometry::{Extent, Pixel, Point, Scale, Wixel},
     graphics::{Canvas, DrawList, FrameInfo, Graphics, GraphicsConfig, Image, Swapchain},
+    hash::HashedStr,
     limits::{self, GFX_IMAGE_COUNT},
     resource::{Error as ResourceError, Resource, StaticResource},
-    string::HashedStr,
     system::{
         event_loop::{ActiveEventLoop, EventHandler as SysEventHandler, EventLoop, EventLoopError},
         ButtonState, KeyCode, ModifierKeys, MonitorState, MouseButton, PaintReason,
@@ -20,14 +20,26 @@ pub enum Error {
     EventLoop(#[from] EventLoopError),
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct Config {
     pub resources: &'static [StaticResource],
     pub graphics: GraphicsConfig,
+    pub frame_arena_size: usize,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            resources: &[],
+            graphics: GraphicsConfig::default(),
+            frame_arena_size: 1024 * 1024, // 1 MiB
+        }
+    }
 }
 
 pub struct Application {
     event_loop: EventLoop,
+    frame_arena: Arena,
     resources: HashMap<u64, Resource, PassthroughBuildHasher>,
     graphics: Graphics,
 }
@@ -44,6 +56,8 @@ impl Application {
     pub fn new(config: &Config) -> Result<Self, Error> {
         limits::GFX_IMAGE_COUNT.check(config.resources.len());
 
+        let frame_arena = Arena::new(config.frame_arena_size).unwrap();
+
         let mut graphics = Graphics::new(&config.graphics);
 
         let mut resources =
@@ -56,7 +70,7 @@ impl Application {
                 StaticResource::Raster(name, pixels) => {
                     let image = graphics.create_raster_image(pixels.info()).unwrap();
                     graphics.upload_raster_image(image, pixels).unwrap();
-                    resources.insert(name.hash, Resource::Image(image));
+                    resources.insert(name.hash.0, Resource::Image(image));
                 }
             }
         }
@@ -67,6 +81,7 @@ impl Application {
 
         Ok(Self {
             event_loop,
+            frame_arena,
             resources,
             graphics,
         })
@@ -86,6 +101,7 @@ impl Application {
         self.event_loop
             .run(ApplicationEventHandler {
                 client: event_handler,
+                frame_arena: &mut self.frame_arena,
                 resources: &mut self.resources,
                 graphics: &self.graphics,
                 phantom: PhantomData,
@@ -133,7 +149,7 @@ impl<'a, UserWindowData> AppContext<'a, UserWindowData> {
     ///  encountered.
     pub fn load_image(&mut self, path: HashedStr) -> Result<Image, ResourceError> {
         limits::RES_PATH_LENGTH.test(path.string, ResourceError::PathTooLong)?;
-        match self.resources.entry(path.hash) {
+        match self.resources.entry(path.hash.0) {
             std::collections::hash_map::Entry::Occupied(entry) => match entry.get() {
                 Resource::Image(image) => Ok(*image),
                 #[allow(unreachable_patterns)]
@@ -366,8 +382,9 @@ struct WindowState<'a> {
 
 struct ApplicationEventHandler<'a, UserData, Client: EventHandler<UserData>> {
     client: Client,
-    graphics: &'a Graphics,
+    frame_arena: &'a mut Arena,
     resources: &'a mut HashMap<u64, Resource, PassthroughBuildHasher>,
+    graphics: &'a Graphics,
     phantom: PhantomData<UserData>,
 }
 
@@ -594,9 +611,11 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState<'_>, 
         // hacky
         let scale = Scale::new(meta.dpi_scale.factor);
 
-        let mut canvas = self
-            .graphics
-            .create_canvas(&image, &mut meta.draw_list, scale);
+        self.frame_arena.reset();
+
+        let mut canvas =
+            self.graphics
+                .create_canvas(self.frame_arena, &image, &mut meta.draw_list, scale);
 
         self.client
             .repaint(&mut cx, &mut wn, &mut canvas, &image.frame_info());

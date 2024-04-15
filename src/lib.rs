@@ -2,9 +2,9 @@
 
 pub mod geometry;
 pub mod graphics;
+mod hash;
 pub mod limits;
 pub mod resource;
-mod string;
 pub mod system;
 pub mod time;
 
@@ -12,4 +12,4 @@ mod application;
 mod core;
 
 pub use application::{AppContext, Application, Config, EventHandler};
-pub use string::HashedStr;
+pub use hash::{Hash, HashedStr};

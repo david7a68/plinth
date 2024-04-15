@@ -1,7 +1,8 @@
 use plinth::{
-    geometry::{Extent, Texel},
+    geometry::{Extent, Rect, Texel},
     graphics::{
-        Canvas, Color, Format, FrameInfo, GraphicsConfig, ImageInfo, Layout, RasterBuf, RoundRect,
+        Canvas, Color, FontOptions, FontWeight, Format, FrameInfo, GraphicsConfig, ImageInfo,
+        Layout, Pt, RasterBuf, RoundRect, TextBox, TextWrapMode,
     },
     hashed_str,
     resource::StaticResource,
@@ -76,5 +77,20 @@ impl EventHandler<AppWindow> for App {
         canvas.clear(Color::WHITE);
         canvas.draw_rect(&RoundRect::new((50.0, 100.0, 40.0, 70.0)).with_image(image));
         canvas.draw_rect(&RoundRect::new((100.0, 100.0, 40.0, 70.0)).with_color(Color::RED));
+
+        canvas.draw_text(
+            "Hello, World!",
+            FontOptions {
+                name: hashed_str!("Arial"),
+                size: Pt(40),
+                weight: FontWeight::Bold,
+                ..Default::default()
+            },
+            TextBox {
+                wrap: TextWrapMode::Word,
+                rect: Rect::new((50.0, 150.0), (200.0, 50.0)),
+                line_spacing: 0.8,
+            },
+        );
     }
 }

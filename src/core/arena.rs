@@ -18,14 +18,13 @@ pub enum Error {
     InsufficientCapacity,
 }
 
-pub struct Arena<'a> {
+pub struct Arena {
     root: *mut u8,
     stop: *mut u8,
     next: Cell<*mut u8>,
-    phantom: PhantomData<&'a mut u8>,
 }
 
-impl Arena<'static> {
+impl Arena {
     pub fn new(size: usize) -> Result<Self, Error> {
         assert!(isize::try_from(size).is_ok(), "size exceeds isize::MAX");
 
@@ -46,9 +45,9 @@ impl Arena<'static> {
     }
 }
 
-impl<'a> Arena<'a> {
+impl Arena {
     #[must_use]
-    pub fn with_memory(memory: &'a mut [u8]) -> Self {
+    pub fn with_memory(memory: &'static mut [u8]) -> Self {
         let root = memory.as_mut_ptr();
 
         // SAFETY: `root` is an aligned, non-null pointer to `memory.len()`
@@ -60,12 +59,11 @@ impl<'a> Arena<'a> {
             root,
             stop,
             next: Cell::new(root),
-            phantom: PhantomData,
         }
     }
 }
 
-impl<'a> Arena<'a> {
+impl Arena {
     pub fn alloc(&self, layout: Layout) -> Result<NonNull<u8>, Error> {
         let align = self.next.get().align_offset(layout.align());
 
@@ -284,17 +282,17 @@ impl<'a> Arena<'a> {
     }
 }
 
-pub struct Box<'a, T: 'a> {
+pub struct Box<'arena, T: 'arena> {
     ptr: NonNull<T>,
-    phantom: PhantomData<&'a mut T>,
+    phantom: PhantomData<&'arena mut T>,
 }
 
-impl<'a, T> Box<'a, T> {
-    pub fn new(arena: &'a mut Arena, value: T) -> Result<Self, Error> {
+impl<'arena, T> Box<'arena, T> {
+    pub fn new(arena: &'arena mut Arena, value: T) -> Result<Self, Error> {
         arena.make(value)
     }
 
-    pub fn new_with(arena: &'a mut Arena, f: impl FnOnce() -> T) -> Result<Self, Error> {
+    pub fn new_with(arena: &'arena mut Arena, f: impl FnOnce() -> T) -> Result<Self, Error> {
         arena.make_with(f)
     }
 
@@ -346,19 +344,19 @@ impl<T> Drop for Box<'_, T> {
     }
 }
 
-pub struct Array<'a, T: 'a> {
+pub struct Array<'arena, T: 'arena> {
     ptr: NonNull<T>,
     len: u32,
     cap: u32,
-    phantom: PhantomData<&'a mut T>,
+    phantom: PhantomData<&'arena mut T>,
 }
 
-impl<'a, T> Array<'a, T> {
-    pub fn new(mem: &'a Arena) -> Result<Self, Error> {
+impl<'arena, T> Array<'arena, T> {
+    pub fn new(mem: &'arena Arena) -> Result<Self, Error> {
         mem.make_array(0)
     }
 
-    pub fn with_capacity(mem: &'a Arena, cap: usize) -> Result<Self, Error> {
+    pub fn with_capacity(mem: &'arena Arena, cap: usize) -> Result<Self, Error> {
         mem.make_array(cap)
     }
 
@@ -410,7 +408,7 @@ impl<'a, T> Array<'a, T> {
         }
     }
 
-    pub fn push(&mut self, arena: &'a Arena, value: T) -> Result<usize, Error> {
+    pub fn push(&mut self, arena: &'arena Arena, value: T) -> Result<usize, Error> {
         if self.len == self.cap {
             arena.grow_array(self.cap as usize * 2, self)?;
         }
@@ -421,6 +419,41 @@ impl<'a, T> Array<'a, T> {
         self.len += 1;
 
         Ok(self.len as usize)
+    }
+
+    pub fn extend(
+        &mut self,
+        arena: &'arena Arena,
+        it: impl IntoIterator<Item = T>,
+    ) -> Result<usize, Error> {
+        let mut it = it.into_iter();
+        let len = it.size_hint().1.unwrap_or(it.size_hint().0);
+
+        // optimize for known size
+        if len > 0 {
+            if let Ok(len) = u32::try_from(self.len as usize + len) {
+                if len > self.cap {
+                    arena.grow_array(len as usize, self)?;
+                }
+            } else {
+                return Err(Error::InsufficientCapacity);
+            }
+
+            for i in 0..len {
+                if let Some(item) = it.next() {
+                    unsafe { self.ptr.as_ptr().add(i).write(item) };
+                } else {
+                    break;
+                }
+            }
+        }
+
+        // slow path for unknown size
+        for item in it {
+            self.push(arena, item)?;
+        }
+
+        Ok(self.len())
     }
 
     #[must_use]
@@ -435,7 +468,7 @@ impl<'a, T> Array<'a, T> {
     }
 
     #[allow(clippy::must_use_candidate)]
-    pub fn trim(&mut self, arena: &'a mut Arena) -> bool {
+    pub fn trim(&mut self, arena: &'arena mut Arena) -> bool {
         arena.shrink_array(self.len(), self)
     }
 }
@@ -495,8 +528,8 @@ mod tests {
 
     #[test]
     fn arena_stack() {
-        let mut memory = [0u8; 1024];
-        let mut arena = Arena::with_memory(&mut memory);
+        let mut arena =
+            Arena::with_memory(std::boxed::Box::leak(std::boxed::Box::new([0u8; 1024])));
 
         assert_eq!(unsafe { arena.root.offset_from(arena.stop) }, -1024);
         assert_eq!(arena.root, arena.next.get());

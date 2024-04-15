@@ -1,12 +1,26 @@
 use std::ops::Deref;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Hash(pub u64);
+
+impl Hash {
+    pub fn of<T: std::hash::Hash>(value: &T) -> Self {
+        use std::hash::Hasher;
+
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        value.hash(&mut hasher);
+
+        Hash(hasher.finish())
+    }
+}
+
 /// A string that has been pre-hashed for faster comparisons.
 ///
 /// Minor optimization that allows for faster string comparisons without having
 /// to hash at runtime.
 #[derive(Debug, Clone, Copy)]
 pub struct HashedStr<'a> {
-    pub hash: u64,
+    pub hash: Hash,
     pub string: &'a str,
 }
 
@@ -15,11 +29,19 @@ impl<'a> HashedStr<'a> {
     pub fn new(string: &'a str) -> Self {
         HashedStr {
             // todo: this should not use const_fnv1a_hash, a faster implementation should be used instead
-            hash: const_fnv1a_hash::fnv1a_hash_str_64(string),
+            hash: Hash(const_fnv1a_hash::fnv1a_hash_str_64(string)),
             string,
         }
     }
 }
+
+impl std::hash::Hash for HashedStr<'_> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash.hash(state);
+    }
+}
+
+impl Eq for HashedStr<'_> {}
 
 impl PartialEq for HashedStr<'_> {
     fn eq(&self, other: &Self) -> bool {
@@ -36,7 +58,7 @@ impl PartialOrd for HashedStr<'_> {
 impl<'a, S: Deref<Target = &'a str>> From<S> for HashedStr<'a> {
     fn from(val: S) -> Self {
         HashedStr {
-            hash: const_fnv1a_hash::fnv1a_hash_str_64(&val),
+            hash: Hash(const_fnv1a_hash::fnv1a_hash_str_64(&val)),
             string: &val,
         }
     }
@@ -58,8 +80,8 @@ impl Deref for HashedStr<'_> {
 macro_rules! hashed_str {
     ($s:expr) => {{
         let string: &'static str = $s;
-        plinth::HashedStr {
-            hash: const_fnv1a_hash::fnv1a_hash_str_64(string),
+        $crate::HashedStr {
+            hash: $crate::Hash(const_fnv1a_hash::fnv1a_hash_str_64(string)),
             string,
         }
     }};

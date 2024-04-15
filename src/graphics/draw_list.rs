@@ -1,12 +1,13 @@
 use core::panic;
 
 use crate::{
-    geometry::{Pixel, Rect, UV},
+    core::arena::Arena,
+    geometry::{Pixel, Rect, Scale, Texel, UV},
     graphics::{color::Color, primitives::RoundRect, texture_atlas::CachedTextureId},
     limits::GFX_DRAW_PRIM_COUNT,
 };
 
-use super::texture_atlas::TextureCache;
+use super::{text::TextEngine, texture_atlas::TextureCache, FontOptions, TextBox};
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -142,31 +143,40 @@ impl Iterator for DrawIter<'_> {
 }
 
 pub struct Canvas<'a> {
+    arena: &'a mut Arena,
+    text_engine: &'a TextEngine,
     textures: &'a TextureCache,
     draw_list: &'a mut DrawList,
     region: Rect<Pixel>,
     rect_batch_start: usize,
     rect_batch_count: usize,
     state: DrawCommand,
+    dpi: Scale<Texel, Pixel>,
 }
 
 impl<'a> Canvas<'a> {
     pub(super) fn new(
         textures: &'a TextureCache,
+        text_engine: &'a TextEngine,
+        arena: &'a mut Arena,
         draw_list: &'a mut DrawList,
         region: Rect<Pixel>,
+        dpi: Scale<Texel, Pixel>,
     ) -> Self {
         draw_list.clear();
         draw_list.areas.push(region);
         draw_list.commands.push((DrawCommand::Begin, 0));
 
         Self {
+            arena,
+            text_engine,
             textures,
             draw_list,
             region,
             rect_batch_start: 0,
             rect_batch_count: 0,
             state: DrawCommand::Begin,
+            dpi,
         }
     }
 
@@ -222,6 +232,14 @@ impl<'a> Canvas<'a> {
         self.rect_batch_count += 1;
 
         self.state = DrawCommand::Rects;
+    }
+
+    pub fn draw_text(&mut self, text: &str, font: FontOptions, rect: TextBox) {
+        let layout =
+            self.text_engine
+                .layout_text(self.arena, text, rect, font, Scale::new(self.dpi.factor));
+
+        layout.draw(self.draw_list);
     }
 
     pub fn finish(&mut self) {

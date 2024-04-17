@@ -40,9 +40,19 @@ pub use self::{
     },
 };
 
-new_point!(UvPoint(u, v), f32, 0.0, { limit: 0.0, 1.0, "UV point out of limits" });
-new_extent!(UvExtent, f32, 0.0, { limit: 0.0, 1.0, "UV extent out of limits" });
-new_rect!(UvRect, f32, UvPoint, UvExtent);
+new_point! {
+    UvPoint(u, v, f32, 0.0),
+    { limit: 0.0, 1.0, "UV point out of limits" },
+}
+
+new_extent! {
+    UvExtent(f32, 0.0),
+    { limit: 0.0, 1.0, "UV extent out of limits" },
+}
+
+new_rect! {
+    UvRect(f32, UvPoint, UvExtent),
+}
 
 impl UvRect {
     pub fn to_uvwh(&self) -> [f32; 4] {
@@ -55,10 +65,17 @@ impl UvRect {
     }
 }
 
-new_point!(ImagePoint(x, y), u16, 0, { limit: GFX_IMAGE_EXTENT_MIN, GFX_IMAGE_EXTENT_MAX, "Image point out of limits" }, Eq);
-new_extent!(
-    #[derive(Hash)]
-    ImageExtent, u16, 0, { limit: GFX_IMAGE_EXTENT_MIN, GFX_IMAGE_EXTENT_MAX, "Image extent out of limits" }, Eq);
+new_point! {
+    #[derive(Eq)]
+    ImagePoint(x, y, u16, 0),
+    { limit: GFX_IMAGE_EXTENT_MIN, GFX_IMAGE_EXTENT_MAX, "Image point out of limits" },
+}
+
+new_extent! {
+    #[derive(Eq, Hash)]
+    ImageExtent(u16, 0),
+    { limit: GFX_IMAGE_EXTENT_MIN, GFX_IMAGE_EXTENT_MAX, "Image extent out of limits" },
+}
 
 impl ImageExtent {
     pub const fn limit_assert(extent: Self) {
@@ -87,11 +104,25 @@ impl From<WindowExtent> for TextureExtent {
     }
 }
 
-new_rect!(ImageRect, u16, ImagePoint, ImageExtent);
+new_rect! {
+    ImageRect(u16, ImagePoint, ImageExtent),
+}
 
-new_point!(TexturePoint(x, y), u16, 0, { limit: GFX_ATLAS_EXTENT_MIN, GFX_ATLAS_EXTENT_MAX, "Texture point out of limits" }, Eq);
-new_extent!(TextureExtent, u16, 0, { limit: GFX_ATLAS_EXTENT_MIN, GFX_ATLAS_EXTENT_MAX, "Texture extent out of limits" }, Eq);
-new_rect!(TextureRect, u16, TexturePoint, TextureExtent);
+new_point! {
+    #[derive(Eq)]
+    TexturePoint(x, y, u16, 0),
+    { limit: GFX_ATLAS_EXTENT_MIN, GFX_ATLAS_EXTENT_MAX, "Texture point out of limits" },
+}
+
+new_extent! {
+    #[derive(Eq)]
+    TextureExtent(u16, 0),
+    { limit: GFX_ATLAS_EXTENT_MIN, GFX_ATLAS_EXTENT_MAX, "Texture extent out of limits" },
+}
+
+new_rect! {
+    TextureRect(u16, TexturePoint, TextureExtent),
+}
 
 impl TextureRect {
     pub fn uv_in(&self, texture: TextureExtent) -> UvRect {

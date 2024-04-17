@@ -17,23 +17,21 @@ use self::limits::{SYS_WINDOW_COORD_MAX, SYS_WINDOW_COORD_MIN};
 #[path = "win32/mod.rs"]
 mod platform_impl;
 
-new_point!(
-    WindowPoint(x, y),
-    i16,
-    0,
-    { limit:SYS_WINDOW_COORD_MIN, SYS_WINDOW_COORD_MAX, "Window point out of limits" },
-    Eq
-);
+new_point! {
+    #[derive(Eq)]
+    WindowPoint(x, y, i16, 0),
+    { limit: SYS_WINDOW_COORD_MIN, SYS_WINDOW_COORD_MAX, "Window point out of limits" },
+}
 
-new_extent!(
-    WindowExtent,
-    i16,
-    0,
-    { limit:SYS_WINDOW_COORD_MIN, SYS_WINDOW_COORD_MAX, "Window extent out of limits" },
-    Eq
-);
+new_extent! {
+    #[derive(Eq)]
+    WindowExtent(i16, 0),
+    { limit: SYS_WINDOW_COORD_MIN, SYS_WINDOW_COORD_MAX, "Window extent out of limits" },
+}
 
-new_rect!(WindowRect, i16, WindowPoint, WindowExtent);
+new_rect! {
+    WindowRect(i16, WindowPoint, WindowExtent),
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DpiScale {

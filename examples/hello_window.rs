@@ -1,9 +1,8 @@
 use plinth::{
-    geometry::{Extent, Pixel, Point, Scale, Wixel},
     graphics::{Canvas, FrameInfo, GraphicsConfig},
     system::{
-        ButtonState, KeyCode, ModifierKeys, MonitorState, MouseButton, PowerPreference,
-        PowerSource, ScrollAxis, Window, WindowAttributes,
+        ButtonState, DpiScale, KeyCode, ModifierKeys, MonitorState, MouseButton, PowerPreference,
+        PowerSource, ScrollAxis, Window, WindowAttributes, WindowExtent, WindowPoint,
     },
     AppContext, Application, Config, EventHandler,
 };
@@ -85,7 +84,7 @@ impl EventHandler<()> for App {
         println!("Window drag resize ended");
     }
 
-    fn resized(&mut self, app: &mut AppContext<()>, window: &mut Window<()>, size: Extent<Wixel>) {
+    fn resized(&mut self, app: &mut AppContext<()>, window: &mut Window<()>, size: WindowExtent) {
         println!("Window resized: {:?}", size);
     }
 
@@ -93,8 +92,8 @@ impl EventHandler<()> for App {
         &mut self,
         app: &mut AppContext<()>,
         window: &mut Window<()>,
-        dpi: Scale<Wixel, Pixel>,
-        size: Extent<Wixel>,
+        dpi: DpiScale,
+        size: WindowExtent,
     ) {
         println!("Window DPI changed: {:?}", dpi);
         println!("Window size: {:?}", size);
@@ -125,7 +124,7 @@ impl EventHandler<()> for App {
         println!("Window restored");
     }
 
-    fn moved(&mut self, app: &mut AppContext<()>, window: &mut Window<()>, position: Point<Wixel>) {
+    fn moved(&mut self, app: &mut AppContext<()>, window: &mut Window<()>, position: WindowPoint) {
         println!("Window moved: {:?}", position);
     }
 
@@ -164,7 +163,7 @@ impl EventHandler<()> for App {
         window: &mut Window<()>,
         button: MouseButton,
         state: ButtonState,
-        position: Point<Wixel>,
+        position: WindowPoint,
         modifiers: ModifierKeys,
     ) {
         println!(
@@ -177,7 +176,7 @@ impl EventHandler<()> for App {
         &mut self,
         app: &mut AppContext<()>,
         window: &mut Window<()>,
-        position: Point<Wixel>,
+        position: WindowPoint,
     ) {
         println!("Mouse moved: {:?}", position);
     }
@@ -186,7 +185,7 @@ impl EventHandler<()> for App {
         &mut self,
         app: &mut AppContext<()>,
         window: &mut Window<()>,
-        position: Point<Wixel>,
+        position: WindowPoint,
     ) {
         println!("Mouse entered: {:?}", position);
     }

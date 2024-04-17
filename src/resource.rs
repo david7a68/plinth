@@ -5,7 +5,10 @@ use crate::{
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("The resource path exceeds {} UTF-8 bytes.", crate::limits::RES_PATH_LENGTH.get())]
+    #[error(
+        "The resource path exceeds {} UTF-8 bytes.",
+        crate::limits::RES_PATH_LENGTH_MAX
+    )]
     PathTooLong,
 
     #[error("The path does not point to an image.")]

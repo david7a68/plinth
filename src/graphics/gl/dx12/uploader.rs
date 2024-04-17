@@ -10,12 +10,9 @@ use windows::{
     },
 };
 
-use crate::{
-    geometry::{Point, Texel},
-    graphics::{
-        gl::dx12::{image_barrier, to_dxgi_format},
-        RasterBuf,
-    },
+use crate::graphics::{
+    gl::dx12::{image_barrier, to_dxgi_format},
+    RasterBuf, TexturePoint,
 };
 
 use super::device::{alloc_upload_buffer, Queue};
@@ -68,13 +65,13 @@ impl Uploader {
         queue: &Queue,
         target: &ID3D12Resource,
         pixels: &RasterBuf,
-        origin: Point<Texel>,
+        origin: TexturePoint,
     ) {
         let row_alignment = D3D12_TEXTURE_DATA_PITCH_ALIGNMENT as usize;
 
         let row_size = pixels.row_size();
         let row_size_aligned = row_size.next_multiple_of(row_alignment);
-        let img_size_aligned = row_size_aligned * usize::try_from(pixels.height().0).unwrap();
+        let img_size_aligned = row_size_aligned * usize::from(pixels.height());
 
         debug_assert_eq!(row_size_aligned % row_alignment, 0);
         debug_assert_eq!(img_size_aligned % row_alignment, 0);
@@ -106,7 +103,7 @@ impl Uploader {
         let rows_per_chunk = buffer_size / row_size_aligned;
         let bytes_per_chunk = rows_per_chunk * row_size;
 
-        let mut y_offset = origin.y.0 as u32;
+        let mut y_offset = origin.y as u32;
 
         let fmt = to_dxgi_format(pixels.info().layout, pixels.info().format);
 
@@ -141,7 +138,7 @@ impl Uploader {
                         Offset: buffer.offset,
                         Footprint: D3D12_SUBRESOURCE_FOOTPRINT {
                             Format: fmt,
-                            Width: pixels.width().0 as u32,
+                            Width: pixels.width() as u32,
                             Height: height as u32,
                             Depth: 1,
                             RowPitch: row_size_aligned as u32,
@@ -151,14 +148,8 @@ impl Uploader {
             };
 
             unsafe {
-                self.command_list.CopyTextureRegion(
-                    &dst,
-                    origin.x.0 as u32,
-                    y_offset,
-                    0,
-                    &src,
-                    None,
-                );
+                self.command_list
+                    .CopyTextureRegion(&dst, origin.x as u32, y_offset, 0, &src, None);
             }
 
             y_offset += rows_per_chunk as u32;

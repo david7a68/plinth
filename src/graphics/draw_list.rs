@@ -2,9 +2,9 @@ use core::panic;
 
 use crate::{
     core::arena::Arena,
-    geometry::{Pixel, Rect, Scale, Texel, UV},
-    graphics::{color::Color, primitives::RoundRect, texture_atlas::CachedTextureId},
-    limits::GFX_DRAW_PRIM_COUNT,
+    geometry::Rect,
+    graphics::{color::Color, primitives::RoundRect, texture_atlas::CachedTextureId, UvRect},
+    system::DpiScale,
 };
 
 use super::{text::TextEngine, texture_atlas::TextureCache, FontOptions, TextBox};
@@ -34,10 +34,10 @@ pub struct RRect {
 }
 
 impl RRect {
-    pub fn new(rect: &RoundRect, uvwh: &Rect<UV>, texture_id: u32, sampler: Sampler) -> Self {
+    pub fn new(rect: &RoundRect, uvwh: &UvRect, texture_id: u32, sampler: Sampler) -> Self {
         Self {
-            xywh: rect.rect.to_xywh().map(|x| x.0),
-            uvwh: uvwh.to_xywh().map(|x| x.0),
+            xywh: rect.rect.to_xywh(),
+            uvwh: uvwh.to_uvwh(),
             color: rect.color.to_array_f32(),
             texture_id,
             sampler,
@@ -47,7 +47,7 @@ impl RRect {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Command {
-    Begin(Rect<Pixel>),
+    Begin(Rect),
     Close,
     Clear(Color),
     Rects(u32),
@@ -65,7 +65,7 @@ pub enum DrawCommand {
 #[repr(align(16))]
 pub struct DrawList {
     pub(super) prims: Vec<RRect>,
-    pub(super) areas: Vec<Rect<Pixel>>,
+    pub(super) areas: Vec<Rect>,
     pub(super) colors: Vec<Color>,
     pub(super) commands: Vec<(DrawCommand, u32)>,
 }
@@ -109,7 +109,7 @@ impl<'a> IntoIterator for &'a DrawList {
 }
 
 pub struct DrawIter<'a> {
-    areas: &'a [Rect<Pixel>],
+    areas: &'a [Rect],
     colors: &'a [Color],
     commands: &'a [(DrawCommand, u32)],
     index: usize,
@@ -147,11 +147,11 @@ pub struct Canvas<'a> {
     text_engine: &'a TextEngine,
     textures: &'a TextureCache,
     draw_list: &'a mut DrawList,
-    region: Rect<Pixel>,
+    region: Rect,
     rect_batch_start: usize,
     rect_batch_count: usize,
     state: DrawCommand,
-    dpi: Scale<Texel, Pixel>,
+    dpi: DpiScale,
 }
 
 impl<'a> Canvas<'a> {
@@ -160,8 +160,8 @@ impl<'a> Canvas<'a> {
         text_engine: &'a TextEngine,
         arena: &'a mut Arena,
         draw_list: &'a mut DrawList,
-        region: Rect<Pixel>,
-        dpi: Scale<Texel, Pixel>,
+        region: Rect,
+        dpi: DpiScale,
     ) -> Self {
         draw_list.clear();
         draw_list.areas.push(region);
@@ -181,7 +181,7 @@ impl<'a> Canvas<'a> {
     }
 
     #[must_use]
-    pub fn region(&self) -> Rect<Pixel> {
+    pub fn region(&self) -> Rect {
         self.region
     }
 
@@ -191,8 +191,6 @@ impl<'a> Canvas<'a> {
             DrawCommand::Rects => self.submit_batch(),
             DrawCommand::Close => panic!("Canvas state Close -> Clear is a bug."),
         }
-
-        GFX_DRAW_PRIM_COUNT.check(self.draw_list.colors.len());
 
         self.draw_list
             .commands
@@ -227,17 +225,15 @@ impl<'a> Canvas<'a> {
             Sampler::default(),
         ));
 
-        GFX_DRAW_PRIM_COUNT.check(self.rect_batch_count);
-
         self.rect_batch_count += 1;
 
         self.state = DrawCommand::Rects;
     }
 
     pub fn draw_text(&mut self, text: &str, font: FontOptions, rect: TextBox) {
-        let layout =
-            self.text_engine
-                .layout_text(self.arena, text, rect, font, Scale::new(self.dpi.factor));
+        let layout = self
+            .text_engine
+            .layout_text(self.arena, text, rect, font, self.dpi);
 
         layout.draw(self.draw_list);
     }

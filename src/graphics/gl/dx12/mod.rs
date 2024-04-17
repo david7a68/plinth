@@ -18,10 +18,7 @@ use windows::Win32::Graphics::{
     },
 };
 
-use crate::{
-    geometry::{Extent, Texel},
-    graphics::{Format, Layout},
-};
+use crate::graphics::{Format, Layout, TextureExtent};
 
 pub use self::device::Device;
 pub use swapchain::{Swapchain, SwapchainImage};
@@ -30,14 +27,14 @@ use super::SubmitId;
 
 pub struct RenderTarget {
     pub draw: Option<SubmitId>,
-    pub size: Extent<Texel>,
+    pub size: TextureExtent,
     pub state: D3D12_RESOURCE_STATES,
     pub resource: ID3D12Resource,
     pub descriptor: D3D12_CPU_DESCRIPTOR_HANDLE,
 }
 
 impl RenderTarget {
-    pub fn extent(&self) -> Extent<Texel> {
+    pub fn extent(&self) -> TextureExtent {
         self.size
     }
 }

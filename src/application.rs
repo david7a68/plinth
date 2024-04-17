@@ -2,15 +2,15 @@ use std::{collections::HashMap, marker::PhantomData};
 
 use crate::{
     core::{arena::Arena, PassthroughBuildHasher},
-    geometry::{Extent, Pixel, Point, Scale, Wixel},
     graphics::{Canvas, DrawList, FrameInfo, Graphics, GraphicsConfig, Image, Swapchain},
     hash::HashedStr,
-    limits::{self, GFX_IMAGE_COUNT},
+    limits::{ResourcePath, GFX_IMAGE_COUNT_MAX},
     resource::{Error as ResourceError, Resource, StaticResource},
     system::{
         event_loop::{ActiveEventLoop, EventHandler as SysEventHandler, EventLoop, EventLoopError},
-        ButtonState, KeyCode, ModifierKeys, MonitorState, MouseButton, PaintReason,
+        ButtonState, DpiScale, KeyCode, ModifierKeys, MonitorState, MouseButton, PaintReason,
         PowerPreference, PowerSource, ScrollAxis, Window, WindowAttributes, WindowError,
+        WindowExtent, WindowPoint,
     },
 };
 
@@ -54,14 +54,14 @@ impl Application {
     /// This will fail if the event loop could not be initialized, or if an
     /// application has already been initialized.
     pub fn new(config: &Config) -> Result<Self, Error> {
-        limits::GFX_IMAGE_COUNT.check(config.resources.len());
+        assert!(config.resources.len() <= GFX_IMAGE_COUNT_MAX);
 
         let frame_arena = Arena::new(config.frame_arena_size).unwrap();
 
         let mut graphics = Graphics::new(&config.graphics);
 
         let mut resources =
-            HashMap::with_capacity_and_hasher(GFX_IMAGE_COUNT.get(), PassthroughBuildHasher::new());
+            HashMap::with_capacity_and_hasher(GFX_IMAGE_COUNT_MAX, PassthroughBuildHasher::new());
 
         // todo: use a thread pool a la rayon to load resources in parallel
 
@@ -148,7 +148,8 @@ impl<'a, UserWindowData> AppContext<'a, UserWindowData> {
     ///  is missing or malformed. It may also return an IO error if one is
     ///  encountered.
     pub fn load_image(&mut self, path: HashedStr) -> Result<Image, ResourceError> {
-        limits::RES_PATH_LENGTH.test(path.string, ResourceError::PathTooLong)?;
+        let _path_str = ResourcePath::new(path).ok_or(ResourceError::PathTooLong)?;
+
         match self.resources.entry(path.hash.0) {
             std::collections::hash_map::Entry::Occupied(entry) => match entry.get() {
                 Resource::Image(image) => Ok(*image),
@@ -177,8 +178,7 @@ impl<'a, UserWindowData> AppContext<'a, UserWindowData> {
     ///  resource is missing or malformed. It may also return an IO error if one
     ///  is encountered.
     pub fn load_resource(&mut self, path: HashedStr) -> Result<Resource, ResourceError> {
-        limits::RES_PATH_LENGTH.test(path.string, ResourceError::PathTooLong)?;
-        let _ = path;
+        let _path_str = ResourcePath::new(path).ok_or(ResourceError::PathTooLong)?;
         todo!()
     }
 
@@ -205,8 +205,8 @@ impl<'a, UserWindowData> AppContext<'a, UserWindowData> {
                 WindowState {
                     swapchain,
                     draw_list: DrawList::new(),
-                    dpi_scale: Scale::default(),
-                    to_resize: Extent::default(),
+                    dpi_scale: DpiScale::IDENTITY,
+                    to_resize: WindowExtent::ZERO,
                 },
                 user_data,
             )
@@ -264,7 +264,7 @@ pub trait EventHandler<WindowData> {
         &mut self,
         app: &mut AppContext<WindowData>,
         window: &mut Window<WindowData>,
-        size: Extent<Wixel>,
+        size: WindowExtent,
     ) {
     }
 
@@ -272,8 +272,8 @@ pub trait EventHandler<WindowData> {
         &mut self,
         app: &mut AppContext<WindowData>,
         window: &mut Window<WindowData>,
-        dpi: Scale<Wixel, Pixel>,
-        size: Extent<Wixel>,
+        dpi: DpiScale,
+        size: WindowExtent,
     ) {
     }
 
@@ -300,7 +300,7 @@ pub trait EventHandler<WindowData> {
         &mut self,
         app: &mut AppContext<WindowData>,
         window: &mut Window<WindowData>,
-        position: Point<Wixel>,
+        position: WindowPoint,
     ) {
     }
 
@@ -334,7 +334,7 @@ pub trait EventHandler<WindowData> {
         window: &mut Window<WindowData>,
         button: MouseButton,
         state: ButtonState,
-        position: Point<Wixel>,
+        position: WindowPoint,
         modifiers: ModifierKeys,
     ) {
     }
@@ -353,7 +353,7 @@ pub trait EventHandler<WindowData> {
         &mut self,
         app: &mut AppContext<WindowData>,
         window: &mut Window<WindowData>,
-        position: Point<Wixel>,
+        position: WindowPoint,
     ) {
     }
 
@@ -361,7 +361,7 @@ pub trait EventHandler<WindowData> {
         &mut self,
         app: &mut AppContext<WindowData>,
         window: &mut Window<WindowData>,
-        position: Point<Wixel>,
+        position: WindowPoint,
     ) {
     }
 
@@ -376,8 +376,8 @@ pub trait EventHandler<WindowData> {
 struct WindowState<'a> {
     swapchain: Swapchain<'a>,
     draw_list: DrawList,
-    dpi_scale: Scale<Wixel, Pixel>,
-    to_resize: Extent<Wixel>,
+    dpi_scale: DpiScale,
+    to_resize: WindowExtent,
 }
 
 struct ApplicationEventHandler<'a, UserData, Client: EventHandler<UserData>> {
@@ -487,7 +487,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState<'_>, 
         &mut self,
         event_loop: &ActiveEventLoop<(WindowState, UserData)>,
         window: Window<(WindowState, UserData)>,
-        size: Extent<Wixel>,
+        size: WindowExtent,
     ) {
         let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
         let (meta, mut wn) = window.split();
@@ -500,8 +500,8 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState<'_>, 
         &mut self,
         event_loop: &ActiveEventLoop<(WindowState, UserData)>,
         window: Window<(WindowState, UserData)>,
-        dpi: Scale<Wixel, Pixel>,
-        size: Extent<Wixel>,
+        dpi: DpiScale,
+        size: WindowExtent,
     ) {
         let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
         let (meta, mut wn) = window.split();
@@ -574,7 +574,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState<'_>, 
         &mut self,
         event_loop: &ActiveEventLoop<(WindowState, UserData)>,
         window: Window<(WindowState, UserData)>,
-        position: Point<Wixel>,
+        position: WindowPoint,
     ) {
         let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
         let (_, mut wn) = window.split();
@@ -600,7 +600,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState<'_>, 
         let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
         let (meta, mut wn) = window.split();
 
-        if meta.to_resize != Extent::default() {
+        if meta.to_resize != WindowExtent::ZERO {
             meta.swapchain.resize(std::mem::take(&mut meta.to_resize));
         }
 
@@ -609,7 +609,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState<'_>, 
         meta.draw_list.clear();
 
         // hacky
-        let scale = Scale::new(meta.dpi_scale.factor);
+        let scale = DpiScale::new(meta.dpi_scale.factor);
 
         self.frame_arena.reset();
 
@@ -658,7 +658,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState<'_>, 
         window: Window<(WindowState, UserData)>,
         button: MouseButton,
         state: ButtonState,
-        position: Point<Wixel>,
+        position: WindowPoint,
         modifiers: ModifierKeys,
     ) {
         let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
@@ -685,7 +685,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState<'_>, 
         &mut self,
         event_loop: &ActiveEventLoop<(WindowState, UserData)>,
         window: Window<(WindowState, UserData)>,
-        position: Point<Wixel>,
+        position: WindowPoint,
     ) {
         let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
         let (_, mut wn) = window.split();
@@ -696,7 +696,7 @@ impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState<'_>, 
         &mut self,
         event_loop: &ActiveEventLoop<(WindowState, UserData)>,
         window: Window<(WindowState, UserData)>,
-        position: Point<Wixel>,
+        position: WindowPoint,
     ) {
         let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
         let (_, mut wn) = window.split();

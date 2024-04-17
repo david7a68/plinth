@@ -25,9 +25,9 @@ use windows::{
 };
 
 use crate::{
-    geometry::{Extent, Wixel},
+    core::limit::Limit,
     graphics::{FrameInfo, RenderTarget as BRenderTarget},
-    limits,
+    system::WindowExtent,
     time::{FramesPerSecond, PresentPeriod, PresentTime},
 };
 
@@ -79,7 +79,7 @@ pub struct Swapchain<'a> {
     rtv_heap: ID3D12DescriptorHeap,
     rtv: D3D12_CPU_DESCRIPTOR_HANDLE,
 
-    size: Extent<Wixel>,
+    size: WindowExtent,
 
     composition_rate: FramesPerSecond,
     target_frame_rate: Option<FramesPerSecond>,
@@ -178,7 +178,7 @@ impl<'device> Swapchain<'device> {
             target,
             visual,
             waitable_object: latency_event,
-            size: Extent::default(),
+            size: WindowExtent::ZERO,
             rtv_heap: swapchain_rtv_heap,
             rtv: swapchain_rtv,
             target_frame_rate: None,
@@ -188,7 +188,7 @@ impl<'device> Swapchain<'device> {
         }
     }
 
-    pub fn resize(&mut self, size: Extent<Wixel>) {
+    pub fn resize(&mut self, size: WindowExtent) {
         resize_swapchain(&self.handle, size, None, || {
             self.device.idle();
         });
@@ -244,7 +244,7 @@ impl<'device> Swapchain<'device> {
 
         let rt = RenderTarget {
             draw: None,
-            size: self.size.cast(),
+            size: self.size.into(),
             state: D3D12_RESOURCE_STATE_PRESENT,
             resource: image,
             descriptor: self.rtv,
@@ -273,7 +273,7 @@ impl Drop for Swapchain<'_> {
 
 pub fn resize_swapchain(
     swapchain: &IDXGISwapChain3,
-    size: Extent<Wixel>,
+    size: WindowExtent,
     flex: Option<f32>,
     idle: impl Fn(),
 ) {
@@ -297,11 +297,11 @@ pub fn resize_swapchain(
         unsafe { swapchain.GetDesc1(&mut desc) }.unwrap();
 
         if width > desc.Width || height > desc.Height {
-            let max_dim = limits::SYS_WINDOW_EXTENT.max();
+            let max_dim = WindowExtent::max();
             #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-            let w = (f64::from(width) * f64::from(flex)).min(f64::from(max_dim.width.0)) as u32;
+            let w = (f64::from(width) * f64::from(flex)).min(f64::from(max_dim.width)) as u32;
             #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
-            let h = (f64::from(height) * f64::from(flex)).min(f64::from(max_dim.height.0)) as u32;
+            let h = (f64::from(height) * f64::from(flex)).min(f64::from(max_dim.height)) as u32;
 
             idle();
             resize(w, h);

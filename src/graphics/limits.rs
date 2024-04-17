@@ -1,11 +1,9 @@
-use crate::core::limits::{TexelExtentRange, Usize, MAX};
+pub const GFX_IMAGE_EXTENT_MIN: u16 = 1;
+pub const GFX_IMAGE_EXTENT_MAX: u16 = 4096;
+pub const GFX_IMAGE_COUNT_MAX: usize = 4096;
 
-pub const GFX_IMAGE_EXTENT: TexelExtentRange<1, 1, 4096, 4096> =
-    TexelExtentRange::new("Image extent out of range.");
+pub const GFX_ATLAS_COUNT_MAX: usize = 128;
+pub const GFX_ATLAS_EXTENT_MIN: u16 = 1;
+pub const GFX_ATLAS_EXTENT_MAX: u16 = 8192;
 
-pub const GFX_IMAGE_COUNT: Usize<4096, MAX> = Usize::new("Too many images");
-
-pub const GFX_TEXTURE_COUNT: Usize<128, MAX> = Usize::new("Too many textures");
-
-pub const GFX_DRAW_PRIM_COUNT: Usize<{ u32::MAX as _ }, MAX> =
-    Usize::new("Too many items in draw list");
+pub const GFX_DRAW_TRI_COUNT_MAX: usize = u32::MAX as usize;

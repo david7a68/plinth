@@ -21,11 +21,13 @@ use windows::{
 
 use crate::{
     core::{arena::Arena, static_lru_cache::LruCache},
-    geometry::{Extent, Pixel, Point, Rect, Scale, Texel},
-    hashed_str, Hash, HashedStr,
+    geometry::{Extent, Point, Rect},
+    hashed_str,
+    system::DpiScale,
+    Hash, HashedStr,
 };
 
-use super::{gl::TextureId, Color, DrawList};
+use super::{gl::TextureId, Color, DrawList, TextureExtent};
 
 pub const CACHE_SIZE: usize = 32;
 
@@ -65,7 +67,7 @@ impl TextEngine {
 
         let cached_formats = RefCell::new(LruCache::new());
 
-        let default_format = create_format(&factory, default_font, Scale::new(1.0)).unwrap();
+        let default_format = create_format(&factory, default_font, DpiScale::new(1.0)).unwrap();
 
         Self {
             factory,
@@ -80,7 +82,7 @@ impl TextEngine {
         text: &str,
         block: TextBox,
         style: FontOptions,
-        scale: Scale<f32, f32>,
+        scale: DpiScale,
     ) -> TextLayout {
         let chars = {
             let mut arr = temp.make_array(text.len()).expect("Out of temp memory");
@@ -97,8 +99,8 @@ impl TextEngine {
             self.factory.CreateTextLayout(
                 &chars,
                 &style.inner,
-                block.rect.extent.width.0,
-                block.rect.extent.height.0,
+                block.rect.extent.width,
+                block.rect.extent.height,
             )
         }
         .unwrap();
@@ -110,7 +112,7 @@ impl TextEngine {
         todo!()
     }
 
-    pub fn glyph_cache_add_texture(&self, texture: TextureId, size: Extent<Texel>) {
+    pub fn glyph_cache_add_texture(&self, texture: TextureId, size: TextureExtent) {
         todo!()
     }
 }
@@ -174,14 +176,14 @@ impl TextLayout {
 
 pub struct TextBox {
     pub wrap: TextWrapMode,
-    pub rect: Rect<Pixel>,
+    pub rect: Rect,
     pub line_spacing: f32,
 }
 
 fn create_format(
     factory: &IDWriteFactory,
     font: FontOptions,
-    dpi: Scale<f32, f32>,
+    dpi: DpiScale,
 ) -> Result<TextFormat, Error> {
     let weight = match font.weight {
         Weight::Light => DWRITE_FONT_WEIGHT_LIGHT,
@@ -209,11 +211,6 @@ fn create_format(
         .chain(once(0))
         .collect::<SmallVec<[u16; 64]>>();
 
-    println!(
-        "font size: {:?}, scale: {:?}, pixels: {:?}",
-        font.size, dpi.factor, size
-    );
-
     let text_format = unsafe {
         factory.CreateTextFormat(
             PCWSTR(font_name.as_ptr()),
@@ -239,14 +236,16 @@ fn create_format(
 }
 
 #[implement(IDWriteTextRenderer)]
-struct TextRenderer {}
+struct TextRenderer {
+    dpi: f32,
+}
 
 impl IDWritePixelSnapping_Impl for TextRenderer {
     fn IsPixelSnappingDisabled(
         &self,
         clientdrawingcontext: *const c_void,
     ) -> Result<BOOL, WindowsError> {
-        todo!()
+        Ok(false.into())
     }
 
     fn GetCurrentTransform(
@@ -254,7 +253,16 @@ impl IDWritePixelSnapping_Impl for TextRenderer {
         clientdrawingcontext: *const c_void,
         transform: *mut DWRITE_MATRIX,
     ) -> Result<(), WindowsError> {
-        todo!()
+        let transform = unsafe { transform.as_mut() }.unwrap();
+
+        transform.m11 = 1.0;
+        transform.m12 = 0.0;
+        transform.m21 = 0.0;
+        transform.m22 = 1.0;
+        transform.dx = 0.0;
+        transform.dy = 0.0;
+
+        Ok(())
     }
 
     fn GetPixelsPerDip(&self, clientdrawingcontext: *const c_void) -> Result<f32, WindowsError> {

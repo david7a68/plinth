@@ -1,18 +1,16 @@
-use crate::geometry::{Pixel, Rect};
+use crate::geometry::Rect;
 
 use super::{color::Color, image::Image};
 
 pub struct RoundRect {
-    pub rect: Rect<Pixel>,
+    pub rect: Rect,
     pub color: Color,
     pub image: Image,
 }
 
 impl RoundRect {
     #[must_use]
-    pub fn new(rect: impl Into<Rect<Pixel>>) -> Self {
-        let rect = rect.into();
-
+    pub fn new(rect: Rect) -> Self {
         Self {
             rect,
             color: Color::WHITE,

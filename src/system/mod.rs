@@ -1,16 +1,49 @@
 pub(crate) mod event_loop;
-
 mod input;
-pub use input::*;
-
+pub(crate) mod limits;
 mod power;
-pub use power::*;
-
 pub(crate) mod time;
-
 mod window;
+
+pub use input::*;
+pub use power::*;
 pub use window::*;
+
+use crate::geometry::{new_extent, new_point, new_rect};
+
+use self::limits::{SYS_WINDOW_COORD_MAX, SYS_WINDOW_COORD_MIN};
 
 #[cfg(target_os = "windows")]
 #[path = "win32/mod.rs"]
 mod platform_impl;
+
+new_point!(
+    WindowPoint(x, y),
+    i16,
+    0,
+    { limit:SYS_WINDOW_COORD_MIN, SYS_WINDOW_COORD_MAX, "Window point out of limits" },
+    Eq
+);
+
+new_extent!(
+    WindowExtent,
+    i16,
+    0,
+    { limit:SYS_WINDOW_COORD_MIN, SYS_WINDOW_COORD_MAX, "Window extent out of limits" },
+    Eq
+);
+
+new_rect!(WindowRect, i16, WindowPoint, WindowExtent);
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DpiScale {
+    pub factor: f32,
+}
+
+impl DpiScale {
+    pub const IDENTITY: Self = Self { factor: 1.0 };
+
+    pub fn new(factor: f32) -> Self {
+        Self { factor }
+    }
+}

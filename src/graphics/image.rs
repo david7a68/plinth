@@ -1,9 +1,8 @@
 use std::{fmt::Debug, ptr::addr_of};
 
-use crate::{
-    geometry::{Extent, Texel},
-    limits::{GFX_IMAGE_COUNT, GFX_IMAGE_EXTENT},
-};
+use crate::core::limit::Limit;
+
+use super::{limits::GFX_IMAGE_COUNT_MAX, ImageExtent};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -11,7 +10,10 @@ pub enum Error {
     SizeLimit,
     #[error("The image size does not agree with the number of bytes provided.")]
     SizeError,
-    #[error("The image could not be created because the image count limit ({}) has been reached ", GFX_IMAGE_COUNT.get())]
+    #[error(
+        "The image could not be created because the image count limit ({}) has been reached ",
+        GFX_IMAGE_COUNT_MAX
+    )]
     MaxCount,
     #[error("The image handle has expired.")]
     Expired,
@@ -72,7 +74,7 @@ impl From<u8> for Format {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Info {
-    pub extent: Extent<Texel>,
+    pub extent: ImageExtent,
     pub format: Format,
     pub layout: Layout,
 }
@@ -80,15 +82,15 @@ pub struct Info {
 impl Info {
     #[must_use]
     pub const fn row_size(&self) -> usize {
-        self.extent.width.0 as usize * self.layout.bytes_per_pixel()
+        self.extent.width as usize * self.layout.bytes_per_pixel()
     }
 }
 
 impl Info {
     pub(crate) fn pack(self) -> PackedInfo {
         PackedInfo::new()
-            .with_width(self.extent.width.0)
-            .with_height(self.extent.height.0)
+            .with_width(self.extent.width)
+            .with_height(self.extent.height)
             .with_layout(self.layout as u8)
             .with_format(self.format as u8)
     }
@@ -105,8 +107,8 @@ pub struct Image {
 
 impl Image {
     #[must_use]
-    pub fn extent(&self) -> Extent<Texel> {
-        Extent::new(Texel(self.info.width()), Texel(self.info.height()))
+    pub fn extent(&self) -> ImageExtent {
+        ImageExtent::new(self.info.width(), self.info.height())
     }
 
     #[must_use]
@@ -143,7 +145,7 @@ pub struct RasterBuf<'a> {
 impl<'a> RasterBuf<'a> {
     #[must_use]
     pub const fn new(info: Info, data: &[u8]) -> RasterBuf {
-        GFX_IMAGE_EXTENT.check(info.extent);
+        ImageExtent::limit_assert(info.extent);
 
         let row_size = info.row_size();
         assert!(
@@ -155,7 +157,7 @@ impl<'a> RasterBuf<'a> {
     }
 
     pub fn try_new(info: Info, data: &'a [u8]) -> Result<RasterBuf<'a>, Error> {
-        GFX_IMAGE_EXTENT.test(info.extent, Error::SizeLimit)?;
+        info.extent.limit_error(Error::SizeLimit)?;
 
         let row_size = info.row_size();
         if data.len() % row_size != 0 {
@@ -171,12 +173,12 @@ impl<'a> RasterBuf<'a> {
     }
 
     #[must_use]
-    pub const fn width(&self) -> Texel {
+    pub const fn width(&self) -> u16 {
         self.info.extent.width
     }
 
     #[must_use]
-    pub const fn height(&self) -> Texel {
+    pub const fn height(&self) -> u16 {
         self.info.extent.height
     }
 
@@ -209,9 +211,9 @@ impl Debug for RasterBuf<'_> {
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct PackedInfo {
     #[bits(12)] // max width: 4096; could take 1 bit from _empty for 8192
-    pub width: i16,
+    pub width: u16,
     #[bits(12)] // max height: 4096; could take 1 bit from _empty for 8192
-    pub height: i16,
+    pub height: u16,
     #[bits(3)]
     pub layout: u8,
     #[bits(3)]

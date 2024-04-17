@@ -1,642 +1,195 @@
-//! 2D geometry types with type-safe coordinate spaces.
+macro_rules! new_point_options {
+    ($name:ident($x:ident, $y:ident)) => {};
+    ($name:ident($x:ident, $y:ident), {limit: $min:expr, $max:expr, $msg:expr}) => {
+        impl $crate::core::limit::Limit for $name {
+            const ASSERT_MESSAGE: &'static str = $msg;
 
-use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
+            #[inline]
+            fn min() -> Self {
+                Self { $x: $min, $y: $min }
+            }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Hash)]
-pub struct Point<T: Num> {
-    pub x: T,
-    pub y: T,
-}
+            #[inline]
+            fn max() -> Self {
+                Self { $x: $max, $y: $max }
+            }
 
-impl<T: Num> Point<T> {
-    pub const ZERO: Self = Self {
-        x: T::ZERO,
-        y: T::ZERO,
+            #[inline]
+            fn clamp(&mut self) {
+                self.$x = self.$x.clamp(Self::min().$x, Self::max().$x);
+                self.$y = self.$y.clamp(Self::min().$y, Self::max().$y);
+            }
+
+            #[inline]
+            fn limit_check(&self) -> bool {
+                let $x = $min <= self.$x && self.$x <= $max;
+                let $y = $min <= self.$y && self.$y <= $max;
+                $x && $y
+            }
+        }
     };
-
-    pub const ONE: Self = Self {
-        x: T::ONE,
-        y: T::ONE,
+    ($name:ident($x:ident, $y:ident), {limit: $min:expr, $max:expr, $msg:expr}, $($ops:tt),*) => {
+        $crate::geometry::new_point_options!($name($x, $y), { limit: $min, $max, $msg });
+        $crate::geometry::new_point_options!($name($x, $y), $($ops),*);
     };
-
-    pub const MIN: Self = Self {
-        x: T::MIN,
-        y: T::MIN,
+    ($name:ident($x:ident, $y:ident), Eq) => {
+        impl Eq for $name {}
     };
-
-    pub const MAX: Self = Self {
-        x: T::MAX,
-        y: T::MAX,
+    ($name:ident($x:ident, $y:ident), Eq, $($ops:tt),*) => {
+        $crate::geometry::new_point_options($name($x, $y), Eq);
+        $crate::geometry::new_point_options($name, $($ops),*);
     };
-
-    pub fn new(x: impl Into<T>, y: impl Into<T>) -> Self {
-        Self {
-            x: x.into(),
-            y: y.into(),
-        }
-    }
-
-    pub fn cast<U: Num + From<T>>(self) -> Point<U> {
-        Point {
-            x: U::from(self.x),
-            y: U::from(self.y),
-        }
-    }
-
-    pub fn scale_to<U: Num>(self, factor: Scale<T, U>) -> Point<U>
-    where
-        T: ScaleTo<T, U>,
-    {
-        Point::new(self.x.scale(factor), self.y.scale(factor))
-    }
-
-    pub const fn as_extent(&self) -> Extent<T> {
-        Extent {
-            width: self.x,
-            height: self.y,
-        }
-    }
-
-    pub fn min(&self, other: &Self) -> Self {
-        Self {
-            x: self.x.min(other.x),
-            y: self.y.min(other.y),
-        }
-    }
-
-    pub fn max(&self, other: &Self) -> Self {
-        Self {
-            x: self.x.max(other.x),
-            y: self.y.max(other.y),
-        }
-    }
 }
 
-impl<T: Num, I: Into<T>> From<(I, I)> for Point<T> {
-    fn from((x, y): (I, I)) -> Self {
-        Self::new(x.into(), y.into())
-    }
-}
+macro_rules! new_point {
+    ($(#[$meta:meta])* $name:ident($x:ident, $y:ident), $element_ty:ty, $zero:expr) => {
+        $(#[$meta:meta])*
+        #[derive(Clone, Copy, Debug, Default, PartialEq)]
+        pub struct $name {
+            pub $x: $element_ty,
+            pub $y: $element_ty,
+        }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Hash)]
-pub struct Extent<T: Num> {
-    pub width: T,
-    pub height: T,
-}
+        impl $name {
+            pub const ORIGIN: Self = Self { $x: $zero, $y: $zero };
 
-impl<T: Num> Extent<T> {
-    pub const ZERO: Self = Self {
-        width: T::ZERO,
-        height: T::ZERO,
+            pub fn new($x: $element_ty, $y: $element_ty) -> Self {
+                Self { $x, $y }
+            }
+        }
+
+        impl From<($element_ty, $element_ty)> for $name {
+            fn from(($x, $y): ($element_ty, $element_ty)) -> Self {
+                Self { $x, $y }
+            }
+        }
     };
-
-    pub const ONE: Self = Self {
-        width: T::ONE,
-        height: T::ONE,
+    ($(#[$meta:meta])* $name:ident($x:ident, $y:ident), $element_ty:ty, $zero:expr, $($ops:tt),*) => {
+        new_point! {
+            $(#[$meta])*
+            $name($x, $y), $element_ty, $zero
+        }
+        $crate::geometry::new_point_options!($name($x, $y), $($ops),*);
     };
+}
 
-    pub const MIN: Self = Self {
-        width: T::MIN,
-        height: T::MIN,
+macro_rules! new_extent_options {
+    ($name:ty) => {};
+    ($name:ty, {limit: $min:expr, $max:expr, $msg:expr}) => {
+        impl $crate::core::limit::Limit for $name {
+            const ASSERT_MESSAGE: &'static str = $msg;
+
+            #[inline]
+            fn min() -> Self {
+                Self { width: $min, height: $min }
+            }
+
+            #[inline]
+            fn max() -> Self {
+                Self { width: $max, height: $max }
+            }
+
+            #[inline]
+            fn clamp(&mut self) {
+                self.width = self.width.clamp(Self::min().width, Self::max().width);
+                self.height = self.height.clamp(Self::min().height, Self::max().height);
+            }
+
+            #[inline]
+            fn limit_check(&self) -> bool {
+                let width = $min <= self.width && self.width <= $max;
+                let height = $min <= self.height && self.height <= $max;
+                width && height
+            }
+        }
     };
-
-    pub const MAX: Self = Self {
-        width: T::MAX,
-        height: T::MAX,
+    ($name:ty, {limit: $min:expr, $max:expr, $msg:expr}, $($ops:tt),*) => {
+        $crate::geometry::new_extent_options!($name, { limit: $min, $max, $msg });
+        $crate::geometry::new_extent_options!($name, $($ops),*);
     };
-
-    #[must_use]
-    pub fn new(width: impl Into<T>, height: impl Into<T>) -> Self {
-        Self {
-            width: width.into(),
-            height: height.into(),
-        }
-    }
-
-    #[must_use]
-    pub fn cast<U: Num + From<T>>(self) -> Extent<U> {
-        Extent {
-            width: U::from(self.width),
-            height: U::from(self.height),
-        }
-    }
-
-    #[must_use]
-    pub fn scale_to<U: Num>(self, factor: Scale<T, U>) -> Extent<U>
-    where
-        T: ScaleTo<T, U>,
-    {
-        Extent::new(self.width.scale(factor), self.height.scale(factor))
-    }
-
-    #[must_use]
-    pub fn min(&self, other: &Self) -> Self {
-        Self {
-            width: self.width.min(other.width),
-            height: self.height.min(other.height),
-        }
-    }
-
-    #[must_use]
-    pub fn max(&self, other: &Self) -> Self {
-        Self {
-            width: self.width.max(other.width),
-            height: self.height.max(other.height),
-        }
-    }
-}
-
-impl<T: Num> Div for Extent<T>
-where
-    T: Div<Output = T>,
-{
-    type Output = Self;
-
-    fn div(self, other: Self) -> Self {
-        Self {
-            width: self.width / other.width,
-            height: self.height / other.height,
-        }
-    }
-}
-
-impl<T: Num, I: Into<T>> From<(I, I)> for Extent<T> {
-    fn from((width, height): (I, I)) -> Self {
-        Self::new(width.into(), height.into())
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Hash)]
-pub struct Rect<T: Num> {
-    pub origin: Point<T>,
-    pub extent: Extent<T>,
-}
-
-impl<T: Num> Rect<T> {
-    pub const ZERO: Self = Self {
-        origin: Point::ZERO,
-        extent: Extent::ZERO,
+    ($name:ty, Eq) => {
+        impl Eq for $name {}
     };
-
-    pub const ONE: Self = Self {
-        origin: Point::ZERO,
-        extent: Extent::ONE,
+    ($name:ty, Eq, $($ops:tt),*) => {
+        $crate::geometry::new_extent_options($name, Eq);
+        $crate::geometry::new_extent_options($name, $($ops),*);
     };
-
-    pub const MIN: Self = Self {
-        origin: Point::MIN,
-        extent: Extent::MIN,
-    };
-
-    pub const MAX: Self = Self {
-        origin: Point::MAX,
-        extent: Extent::MAX,
-    };
-
-    pub fn new(origin: impl Into<Point<T>>, extent: impl Into<Extent<T>>) -> Self {
-        Self {
-            origin: origin.into(),
-            extent: extent.into(),
-        }
-    }
-
-    pub fn from_extent(extent: impl Into<Extent<T>>) -> Self {
-        Self {
-            origin: Point::ZERO,
-            extent: extent.into(),
-        }
-    }
-
-    pub fn cast<U: Num + From<T>>(self) -> Rect<U> {
-        Rect {
-            origin: self.origin.cast(),
-            extent: self.extent.cast(),
-        }
-    }
-
-    pub fn scale_to<U: Num>(self, factor: Scale<T, U>) -> Rect<U>
-    where
-        T: ScaleTo<T, U>,
-    {
-        Rect::new(self.origin.scale_to(factor), self.extent.scale_to(factor))
-    }
-
-    pub fn to_xywh(&self) -> [T; 4] {
-        let origin = self.origin;
-        let extent = self.extent;
-        [origin.x, origin.y, extent.width, extent.height]
-    }
 }
 
-impl<T: Num, I: Into<T>> From<(I, I, I, I)> for Rect<T> {
-    fn from((x, y, w, h): (I, I, I, I)) -> Self {
-        Self::new((x, y), (w, h))
-    }
-}
-
-impl<T: Num, I: Into<T>> From<((I, I), (I, I))> for Rect<T> {
-    fn from(((x, y), (w, h)): ((I, I), (I, I))) -> Self {
-        Self::new((x, y), (w, h))
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Hash)]
-pub struct Aabb<T: Num> {
-    pub min: Point<T>,
-    pub max: Point<T>,
-}
-
-impl<T: Num> Aabb<T> {
-    pub const MIN: Self = Self {
-        min: Point::MIN,
-        max: Point::MIN,
-    };
-
-    pub const MAX: Self = Self {
-        min: Point::MAX,
-        max: Point::MAX,
-    };
-
-    pub fn new(min: Point<T>, max: Point<T>) -> Self {
-        Self { min, max }
-    }
-
-    pub fn cast<U: Num + From<T>>(self) -> Aabb<U> {
-        Aabb {
-            min: self.min.cast(),
-            max: self.max.cast(),
-        }
-    }
-
-    pub fn scale_to<U: Num>(self, factor: Scale<T, U>) -> Aabb<U>
-    where
-        T: ScaleTo<T, U>,
-    {
-        Aabb::new(self.min.scale_to(factor), self.max.scale_to(factor))
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
-pub struct Scale<T: Num, U: Num> {
-    pub factor: f32,
-    _phantom: std::marker::PhantomData<(T, U)>,
-}
-
-impl<T: Num, U: Num> Scale<T, U> {
-    #[must_use]
-    pub fn new(factor: f32) -> Self {
-        Self {
-            factor,
-            _phantom: std::marker::PhantomData,
-        }
-    }
-}
-
-impl<T: Num, U: Num> Default for Scale<T, U> {
-    fn default() -> Self {
-        Self {
-            factor: 1.0,
-            _phantom: std::marker::PhantomData,
-        }
-    }
-}
-
-pub trait Num: Copy + Default + Add + Sub + Mul + Div + PartialOrd + PartialEq {
-    const ZERO: Self;
-    const ONE: Self;
-
-    const MIN: Self;
-    const MAX: Self;
-
-    #[must_use]
-    fn min(self, other: Self) -> Self;
-
-    #[must_use]
-    fn max(self, other: Self) -> Self;
-}
-
-pub trait ScaleTo<T: Num, U: Num> {
-    fn scale(&self, factor: Scale<T, U>) -> U;
-}
-
-macro_rules! impl_num {
-    ($(#[$meta:meta])* $name:ident($int_ty:ty): From($($from_ty:ty),*), Into($($into_ty:ty),*) ) => {
+macro_rules! new_extent {
+    ($(#[$meta:meta])* $name:ident, $element_ty:ty, $zero:expr) => {
         $(#[$meta])*
-        #[derive(Clone, Copy, Debug, Default, PartialEq, PartialOrd)]
-        pub struct $name(pub $int_ty);
+        #[derive(Clone, Copy, Debug, Default, PartialEq)]
+        pub struct $name {
+            pub width: $element_ty,
+            pub height: $element_ty,
+        }
 
-        impl Add for $name {
-            type Output = Self;
+        impl $name {
+            pub const ZERO: Self = Self { width: $zero, height: $zero };
 
-            fn add(self, other: Self) -> Self {
-                Self(self.0 + other.0)
+            pub fn new(width: $element_ty, height: $element_ty) -> Self {
+                Self { width, height }
             }
         }
 
-        impl Add<$int_ty> for $name {
-            type Output = Self;
+        impl From<($element_ty, $element_ty)> for $name {
+            fn from((width, height): ($element_ty, $element_ty)) -> Self {
+                Self { width, height }
+            }
+        }
+    };
+    ($(#[$meta:meta])* $name:ident, $element_ty:ty, $zero:expr, $($ops:tt),*) => {
+        $crate::geometry::new_extent! {
+            $(#[$meta])*
+            $name, $element_ty, $zero
+        }
+        $crate::geometry::new_extent_options!($name, $($ops),*);
+    };
+}
 
-            fn add(self, other: $int_ty) -> Self {
-                Self(self.0 + other)
+macro_rules! new_rect {
+    ($(#[$meta:meta])* $name:ident, $element_ty:ty, $point_ty:ty, $extent_ty:ty) => {
+        $(#[$meta:meta])*
+        #[derive(Clone, Copy, Debug, PartialEq)]
+        pub struct $name {
+            pub origin: $point_ty,
+            pub extent: $extent_ty,
+        }
+
+        impl $name {
+            pub const ZERO: Self = Self { origin: <$point_ty>::ORIGIN, extent: <$extent_ty>::ZERO };
+
+            pub fn new(origin: $point_ty, extent: $extent_ty) -> Self {
+                Self { origin, extent }
             }
         }
 
-        impl AddAssign for $name {
-            fn add_assign(&mut self, other: Self) {
-                self.0 += other.0;
-            }
-        }
-
-        impl AddAssign<$int_ty> for $name {
-            fn add_assign(&mut self, other: $int_ty) {
-                self.0 += other;
-            }
-        }
-
-        impl Sub for $name {
-            type Output = Self;
-
-            fn sub(self, other: Self) -> Self {
-                Self(self.0 - other.0)
-            }
-        }
-
-        impl SubAssign for $name {
-            fn sub_assign(&mut self, other: Self) {
-                self.0 -= other.0;
-            }
-        }
-
-        impl SubAssign<$int_ty> for $name {
-            fn sub_assign(&mut self, other: $int_ty) {
-                self.0 -= other;
-            }
-        }
-
-        impl Mul for $name {
-            type Output = Self;
-
-            fn mul(self, other: Self) -> Self {
-                Self(self.0 * other.0)
-            }
-        }
-
-        impl MulAssign for $name {
-            fn mul_assign(&mut self, other: Self) {
-                self.0 *= other.0;
-            }
-        }
-
-        impl MulAssign<$int_ty> for $name {
-            fn mul_assign(&mut self, other: $int_ty) {
-                self.0 *= other;
-            }
-        }
-
-        impl Div for $name {
-            type Output = Self;
-
-            fn div(self, other: Self) -> Self {
-                Self(self.0 / other.0)
-            }
-        }
-
-        impl DivAssign for $name {
-            fn div_assign(&mut self, other: Self) {
-                self.0 /= other.0;
-            }
-        }
-
-        impl DivAssign<$int_ty> for $name {
-            fn div_assign(&mut self, other: $int_ty) {
-                self.0 /= other;
-            }
-        }
-
-        impl From<$int_ty> for $name {
-            fn from(value: $int_ty) -> Self {
-                Self(value)
-            }
-        }
-
-        impl From<$name> for $int_ty {
-            fn from(value: $name) -> Self {
-                value.0
-            }
-        }
-
-        $(
-            impl From<$from_ty> for $name {
-                fn from(value: $from_ty) -> Self {
-                    Self(value as $int_ty)
-                }
-            }
-        )*
-
-        $(
-            impl From<$name> for $into_ty {
-                fn from(value: $name) -> Self {
-                    <$into_ty>::from(value.0)
-                }
-            }
-        )*
-
-        impl PartialEq<$int_ty> for $name {
-            fn eq(&self, other: &$int_ty) -> bool {
-                self.0 == *other
-            }
-        }
-
-        impl PartialEq<$name> for $int_ty {
-            fn eq(&self, other: &$name) -> bool {
-                *self == other.0
-            }
-        }
-
-        impl Num for $name {
-            const ZERO: Self = Self(<$int_ty>::ZERO);
-            const ONE: Self = Self(<$int_ty>::ONE);
-
-            const MIN: Self = Self(<$int_ty>::MIN);
-            const MAX: Self = Self(<$int_ty>::MAX);
-
-            fn min(self, other: Self) -> Self {
-                Self(<$int_ty as Num>::min(self.0, other.0))
-            }
-
-            fn max(self, other: Self) -> Self {
-                Self(<$int_ty as Num>::max(self.0, other.0))
+        impl From<($element_ty, $element_ty, $element_ty, $element_ty)> for $name {
+            fn from((x, y, w, h): ($element_ty, $element_ty, $element_ty, $element_ty)) -> Self {
+                Self { origin: <$point_ty>::new(x, y), extent: <$extent_ty>::new(w, h) }
             }
         }
     };
 }
 
-impl_num!(Pixel(f32): From(), Into());
+pub(crate) use new_extent;
+pub(crate) use new_extent_options;
+pub(crate) use new_point;
+pub(crate) use new_point_options;
+pub(crate) use new_rect;
 
-impl ScaleTo<Texel, Pixel> for Texel {
-    fn scale(&self, factor: Scale<Texel, Pixel>) -> Pixel {
-        Pixel(self.0 as f32 * factor.factor)
-    }
-}
+new_point!(Point(x, y), f32, 0.0);
+new_extent!(Extent, f32, 0.0);
+new_rect!(Rect, f32, Point, Extent);
 
-impl_num!(
-    #[derive(Eq, Hash, Ord)]
-    Texel(i16):
-    From(),
-    Into()
-);
-
-impl From<Texel> for f32 {
-    fn from(value: Texel) -> Self {
-        value.0 as f32
-    }
-}
-
-impl From<Texel> for Pixel {
-    fn from(value: Texel) -> Self {
-        Pixel(value.0 as f32)
-    }
-}
-
-impl From<Wixel> for Texel {
-    fn from(value: Wixel) -> Self {
-        Texel(value.0)
-    }
-}
-
-impl From<Texel> for Extent<f32> {
-    fn from(value: Texel) -> Self {
-        Extent::new(value.0 as f32, value.0 as f32)
-    }
-}
-
-impl TryFrom<Texel> for u64 {
-    type Error = std::num::TryFromIntError;
-
-    fn try_from(value: Texel) -> Result<Self, Self::Error> {
-        value.0.try_into()
-    }
-}
-
-impl_num!(
-    UV(f32):
-    From(),
-    Into()
-);
-
-impl ScaleTo<Texel, UV> for Texel {
-    fn scale(&self, factor: Scale<Texel, UV>) -> UV {
-        UV(self.0 as f32 * factor.factor)
-    }
-}
-
-pub use wixel::Wixel;
-mod wixel {
-    #[allow(clippy::wildcard_imports)]
-    use super::*;
-
-    impl_num!(
-        #[derive(Eq, Hash, Ord)]
-        Wixel(i16):
-        From(),
-        Into(i32, f32)
-    );
-
-    impl Default for Extent<Wixel> {
-        /// Special case for the default extent of a window.
-        ///
-        /// Defaults to [`WINDOW_EXTENT`](crate::limits::WINDOW_EXTENT)'s minimum extent.
-        fn default() -> Self {
-            crate::limits::SYS_WINDOW_EXTENT.min()
-        }
-    }
-
-    impl ScaleTo<Wixel, Pixel> for Wixel {
-        fn scale(&self, factor: Scale<Wixel, Pixel>) -> Pixel {
-            Pixel(self.0 as f32 * factor.factor)
-        }
-    }
-
-    impl TryFrom<Wixel> for u32 {
-        type Error = std::num::TryFromIntError;
-
-        fn try_from(value: Wixel) -> Result<Self, Self::Error> {
-            value.0.try_into()
-        }
-    }
-
-    impl TryFrom<i32> for Wixel {
-        type Error = std::num::TryFromIntError;
-
-        fn try_from(value: i32) -> Result<Self, Self::Error> {
-            Ok(Wixel(i16::try_from(value)?))
-        }
-    }
-
-    impl TryFrom<Extent<i32>> for Extent<Wixel> {
-        type Error = std::num::TryFromIntError;
-
-        fn try_from(value: Extent<i32>) -> Result<Self, Self::Error> {
-            Ok(Extent {
-                width: Wixel(i16::try_from(value.width)?),
-                height: Wixel(i16::try_from(value.height)?),
-            })
-        }
-    }
-}
-
-macro_rules! impl_prim {
-    ($($t:ty),+) => {
-        $(
-            impl Num for $t {
-                const ZERO: Self = 0;
-                const ONE: Self = 1;
-
-                const MIN: Self = Self::MIN;
-                const MAX: Self = Self::MAX;
-
-                fn min(self, other: Self) -> Self {
-                    <$t as std::cmp::Ord>::min(self, other)
-                }
-
-                fn max(self, other: Self) -> Self {
-                    <$t as std::cmp::Ord>::max(self, other)
-                }
-            }
-        )+
-    };
-}
-
-impl_prim!(i8, i16, i32, i64, i128, isize, u8, u16, u32, u64, u128, usize);
-
-impl Num for f32 {
-    const ZERO: Self = 0.0;
-    const ONE: Self = 1.0;
-
-    const MIN: Self = Self::MIN;
-    const MAX: Self = Self::MAX;
-
-    fn min(self, other: Self) -> Self {
-        self.min(other)
-    }
-
-    fn max(self, other: Self) -> Self {
-        self.max(other)
-    }
-}
-
-impl Num for f64 {
-    const ZERO: Self = 0.0;
-    const ONE: Self = 1.0;
-
-    const MIN: Self = Self::MIN;
-    const MAX: Self = Self::MAX;
-
-    fn min(self, other: Self) -> Self {
-        self.min(other)
-    }
-
-    fn max(self, other: Self) -> Self {
-        self.max(other)
+impl Rect {
+    pub fn to_xywh(&self) -> [f32; 4] {
+        [
+            self.origin.x,
+            self.origin.y,
+            self.extent.width,
+            self.extent.height,
+        ]
     }
 }

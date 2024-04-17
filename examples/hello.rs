@@ -1,8 +1,8 @@
 use plinth::{
-    geometry::{Extent, Rect, Texel},
+    geometry::{Extent, Point, Rect},
     graphics::{
-        Canvas, Color, FontOptions, FontWeight, Format, FrameInfo, GraphicsConfig, ImageInfo,
-        Layout, Pt, RasterBuf, RoundRect, TextBox, TextWrapMode,
+        Canvas, Color, FontOptions, FontWeight, Format, FrameInfo, GraphicsConfig, ImageExtent,
+        ImageInfo, Layout, Pt, RasterBuf, RoundRect, TextBox, TextWrapMode,
     },
     hashed_str,
     resource::StaticResource,
@@ -13,7 +13,7 @@ use plinth::{
 #[rustfmt::skip]
 const IMAGE: RasterBuf<'static> = RasterBuf::new(
     ImageInfo {
-        extent: Extent {width: Texel(3), height: Texel(1)},
+        extent: ImageExtent {width: 3, height: 1},
         format: Format::Linear,
         layout: Layout::Rgba8,
     },
@@ -75,8 +75,14 @@ impl EventHandler<AppWindow> for App {
         let image = app.load_image(hashed_str!("image")).unwrap();
 
         canvas.clear(Color::WHITE);
-        canvas.draw_rect(&RoundRect::new((50.0, 100.0, 40.0, 70.0)).with_image(image));
-        canvas.draw_rect(&RoundRect::new((100.0, 100.0, 40.0, 70.0)).with_color(Color::RED));
+        canvas.draw_rect(
+            &RoundRect::new(Rect::new(Point::new(50.0, 100.0), Extent::new(40.0, 70.0)))
+                .with_image(image),
+        );
+        canvas.draw_rect(
+            &RoundRect::new(Rect::new(Point::new(100.0, 100.0), Extent::new(40.0, 70.0)))
+                .with_color(Color::RED),
+        );
 
         canvas.draw_text(
             "Hello, World!",
@@ -88,7 +94,7 @@ impl EventHandler<AppWindow> for App {
             },
             TextBox {
                 wrap: TextWrapMode::Word,
-                rect: Rect::new((50.0, 150.0), (200.0, 50.0)),
+                rect: Rect::new(Point::new(50.0, 150.0), Extent::new(200.0, 50.0)),
                 line_spacing: 0.8,
             },
         );

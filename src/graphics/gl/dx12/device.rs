@@ -43,11 +43,10 @@ use windows::{
 
 use crate::{
     core::static_slot_map::SlotMap,
-    geometry::{Extent, Point, Texel},
     graphics::{
         draw_list::Command,
         gl::{dx12::image_barrier, SubmitId, TextureId},
-        DrawList, Format, GraphicsConfig, Layout, RasterBuf,
+        DrawList, Format, GraphicsConfig, Layout, RasterBuf, TextureExtent, TexturePoint,
     },
 };
 
@@ -183,7 +182,7 @@ impl Device {
 
     pub fn create_texture(
         &self,
-        extent: Extent<Texel>,
+        extent: TextureExtent,
         layout: Layout,
         format: Format,
     ) -> TextureId {
@@ -200,8 +199,8 @@ impl Device {
         let image_desc = D3D12_RESOURCE_DESC {
             Dimension: D3D12_RESOURCE_DIMENSION_TEXTURE2D,
             Alignment: 0,
-            Width: extent.width.0 as u64,
-            Height: extent.height.0 as u32,
+            Width: extent.width as u64,
+            Height: extent.height as u32,
             DepthOrArraySize: 1,
             MipLevels: 1,
             Format: format,
@@ -247,7 +246,7 @@ impl Device {
         &self,
         target: TextureId,
         pixels: &RasterBuf,
-        origin: Point<Texel>,
+        origin: TexturePoint,
     ) {
         let target = self.get_texture(target);
         self.uploader
@@ -627,8 +626,8 @@ impl Frame {
             command_list.RSSetScissorRects(&[RECT {
                 left: 0,
                 top: 0,
-                right: i32::from(target.extent().width.0),
-                bottom: i32::from(target.extent().height.0),
+                right: i32::from(target.extent().width),
+                bottom: i32::from(target.extent().height),
             }]);
 
             command_list.SetDescriptorHeaps(&[Some(textures.handle.clone())]);

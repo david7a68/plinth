@@ -1,11 +1,11 @@
 use std::ops::{Deref, DerefMut};
 
-use crate::{
-    core::static_slot_map::new_key_type,
-    geometry::{Extent, Point, Texel, Wixel},
-};
+use crate::{core::static_slot_map::new_key_type, system::WindowExtent};
 
-use super::{Backend, DrawList, Format, FrameInfo, GraphicsConfig, Layout, RasterBuf};
+use super::{
+    Backend, DrawList, Format, FrameInfo, GraphicsConfig, Layout, RasterBuf,
+    {TextureExtent, TexturePoint},
+};
 
 #[cfg(target_os = "windows")]
 pub mod dx12;
@@ -40,7 +40,7 @@ impl Device {
 
     pub fn create_texture(
         &self,
-        extent: Extent<Texel>,
+        extent: TextureExtent,
         layout: Layout,
         format: Format,
     ) -> TextureId {
@@ -54,7 +54,7 @@ impl Device {
         &self,
         target: TextureId,
         pixels: &RasterBuf,
-        origin: Point<Texel>,
+        origin: TexturePoint,
     ) {
         match self {
             Self::Null => {}
@@ -84,7 +84,7 @@ pub enum Swapchain<'device> {
 }
 
 impl<'device> Swapchain<'device> {
-    pub fn resize(&mut self, extent: Extent<Wixel>) {
+    pub fn resize(&mut self, extent: WindowExtent) {
         match self {
             Self::Null => {}
             Self::Dx12(context) => context.resize(extent),
@@ -147,9 +147,9 @@ pub enum RenderTarget {
 
 impl RenderTarget {
     #[must_use]
-    pub fn extent(&self) -> Extent<Texel> {
+    pub fn extent(&self) -> TextureExtent {
         match self {
-            Self::Null => Extent::new(0, 0),
+            Self::Null => TextureExtent::ZERO,
             Self::Dx12(target) => target.extent(),
         }
     }

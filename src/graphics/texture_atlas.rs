@@ -2,28 +2,31 @@ use arrayvec::ArrayVec;
 
 use crate::{
     core::static_slot_map::{new_key_type, SlotMap},
-    geometry::{Extent, Point, Rect, Scale, Texel, UV},
     graphics::{Format, Layout},
-    limits::GFX_IMAGE_COUNT,
+    limits::GFX_ATLAS_COUNT_MAX,
 };
 
-use super::gl::TextureId;
+use super::{
+    gl::TextureId,
+    limits::GFX_IMAGE_COUNT_MAX,
+    {ImageExtent, TextureExtent, TexturePoint, TextureRect, UvRect},
+};
 
 new_key_type!(CachedTextureId);
 
-const ATLAS_EXTENT: Texel = Texel(1024);
+const ATLAS_TEXTURE_DIM: u16 = 1024;
 
 pub struct TextureCache {
-    textures: ArrayVec<AtlasMap, 16>,
-    cache: Box<SlotMap<{ GFX_IMAGE_COUNT.get() }, CachedTexture, CachedTextureId>>,
+    textures: ArrayVec<AtlasMap, GFX_ATLAS_COUNT_MAX>,
+    cache: Box<SlotMap<GFX_IMAGE_COUNT_MAX, CachedTexture, CachedTextureId>>,
 }
 
 impl TextureCache {
     pub fn new(
-        extent: Extent<Texel>,
+        extent: ImageExtent,
         layout: Layout,
         format: Format,
-        alloc_new: impl FnMut(Extent<Texel>, Layout, Format) -> TextureId,
+        alloc_new: impl FnMut(TextureExtent, Layout, Format) -> TextureId,
     ) -> Self {
         let mut this = Self {
             textures: ArrayVec::new(),
@@ -42,13 +45,17 @@ impl TextureCache {
 
     pub fn insert_rect(
         &mut self,
-        extent: Extent<Texel>,
+        extent: ImageExtent,
         layout: Layout,
         format: Format,
-        mut alloc_new: impl FnMut(Extent<Texel>, Layout, Format) -> TextureId,
+        mut alloc_new: impl FnMut(TextureExtent, Layout, Format) -> TextureId,
     ) -> (TextureId, CachedTextureId) {
         // todo: actually calculate the required extent
-        let texture = alloc_new(Extent::new(ATLAS_EXTENT, ATLAS_EXTENT), layout, format);
+        let texture = alloc_new(
+            TextureExtent::new(ATLAS_TEXTURE_DIM, ATLAS_TEXTURE_DIM),
+            layout,
+            format,
+        );
 
         self.textures.push(AtlasMap {
             texture,
@@ -59,7 +66,7 @@ impl TextureCache {
             .cache
             .insert(CachedTexture {
                 texture,
-                rect: Rect::new(Point::new(0, 0), extent),
+                rect: TextureRect::new(TexturePoint::ORIGIN, extent.into()),
             })
             .unwrap();
 
@@ -70,22 +77,27 @@ impl TextureCache {
         todo!()
     }
 
-    pub fn get_rect(&self, image: CachedTextureId) -> (TextureId, Rect<Texel>) {
+    pub fn get_rect(&self, image: CachedTextureId) -> (TextureId, TextureRect) {
         let cached = self.cache.get(image).unwrap();
         (cached.texture, cached.rect)
     }
 
-    pub fn get_uv_rect(&self, image: CachedTextureId) -> (TextureId, Rect<UV>) {
+    pub fn get_uv_rect(&self, image: CachedTextureId) -> (TextureId, UvRect) {
         let cached = self.cache.get(image).unwrap();
-        let scale = Scale::new(1.0 / f32::from(ATLAS_EXTENT.0));
-        (cached.texture, cached.rect.scale_to(scale))
+
+        (
+            cached.texture,
+            cached
+                .rect
+                .uv_in(TextureExtent::new(ATLAS_TEXTURE_DIM, ATLAS_TEXTURE_DIM)),
+        )
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct CachedTexture {
     pub texture: TextureId,
-    pub rect: Rect<Texel>,
+    pub rect: TextureRect,
 }
 
 struct AtlasMap {

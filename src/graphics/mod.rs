@@ -11,14 +11,17 @@ use windows::Win32::Foundation::HWND;
 
 use crate::{
     core::arena::Arena,
-    geometry::{Extent, Pixel, Point, Rect, Scale, Texel},
+    geometry::{new_extent, new_point, new_rect, Extent, Point, Rect},
     graphics::image::PackedKey,
-    system::PowerPreference,
+    system::{DpiScale, PowerPreference, WindowExtent},
     time::{FramesPerSecond, PresentPeriod, PresentTime},
 };
 
 use self::{
     gl::Device,
+    limits::{
+        GFX_ATLAS_EXTENT_MAX, GFX_ATLAS_EXTENT_MIN, GFX_IMAGE_EXTENT_MAX, GFX_IMAGE_EXTENT_MIN,
+    },
     text::TextEngine,
     texture_atlas::{CachedTextureId, TextureCache},
 };
@@ -36,6 +39,80 @@ pub use self::{
         Weight as FontWeight,
     },
 };
+
+new_point!(UvPoint(u, v), f32, 0.0, { limit: 0.0, 1.0, "UV point out of limits" });
+new_extent!(UvExtent, f32, 0.0, { limit: 0.0, 1.0, "UV extent out of limits" });
+new_rect!(UvRect, f32, UvPoint, UvExtent);
+
+impl UvRect {
+    pub fn to_uvwh(&self) -> [f32; 4] {
+        [
+            self.origin.u,
+            self.origin.v,
+            self.extent.width,
+            self.extent.height,
+        ]
+    }
+}
+
+new_point!(ImagePoint(x, y), u16, 0, { limit: GFX_IMAGE_EXTENT_MIN, GFX_IMAGE_EXTENT_MAX, "Image point out of limits" }, Eq);
+new_extent!(
+    #[derive(Hash)]
+    ImageExtent, u16, 0, { limit: GFX_IMAGE_EXTENT_MIN, GFX_IMAGE_EXTENT_MAX, "Image extent out of limits" }, Eq);
+
+impl ImageExtent {
+    pub const fn limit_assert(extent: Self) {
+        assert!(extent.width >= GFX_IMAGE_EXTENT_MIN);
+        assert!(extent.height >= GFX_IMAGE_EXTENT_MIN);
+        assert!(extent.width <= GFX_IMAGE_EXTENT_MAX);
+        assert!(extent.height <= GFX_IMAGE_EXTENT_MAX);
+    }
+}
+
+impl From<ImageExtent> for TextureExtent {
+    fn from(extent: ImageExtent) -> Self {
+        Self {
+            width: extent.width,
+            height: extent.height,
+        }
+    }
+}
+
+impl From<WindowExtent> for TextureExtent {
+    fn from(extent: WindowExtent) -> Self {
+        Self {
+            width: extent.width as u16,
+            height: extent.height as u16,
+        }
+    }
+}
+
+new_rect!(ImageRect, u16, ImagePoint, ImageExtent);
+
+new_point!(TexturePoint(x, y), u16, 0, { limit: GFX_ATLAS_EXTENT_MIN, GFX_ATLAS_EXTENT_MAX, "Texture point out of limits" }, Eq);
+new_extent!(TextureExtent, u16, 0, { limit: GFX_ATLAS_EXTENT_MIN, GFX_ATLAS_EXTENT_MAX, "Texture extent out of limits" }, Eq);
+new_rect!(TextureRect, u16, TexturePoint, TextureExtent);
+
+impl TextureRect {
+    pub fn uv_in(&self, texture: TextureExtent) -> UvRect {
+        debug_assert!(self.extent.width <= texture.width);
+        debug_assert!(self.extent.height <= texture.height);
+
+        let scale_x = 1.0 / f32::from(texture.width);
+        let scale_y = 1.0 / f32::from(texture.height);
+
+        UvRect {
+            origin: UvPoint {
+                u: f32::from(self.origin.x) * scale_x,
+                v: f32::from(self.origin.y) * scale_y,
+            },
+            extent: UvExtent {
+                width: f32::from(self.extent.width) * scale_x,
+                height: f32::from(self.extent.height) * scale_y,
+            },
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub enum Backend {
@@ -91,7 +168,7 @@ impl Graphics {
         let device = Device::new(config);
 
         let textures = TextureCache::new(
-            Extent::new(1, 1),
+            ImageExtent::new(1, 1),
             Layout::Rgba8,
             Format::Linear,
             |extent, layout, format| device.create_texture(extent, layout, format),
@@ -103,13 +180,13 @@ impl Graphics {
             white_pixel,
             &RasterBuf::new(
                 ImageInfo {
-                    extent: Extent::new(1, 1),
+                    extent: ImageExtent::new(1, 1),
                     layout: Layout::Rgba8,
                     format: Format::Linear,
                 },
                 &[0xFF, 0xFF, 0xFF, 0xFF],
             ),
-            Point::new(0, 0),
+            TexturePoint::new(0, 0),
         );
 
         device.flush_upload_buffer();
@@ -184,9 +261,14 @@ impl Graphics {
         arena: &'a mut Arena,
         target: &'a RenderTarget,
         draw_list: &'a mut DrawList,
-        scale: Scale<Texel, Pixel>,
+        scale: DpiScale,
     ) -> Canvas<'a> {
-        let rect = Rect::new(Point::ZERO, target.extent().scale_to(scale));
+        debug_assert!(scale.factor > 0.0, "Invalid scale factor");
+        let width = (target.extent().width as f32 / scale.factor).ceil();
+        let height = (target.extent().height as f32 / scale.factor).ceil();
+
+        let rect = Rect::new(Point::ORIGIN, Extent::new(width, height));
+
         Canvas::new(
             &self.textures,
             &self.text_engine,

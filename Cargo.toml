@@ -14,10 +14,11 @@ const-fnv1a-hash = "1.1"
 parking_lot = { version = "0.12", features = ["hardware-lock-elision"] }
 smallvec = { version = "1.13.2", features = ["const_generics", "const_new"] }
 thiserror = "1"
+windows-core = "0.56.0"
 windows-version = "0.1.0"
 
 [dependencies.windows]
-version = "0.53"
+version = "0.56"
 features = [
     "implement",
     "Win32_Foundation",

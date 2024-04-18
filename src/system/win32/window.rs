@@ -124,7 +124,9 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
 
         unsafe { SetLastError(WIN32_ERROR(0)) };
         unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, create_struct.wndproc_state as _) };
-        unsafe { GetLastError() }.expect("SetWindowLongPtrW(GWLP_USERDATA) failed.");
+        unsafe { GetLastError() }
+            .ok()
+            .expect("SetWindowLongPtrW(GWLP_USERDATA) failed.");
 
         self.state.borrow_mut().write({
             let dpi = unsafe { GetDpiForWindow(hwnd) };
@@ -200,7 +202,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
     }
 
     pub fn show_defer(&mut self, show: SHOW_WINDOW_CMD) {
-        unsafe { ShowWindow(self.hwnd.get(), show) };
+        let _ = unsafe { ShowWindow(self.hwnd.get(), show) };
     }
 
     pub fn show(&mut self, is_visible: bool) {
@@ -349,7 +351,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
         let is_invalid = unsafe { BeginPaint(self.hwnd.get(), &mut ps) }.is_invalid();
         assert!(!is_invalid, "BeginPaint failed.");
 
-        unsafe { EndPaint(self.hwnd.get(), &ps) };
+        let _ = unsafe { EndPaint(self.hwnd.get(), &ps) };
 
         let reason = self
             .with_state(|window| window.paint_reason.take())

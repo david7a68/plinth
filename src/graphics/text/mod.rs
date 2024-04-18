@@ -57,8 +57,8 @@ impl Pt {
 
 pub struct TextEngine {
     factory: IDWriteFactory,
-    default_format: TextFormat,
-    cached_formats: RefCell<LruCache<CACHE_SIZE, TextFormat>>,
+    default_format: IDWriteTextFormat,
+    cached_formats: RefCell<LruCache<CACHE_SIZE, IDWriteTextFormat>>,
 }
 
 impl TextEngine {
@@ -98,7 +98,7 @@ impl TextEngine {
         let inner = unsafe {
             self.factory.CreateTextLayout(
                 &chars,
-                &style.inner,
+                style,
                 block.rect.extent.width,
                 block.rect.extent.height,
             )
@@ -159,11 +159,6 @@ impl Default for FontOptions<'static> {
     }
 }
 
-#[derive(Clone)]
-struct TextFormat {
-    inner: IDWriteTextFormat,
-}
-
 pub struct TextLayout {
     inner: IDWriteTextLayout,
 }
@@ -184,7 +179,7 @@ fn create_format(
     factory: &IDWriteFactory,
     font: FontOptions,
     dpi: DpiScale,
-) -> Result<TextFormat, Error> {
+) -> Result<IDWriteTextFormat, Error> {
     let weight = match font.weight {
         Weight::Light => DWRITE_FONT_WEIGHT_LIGHT,
         Weight::Normal => DWRITE_FONT_WEIGHT_NORMAL,
@@ -232,12 +227,12 @@ fn create_format(
         Error::InvalidFormat
     })?;
 
-    Ok(TextFormat { inner: text_format })
+    Ok(text_format)
 }
 
 #[implement(IDWriteTextRenderer)]
 struct TextRenderer {
-    dpi: f32,
+    dpi: DpiScale,
 }
 
 impl IDWritePixelSnapping_Impl for TextRenderer {
@@ -266,7 +261,7 @@ impl IDWritePixelSnapping_Impl for TextRenderer {
     }
 
     fn GetPixelsPerDip(&self, clientdrawingcontext: *const c_void) -> Result<f32, WindowsError> {
-        todo!()
+        Ok(self.dpi.factor)
     }
 }
 
@@ -303,7 +298,7 @@ impl IDWriteTextRenderer_Impl for TextRenderer {
         strikethrough: *const DWRITE_STRIKETHROUGH,
         clientdrawingeffect: Option<&IUnknown>,
     ) -> Result<(), WindowsError> {
-        todo!()
+        Ok(())
     }
 
     fn DrawInlineObject(
@@ -316,6 +311,6 @@ impl IDWriteTextRenderer_Impl for TextRenderer {
         isrighttoleft: BOOL,
         clientdrawingeffect: Option<&IUnknown>,
     ) -> Result<(), WindowsError> {
-        todo!()
+        Ok(())
     }
 }

@@ -137,7 +137,7 @@ impl<WindowData> ActiveEventLoop<WindowData> {
         // This must happen after checking the returned error since falling
         // within the callback will also fail window creation.
         if hwnd == HWND::default() {
-            let err = unsafe { GetLastError() }.unwrap_err();
+            let err = unsafe { GetLastError() }.ok().unwrap_err();
             Err(WindowError::CreateFailed(err))?;
         }
 
@@ -183,18 +183,18 @@ impl EventLoop {
         loop {
             // To clear timers. If the event loop is busy, it may never get to
             // these, since they are auto-generated when the queue is empty.
-            unsafe { PeekMessageW(&mut msg, None, WM_TIMER, WM_TIMER, PM_NOREMOVE) };
+            let _ = unsafe { PeekMessageW(&mut msg, None, WM_TIMER, WM_TIMER, PM_NOREMOVE) };
 
             match unsafe { GetMessageW(&mut msg, None, 0, 0) }.0 {
                 -1 => {
                     panic!(
                         "Failed to get message, error code: {}",
-                        unsafe { GetLastError() }.unwrap_err().message()
+                        unsafe { GetLastError() }.ok().unwrap_err().message()
                     );
                 }
                 0 => break,
                 1 => unsafe {
-                    TranslateMessage(&msg);
+                    let _ = TranslateMessage(&msg);
                     DispatchMessageW(&msg);
                 },
                 _ => unreachable!(),
@@ -392,7 +392,7 @@ pub(crate) fn register_wndclass(
     };
 
     if atom == 0 {
-        unsafe { GetLastError() }?;
+        unsafe { GetLastError() }.ok()?;
     }
 
     Ok(PCWSTR(atom as usize as *const _))

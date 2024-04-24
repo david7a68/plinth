@@ -62,8 +62,10 @@ static const int2 positions[4] = {
 {
     VS_OUT output;
 
-    float2 xy = rects[instance].xywh.xy + rects[instance].xywh.zw * positions[vertex];
-    float2 uv = rects[instance].uvwh.xy + rects[instance].uvwh.zw * positions[vertex];
+    Rect rect = rects[NonUniformResourceIndex(instance)];
+
+    float2 xy = rect.xywh.xy + rect.xywh.zw * positions[vertex];
+    float2 uv = rect.uvwh.xy + rect.uvwh.zw * positions[vertex];
 
     output.xy = point_to_clip_space(xy);
     output.uv = uv;
@@ -79,11 +81,11 @@ float4 ps_main(VS_OUT input) : SV_TARGET
     if (rect.flags & 1)
     {
         // linear filtering
-        return rect.color * textures[rect.texture_id].Sample(linear_sampler, input.uv);
+        return rect.color * textures[NonUniformResourceIndex(rect.texture_id)].Sample(linear_sampler, input.uv);
     }
     else
     {
         // point filtering
-        return rect.color * textures[rect.texture_id].Sample(point_sampler, input.uv);
+        return rect.color * textures[NonUniformResourceIndex(rect.texture_id)].Sample(point_sampler, input.uv);
     }
 }

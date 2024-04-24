@@ -38,7 +38,7 @@ impl EventHandler<AppWindow> for App {
         .unwrap();
     }
 
-    fn stop(&mut self) {
+    fn stop(&mut self, _app: &mut AppContext<AppWindow>) {
         // no-op
     }
 

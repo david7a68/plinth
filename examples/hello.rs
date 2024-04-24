@@ -49,7 +49,7 @@ impl EventHandler<AppWindow> for App {
             .unwrap();
     }
 
-    fn stop(&mut self) {
+    fn stop(&mut self, _app: &mut AppContext<AppWindow>) {
         // no-op
     }
 
@@ -94,7 +94,7 @@ impl EventHandler<AppWindow> for App {
             },
             TextBox {
                 wrap: TextWrapMode::Word,
-                rect: Rect::new(Point::new(50.0, 150.0), Extent::new(200.0, 50.0)),
+                rect: Rect::new(Point::new(50.0, 150.0), Extent::new(1000.0, 100.0)),
                 line_spacing: 0.8,
             },
         );

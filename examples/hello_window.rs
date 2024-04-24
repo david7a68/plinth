@@ -44,7 +44,7 @@ impl EventHandler<()> for App {
         println!("Event loop resumed");
     }
 
-    fn stop(&mut self) {
+    fn stop(&mut self, app: &mut AppContext<()>) {
         println!("Event loop stopped");
     }
 

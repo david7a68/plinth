@@ -8,6 +8,9 @@ use crate::{core::limit::Limit, time::FramesPerSecond};
 
 #[derive(Debug, thiserror::Error)]
 pub enum WindowError {
+    #[error("Windows cannot be created when the event loop is quitting.")]
+    ExitingEventLoop,
+
     #[error("The maximum number of windows is open. Destroy one before creating another.")]
     TooManyWindows,
 
@@ -248,5 +251,11 @@ impl<'a, Data> Window<'a, Data> {
 impl<'a, Meta, User> Window<'a, (Meta, User)> {
     pub(crate) fn split(self) -> (&'a mut Meta, Window<'a, User>) {
         self.window.split()
+    }
+}
+
+impl<'a, Data> Window<'a, Option<Data>> {
+    pub fn extract_option(self) -> Option<Window<'a, Data>> {
+        self.window.extract_option().map(|window| Window { window })
     }
 }

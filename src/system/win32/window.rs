@@ -25,10 +25,10 @@ use crate::{
     core::limit::Limit,
     limits,
     system::{
-        event_loop::EventHandler,
+        event_loop::{Event, Handler, WindowEvent},
         input::{ButtonState, ModifierKeys, MouseButton, ScrollAxis},
         window::{PaintReason, RefreshRateRequest},
-        {DpiScale, WindowExtent, WindowPoint},
+        DpiScale, WindowExtent, WindowPoint,
     },
     time::FramesPerSecond,
 };
@@ -105,7 +105,7 @@ pub(crate) struct WindowState {
     pub paint_reason: Option<PaintReason>,
 }
 
-pub(crate) struct HandlerContext<'a, WindowData, H: EventHandler<WindowData>> {
+pub(crate) struct HandlerContext<'a, WindowData, H: Handler<WindowData>> {
     pub hwnd: &'a Cell<HWND>,
     pub data: &'a RefCell<MaybeUninit<WindowData>>,
     pub state: &'a RefCell<MaybeUninit<WindowState>>,
@@ -113,7 +113,7 @@ pub(crate) struct HandlerContext<'a, WindowData, H: EventHandler<WindowData>> {
     pub event_loop: api::ActiveEventLoop<WindowData>,
 }
 
-impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData, H> {
+impl<'a, WindowData, H: Handler<WindowData>> HandlerContext<'a, WindowData, H> {
     pub fn init(&mut self, hwnd: HWND, create_struct: &mut CreateStruct<WindowData>) {
         WindowTitle::new(create_struct.title.as_ref().unwrap()).clamp();
 
@@ -176,11 +176,11 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
     }
 
     pub fn wake(&mut self) {
-        self.event(EventHandler::wake_requested);
+        self.event(WindowEvent::Wake);
     }
 
     pub fn close(&mut self) {
-        self.event(EventHandler::close_requested);
+        self.event(WindowEvent::CloseRequest);
     }
 
     pub fn destroy_defer(&mut self) {
@@ -188,17 +188,9 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
     }
 
     pub fn destroy(&mut self) {
+        self.event(WindowEvent::Destroy);
         unsafe { SetWindowLongPtrW(self.hwnd.get(), GWLP_USERDATA, 0) };
-
         self.hwnd.set(HWND::default());
-
-        // SAFETY: Clearing the hwnd marks the data as uninitialized. It will
-        // not be read until it is reinitialized for a new window.
-        let window_data = unsafe { self.data.borrow_mut().assume_init_read() };
-
-        self.event_handler
-            .borrow_mut()
-            .destroyed(&self.event_loop, window_data);
     }
 
     pub fn show_defer(&mut self, show: SHOW_WINDOW_CMD) {
@@ -209,9 +201,9 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
         self.with_state(|window| window.flags.set(WindowFlags::IS_VISIBLE, is_visible));
 
         if is_visible {
-            self.event(EventHandler::shown);
+            self.event(WindowEvent::Shown);
         } else {
-            self.event(EventHandler::hidden);
+            self.event(WindowEvent::Hidden);
         }
     }
 
@@ -234,7 +226,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
         });
 
         if resize_ended {
-            self.event(EventHandler::drag_resize_ended);
+            self.event(WindowEvent::DragResize(false));
         }
     }
 
@@ -262,9 +254,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
 
         let scale = DpiScale::new(f32::from(dpi) / f32::from(DEFAULT_DPI));
 
-        self.event(|handler, event_loop, window| {
-            handler.dpi_changed(event_loop, window, scale, size);
-        });
+        self.event(WindowEvent::DpiChange(scale, size));
     }
 
     pub fn get_min_max_info(&mut self, mmi: &mut MINMAXINFO) {
@@ -318,16 +308,14 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
 
         if let Some((start, size)) = resized {
             if start {
-                self.event(|handler, event_loop, window| {
-                    handler.drag_resize_started(event_loop, window);
-                });
+                self.event(WindowEvent::DragResize(true));
             }
 
-            self.event(|handler, event_loop, window| handler.resized(event_loop, window, size));
+            self.event(WindowEvent::Resize(size));
         }
 
         if let Some(pos) = moved {
-            self.event(|handler, event_loop, window| handler.moved(event_loop, window, pos));
+            self.event(WindowEvent::Move(pos));
         }
     }
 
@@ -357,7 +345,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
             .with_state(|window| window.paint_reason.take())
             .unwrap_or(PaintReason::Commanded); // assume no reason means it's from the OS
 
-        self.event(|handler, event_loop, window| handler.needs_repaint(event_loop, window, reason));
+        self.event(WindowEvent::Repaint(reason));
     }
 
     pub fn mouse_move(&mut self, position: WindowPoint) {
@@ -368,9 +356,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
         });
 
         if entered {
-            self.event(|handler, event_loop, window| {
-                handler.pointer_entered(event_loop, window, position);
-            });
+            self.event(WindowEvent::PointerEntered(position));
 
             unsafe {
                 TrackMouseEvent(&mut TRACKMOUSEEVENT {
@@ -383,20 +369,16 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
             .unwrap();
         }
 
-        self.event(|handler, event_loop, window| {
-            handler.pointer_moved(event_loop, window, position);
-        });
+        self.event(WindowEvent::PointerMoved(position));
     }
 
     pub fn mouse_leave(&mut self) {
         self.with_state(|window| window.flags.set(WindowFlags::HAS_POINTER, false));
-        self.event(EventHandler::pointer_left);
+        self.event(WindowEvent::PointerLeft);
     }
 
     pub fn mouse_wheel(&mut self, axis: ScrollAxis, delta: f32, mods: ModifierKeys) {
-        self.event(|handler, event_loop, window| {
-            handler.mouse_scrolled(event_loop, window, delta, axis, mods);
-        });
+        self.event(WindowEvent::MouseScrolled(delta, axis, mods));
     }
 
     pub fn mouse_button(
@@ -406,9 +388,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
         position: WindowPoint,
         mods: ModifierKeys,
     ) {
-        self.event(|handler, event_loop, window| {
-            handler.mouse_button(event_loop, window, button, state, position, mods);
-        });
+        self.event(WindowEvent::MouseButton(button, state, position, mods));
     }
 
     #[inline]
@@ -420,11 +400,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
         f(state)
     }
 
-    #[inline]
-    pub fn event(
-        &mut self,
-        f: impl FnOnce(&mut H, &api::ActiveEventLoop<WindowData>, api::Window<WindowData>),
-    ) {
+    pub fn event(&mut self, event: WindowEvent) {
         assert_ne!(self.hwnd.get(), HWND::default(), "Window not initialized.");
 
         let (state, mut data) = (self.state.borrow(), self.data.borrow_mut());
@@ -438,7 +414,7 @@ impl<'a, WindowData, H: EventHandler<WindowData>> HandlerContext<'a, WindowData,
             },
         };
 
-        f(&mut *handler, &self.event_loop, window);
+        (*handler).handle(&self.event_loop, Event::Window(window, event));
     }
 }
 
@@ -574,6 +550,20 @@ impl<'a, Meta, User> Window<'a, (Meta, User)> {
                 },
             },
         )
+    }
+}
+
+impl<'a, Data> Window<'a, Option<Data>> {
+    pub fn extract_option(self) -> Option<Window<'a, Data>> {
+        match self.data {
+            Some(data) => Some(Window {
+                hwnd: self.hwnd,
+                state: self.state,
+                data,
+                _phantom: PhantomData,
+            }),
+            None => None,
+        }
     }
 }
 

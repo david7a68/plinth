@@ -7,10 +7,11 @@ use crate::{
     limits::{ResourcePath, GFX_IMAGE_COUNT_MAX},
     resource::{Error as ResourceError, Resource, StaticResource},
     system::{
-        event_loop::{ActiveEventLoop, EventHandler as SysEventHandler, EventLoop, EventLoopError},
-        ButtonState, DpiScale, KeyCode, ModifierKeys, MonitorState, MouseButton, PaintReason,
-        PowerPreference, PowerSource, ScrollAxis, Window, WindowAttributes, WindowError,
-        WindowExtent, WindowPoint,
+        event_loop::{
+            ActiveEventLoop, AppEvent, Event, EventLoop, EventLoopError, Handler, WindowEvent,
+        },
+        ButtonState, DpiScale, KeyCode, ModifierKeys, MonitorState, MouseButton, PowerPreference,
+        PowerSource, ScrollAxis, Window, WindowAttributes, WindowError, WindowExtent, WindowPoint,
     },
 };
 
@@ -117,19 +118,19 @@ impl Application {
 pub struct AppContext<'a, UserWindowData> {
     graphics: &'a Graphics,
     resources: &'a mut HashMap<u64, Resource, PassthroughBuildHasher>,
-    event_loop: &'a ActiveEventLoop<(WindowState<'a>, UserWindowData)>,
+    event_loop: Option<&'a ActiveEventLoop<(WindowState<'a>, Option<UserWindowData>)>>,
 }
 
 impl<'a, UserWindowData> AppContext<'a, UserWindowData> {
     fn new(
         graphics: &'a Graphics,
         resources: &'a mut HashMap<u64, Resource, PassthroughBuildHasher>,
-        event_loop: &'a ActiveEventLoop<(WindowState, UserWindowData)>,
+        event_loop: &'a ActiveEventLoop<(WindowState, Option<UserWindowData>)>,
     ) -> Self {
         Self {
             graphics,
             resources,
-            event_loop,
+            event_loop: Some(event_loop),
         }
     }
 
@@ -197,20 +198,22 @@ impl<'a, UserWindowData> AppContext<'a, UserWindowData> {
         attributes: WindowAttributes,
         constructor: impl FnOnce(Window<()>) -> UserWindowData,
     ) -> Result<(), WindowError> {
-        self.event_loop.create_window(attributes, |window| {
-            let swapchain = self.graphics.create_swapchain(window.hwnd());
-            let user_data = constructor(window);
+        self.event_loop
+            .ok_or(WindowError::ExitingEventLoop)?
+            .create_window(attributes, |window| {
+                let swapchain = self.graphics.create_swapchain(window.hwnd());
+                let user_data = constructor(window);
 
-            (
-                WindowState {
-                    swapchain,
-                    draw_list: DrawList::new(),
-                    dpi_scale: DpiScale::IDENTITY,
-                    to_resize: WindowExtent::ZERO,
-                },
-                user_data,
-            )
-        })
+                (
+                    WindowState {
+                        swapchain,
+                        draw_list: DrawList::new(),
+                        dpi_scale: DpiScale::IDENTITY,
+                        to_resize: WindowExtent::ZERO,
+                    },
+                    Some(user_data),
+                )
+            })
     }
 }
 
@@ -222,7 +225,7 @@ pub trait EventHandler<WindowData> {
 
     fn resume(&mut self, app: &mut AppContext<WindowData>) {}
 
-    fn stop(&mut self);
+    fn stop(&mut self, app: &mut AppContext<WindowData>);
 
     fn low_memory(&mut self, app: &mut AppContext<WindowData>) {}
 
@@ -388,328 +391,174 @@ struct ApplicationEventHandler<'a, UserData, Client: EventHandler<UserData>> {
     phantom: PhantomData<UserData>,
 }
 
-impl<UserData, Outer: EventHandler<UserData>> SysEventHandler<(WindowState<'_>, UserData)>
-    for ApplicationEventHandler<'_, UserData, Outer>
+impl<'a, UserData, Client: EventHandler<UserData>> Handler<(WindowState<'a>, Option<UserData>)>
+    for ApplicationEventHandler<'a, UserData, Client>
 {
-    fn start(&mut self, event_loop: &ActiveEventLoop<(WindowState, UserData)>) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        self.client.start(&mut cx);
-    }
-
-    fn suspend(&mut self, event_loop: &ActiveEventLoop<(WindowState, UserData)>) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        self.client.suspend(&mut cx);
-    }
-
-    fn resume(&mut self, event_loop: &ActiveEventLoop<(WindowState, UserData)>) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        self.client.resume(&mut cx);
-    }
-
-    fn stop(&mut self) {
-        self.client.stop();
-    }
-
-    fn low_memory(&mut self, event_loop: &ActiveEventLoop<(WindowState, UserData)>) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        self.client.low_memory(&mut cx);
-    }
-
-    fn power_source_changed(
+    fn handle(
         &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        power_source: PowerSource,
+        event_loop: &ActiveEventLoop<(WindowState, Option<UserData>)>,
+        event: Event<(WindowState, Option<UserData>)>,
     ) {
         let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        self.client.power_source_changed(&mut cx, power_source);
-    }
 
-    fn monitor_state_changed(
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        monitor: MonitorState,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        self.client.monitor_state_changed(&mut cx, monitor);
-    }
+        match event {
+            Event::App(event) => match event {
+                AppEvent::Start => self.client.start(&mut cx),
+                AppEvent::Suspend => self.client.suspend(&mut cx),
+                AppEvent::Resume => self.client.resume(&mut cx),
+                AppEvent::Stop => self.client.stop(&mut cx),
+                AppEvent::LowMemory => self.client.low_memory(&mut cx),
+                AppEvent::PowerSource(source) => self.client.power_source_changed(&mut cx, source),
+                AppEvent::MonitorState(monitor) => {
+                    self.client.monitor_state_changed(&mut cx, monitor)
+                }
+                AppEvent::PowerPreference(preference) => {
+                    self.client.power_preference_changed(&mut cx, preference)
+                }
+            },
+            Event::Window(window, event) => {
+                let (mut meta, mut win) = window.split();
 
-    fn power_preference_changed(
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        power_preference: PowerPreference,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        self.client
-            .power_preference_changed(&mut cx, power_preference);
-    }
+                match event {
+                    WindowEvent::Activate => self
+                        .client
+                        .activated(&mut cx, &mut win.extract_option().unwrap()),
+                    WindowEvent::Deactivate => self
+                        .client
+                        .deactivated(&mut cx, &mut win.extract_option().unwrap()),
+                    WindowEvent::DragResize(start) => {
+                        if start {
+                            self.client
+                                .drag_resize_started(&mut cx, &mut win.extract_option().unwrap())
+                        } else {
+                            self.client
+                                .drag_resize_ended(&mut cx, &mut win.extract_option().unwrap())
+                        }
+                    }
+                    WindowEvent::Resize(size) => {
+                        meta.to_resize = size;
+                        self.client
+                            .resized(&mut cx, &mut win.extract_option().unwrap(), size)
+                    }
+                    WindowEvent::DpiChange(dpi, size) => {
+                        meta.dpi_scale = dpi;
+                        meta.to_resize = size;
+                        self.client.dpi_changed(
+                            &mut cx,
+                            &mut win.extract_option().unwrap(),
+                            dpi,
+                            size,
+                        )
+                    }
+                    WindowEvent::CloseRequest => self
+                        .client
+                        .close_requested(&mut cx, &mut win.extract_option().unwrap()),
+                    WindowEvent::Shown => self
+                        .client
+                        .shown(&mut cx, &mut win.extract_option().unwrap()),
+                    WindowEvent::Hidden => self
+                        .client
+                        .hidden(&mut cx, &mut win.extract_option().unwrap()),
+                    WindowEvent::Maximized => self
+                        .client
+                        .maximized(&mut cx, &mut win.extract_option().unwrap()),
+                    WindowEvent::Minimized => self
+                        .client
+                        .minimized(&mut cx, &mut win.extract_option().unwrap()),
+                    WindowEvent::Restored => self
+                        .client
+                        .restored(&mut cx, &mut win.extract_option().unwrap()),
+                    WindowEvent::Move(new_pos) => {
+                        self.client
+                            .moved(&mut cx, &mut win.extract_option().unwrap(), new_pos)
+                    }
+                    WindowEvent::Wake => self
+                        .client
+                        .wake_requested(&mut cx, &mut win.extract_option().unwrap()),
+                    WindowEvent::Repaint(_) => {
+                        if meta.to_resize != WindowExtent::ZERO {
+                            meta.swapchain.resize(std::mem::take(&mut meta.to_resize));
+                            meta.to_resize = WindowExtent::ZERO;
+                        }
 
-    fn activated(
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        window: Window<(WindowState, UserData)>,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        let (_, mut wn) = window.split();
-        self.client.activated(&mut cx, &mut wn);
-    }
+                        let mut image = meta.swapchain.next_image();
 
-    fn deactivated(
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        window: Window<(WindowState, UserData)>,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        let (_, mut wn) = window.split();
-        self.client.deactivated(&mut cx, &mut wn);
-    }
+                        meta.draw_list.clear();
 
-    fn drag_resize_started(
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        window: Window<(WindowState, UserData)>,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        let (_, mut wn) = window.split();
-        self.client.drag_resize_started(&mut cx, &mut wn);
-    }
+                        // hacky
+                        let scale = DpiScale::new(meta.dpi_scale.factor);
 
-    fn drag_resize_ended(
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        window: Window<(WindowState, UserData)>,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        let (_, mut wn) = window.split();
-        self.client.drag_resize_ended(&mut cx, &mut wn);
-    }
+                        self.frame_arena.reset();
 
-    fn resized(
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        window: Window<(WindowState, UserData)>,
-        size: WindowExtent,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        let (meta, mut wn) = window.split();
+                        let mut canvas = self.graphics.create_canvas(
+                            self.frame_arena,
+                            &image,
+                            &mut meta.draw_list,
+                            scale,
+                        );
 
-        meta.to_resize = size;
-        self.client.resized(&mut cx, &mut wn, size);
-    }
+                        self.client.repaint(
+                            &mut cx,
+                            &mut win.extract_option().unwrap(),
+                            &mut canvas,
+                            &image.frame_info(),
+                        );
 
-    fn dpi_changed(
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        window: Window<(WindowState, UserData)>,
-        dpi: DpiScale,
-        size: WindowExtent,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        let (meta, mut wn) = window.split();
+                        // in case the client didn't call finish
+                        canvas.finish();
 
-        meta.dpi_scale = dpi;
-        self.client.dpi_changed(&mut cx, &mut wn, dpi, size);
-    }
+                        self.graphics.draw(&meta.draw_list, &mut image);
 
-    fn close_requested(
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        window: Window<(WindowState, UserData)>,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        let (_, mut wn) = window.split();
-        self.client.close_requested(&mut cx, &mut wn);
-    }
+                        image.present();
+                    }
+                    WindowEvent::Destroy => {
+                        // todo: this is a hack
+                        unsafe { std::ptr::drop_in_place(&mut meta) };
 
-    fn shown(
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        window: Window<(WindowState, UserData)>,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        let (_, mut wn) = window.split();
-        self.client.shown(&mut cx, &mut wn);
-    }
-
-    fn hidden(
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        window: Window<(WindowState, UserData)>,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        let (_, mut wn) = window.split();
-        self.client.hidden(&mut cx, &mut wn);
-    }
-
-    fn maximized(
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        window: Window<(WindowState, UserData)>,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        let (_, mut wn) = window.split();
-        self.client.maximized(&mut cx, &mut wn);
-    }
-
-    fn minimized(
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        window: Window<(WindowState, UserData)>,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        let (_, mut wn) = window.split();
-        self.client.minimized(&mut cx, &mut wn);
-    }
-
-    fn restored(
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        window: Window<(WindowState, UserData)>,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        let (_, mut wn) = window.split();
-        self.client.restored(&mut cx, &mut wn);
-    }
-
-    fn moved(
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        window: Window<(WindowState, UserData)>,
-        position: WindowPoint,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        let (_, mut wn) = window.split();
-        self.client.moved(&mut cx, &mut wn, position);
-    }
-
-    fn wake_requested(
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        window: Window<(WindowState, UserData)>,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        let (_, mut wn) = window.split();
-        self.client.wake_requested(&mut cx, &mut wn);
-    }
-
-    fn needs_repaint(
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        window: Window<(WindowState, UserData)>,
-        _reason: PaintReason,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        let (meta, mut wn) = window.split();
-
-        if meta.to_resize != WindowExtent::ZERO {
-            meta.swapchain.resize(std::mem::take(&mut meta.to_resize));
+                        self.client
+                            .destroyed(&mut cx, win.data_mut().take().unwrap())
+                    }
+                    WindowEvent::Key(code, state, modifiers) => self.client.key(
+                        &mut cx,
+                        &mut win.extract_option().unwrap(),
+                        code,
+                        state,
+                        modifiers,
+                    ),
+                    WindowEvent::MouseButton(button, state, position, modifiers) => {
+                        self.client.mouse_button(
+                            &mut cx,
+                            &mut win.extract_option().unwrap(),
+                            button,
+                            state,
+                            position,
+                            modifiers,
+                        )
+                    }
+                    WindowEvent::MouseScrolled(delta, axis, modifiers) => {
+                        self.client.mouse_scrolled(
+                            &mut cx,
+                            &mut win.extract_option().unwrap(),
+                            delta,
+                            axis,
+                            modifiers,
+                        )
+                    }
+                    WindowEvent::PointerMoved(position) => self.client.pointer_moved(
+                        &mut cx,
+                        &mut win.extract_option().unwrap(),
+                        position,
+                    ),
+                    WindowEvent::PointerEntered(position) => self.client.pointer_entered(
+                        &mut cx,
+                        &mut win.extract_option().unwrap(),
+                        position,
+                    ),
+                    WindowEvent::PointerLeft => self
+                        .client
+                        .pointer_left(&mut cx, &mut win.extract_option().unwrap()),
+                }
+            }
         }
-
-        let mut image = meta.swapchain.next_image();
-
-        meta.draw_list.clear();
-
-        // hacky
-        let scale = DpiScale::new(meta.dpi_scale.factor);
-
-        self.frame_arena.reset();
-
-        let mut canvas =
-            self.graphics
-                .create_canvas(self.frame_arena, &image, &mut meta.draw_list, scale);
-
-        self.client
-            .repaint(&mut cx, &mut wn, &mut canvas, &image.frame_info());
-
-        // in case the client didn't call finish
-        canvas.finish();
-
-        self.graphics.draw(&meta.draw_list, &mut image);
-
-        image.present();
-    }
-
-    fn destroyed(
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        (_, window_data): (WindowState, UserData),
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        self.client.destroyed(&mut cx, window_data);
-    }
-
-    fn key(
-        // TODO: better name in the past tense
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        window: Window<(WindowState, UserData)>,
-        code: KeyCode,
-        state: ButtonState,
-        modifiers: ModifierKeys,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        let (_, mut wn) = window.split();
-        self.client.key(&mut cx, &mut wn, code, state, modifiers);
-    }
-
-    fn mouse_button(
-        // TODO: better name in the past tense
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        window: Window<(WindowState, UserData)>,
-        button: MouseButton,
-        state: ButtonState,
-        position: WindowPoint,
-        modifiers: ModifierKeys,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        let (_, mut wn) = window.split();
-        self.client
-            .mouse_button(&mut cx, &mut wn, button, state, position, modifiers);
-    }
-
-    fn mouse_scrolled(
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        window: Window<(WindowState, UserData)>,
-        delta: f32,
-        axis: ScrollAxis,
-        modifiers: ModifierKeys,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        let (_, mut wn) = window.split();
-        self.client
-            .mouse_scrolled(&mut cx, &mut wn, delta, axis, modifiers);
-    }
-
-    fn pointer_moved(
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        window: Window<(WindowState, UserData)>,
-        position: WindowPoint,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        let (_, mut wn) = window.split();
-        self.client.pointer_moved(&mut cx, &mut wn, position);
-    }
-
-    fn pointer_entered(
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        window: Window<(WindowState, UserData)>,
-        position: WindowPoint,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        let (_, mut wn) = window.split();
-        self.client.pointer_entered(&mut cx, &mut wn, position);
-    }
-
-    fn pointer_left(
-        &mut self,
-        event_loop: &ActiveEventLoop<(WindowState, UserData)>,
-        window: Window<(WindowState, UserData)>,
-    ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
-        let (_, mut wn) = window.split();
-        self.client.pointer_left(&mut cx, &mut wn);
     }
 }

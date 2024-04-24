@@ -37,6 +37,7 @@ const WND_CLASS_NAME: PCWSTR = w!("plinth_wc");
 use crate::{
     core::limit::Limit,
     system::{
+        event_loop::{AppEvent, Event, Handler},
         limits::{WindowTitle, SYS_WINDOW_COUNT_MAX, SYS_WINDOW_TITLE_LENGTH_MAX},
         WindowExtent,
     },
@@ -156,7 +157,7 @@ impl EventLoop {
     }
 
     #[allow(clippy::unused_self)]
-    pub fn run<WindowData, H: api::EventHandler<WindowData>>(
+    pub fn run<WindowData, H: Handler<WindowData>>(
         &mut self,
         event_handler: H,
     ) -> Result<(), api::EventLoopError> {
@@ -175,7 +176,10 @@ impl EventLoop {
         };
 
         let event_loop = wndproc_state.as_active_event_loop();
-        wndproc_state.event_handler.borrow_mut().start(&event_loop);
+        wndproc_state
+            .event_handler
+            .borrow_mut()
+            .handle(&event_loop, Event::App(AppEvent::Start));
 
         // Run the event loop until completion.
         let mut msg = MSG::default();
@@ -201,7 +205,10 @@ impl EventLoop {
             }
         }
 
-        wndproc_state.event_handler.borrow_mut().stop();
+        wndproc_state
+            .event_handler
+            .borrow_mut()
+            .handle(&event_loop, Event::App(AppEvent::Stop));
 
         Ok(())
     }
@@ -225,7 +232,7 @@ impl EventLoop {
     }
 }
 
-struct WndProcState<WindowData, H: api::EventHandler<WindowData>> {
+struct WndProcState<WindowData, H: Handler<WindowData>> {
     wndclass: PCWSTR,
     event_handler: RefCell<H>,
 
@@ -234,7 +241,7 @@ struct WndProcState<WindowData, H: api::EventHandler<WindowData>> {
     window_states: [RefCell<MaybeUninit<WindowState>>; SYS_WINDOW_COUNT_MAX],
 }
 
-impl<WindowData, H: api::EventHandler<WindowData>> WndProcState<WindowData, H> {
+impl<WindowData, H: Handler<WindowData>> WndProcState<WindowData, H> {
     fn as_active_event_loop(&self) -> api::ActiveEventLoop<WindowData> {
         api::ActiveEventLoop {
             event_loop: ActiveEventLoop {
@@ -261,7 +268,7 @@ impl<WindowData, H: api::EventHandler<WindowData>> WndProcState<WindowData, H> {
     }
 }
 
-unsafe extern "system" fn unsafe_wndproc<WindowData, H: api::EventHandler<WindowData>>(
+unsafe extern "system" fn unsafe_wndproc<WindowData, H: Handler<WindowData>>(
     hwnd: HWND,
     msg: u32,
     wparam: WPARAM,

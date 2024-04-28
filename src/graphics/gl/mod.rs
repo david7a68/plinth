@@ -1,6 +1,6 @@
 use std::ops::{Deref, DerefMut};
 
-use crate::{core::static_slot_map::new_key_type, system::WindowExtent};
+use crate::{core::slotmap::new_key_type, system::WindowExtent};
 
 use super::{
     Backend, DrawList, Format, FrameInfo, GraphicsConfig, Layout, RasterBuf,
@@ -154,3 +154,44 @@ impl RenderTarget {
         }
     }
 }
+
+/*
+struct Canvas<'arena> {
+    target: RenderTarget,
+    draw_list: DrawList<'arena>,
+}
+
+pub fn draw(&self, canvas: Canvas) {
+    for cmd in draw_list.iter_mut() {
+        match cmd {
+            CommandMut::Rects { rects } => {
+                for rect in rects {
+                    let (uvwh, tex) = self.texture_cache.get(rect.texture_id);
+                    rect.uvwh = uvwh;
+                    rect.texture_id = tex;
+                    rect.flags.checked = true;
+                }
+            }
+            CommandMut::Chars { layout, glyphs } => {
+                let layout = text_engine.get(layout).unwrap();
+
+                for glyph in glyphs {
+                    let (uvwh, texture_id) = glyph_cache.get_or_insert(glyph, |glyph| {
+                        let bitmap = text_engine.rasterize(arena, glyph);
+                        glyph_cache.insert(glyph, bitmap)
+                    });
+
+                    glyph.uvwh = uvwh;
+                    glyph.texture_id = texture_id;
+                    rect.flags.checked = true;
+                }
+
+                // ...
+            }
+            _ => {}
+        }
+    }
+
+    device.draw(canvas.draw_list, canvas.target);
+}
+*/

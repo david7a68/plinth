@@ -5,7 +5,10 @@ use std::{
     cell::Cell,
     marker::PhantomData,
     mem::{align_of, MaybeUninit},
-    ops::{Deref, DerefMut, Index, IndexMut},
+    ops::{
+        Deref, DerefMut, Index, IndexMut, Range, RangeBounds, RangeFrom, RangeFull, RangeInclusive,
+        RangeTo, RangeToInclusive,
+    },
     ptr::NonNull,
     slice::{from_raw_parts, from_raw_parts_mut},
 };
@@ -117,36 +120,32 @@ impl Arena {
         })
     }
 
-    pub fn make_array<T>(&self, cap: usize) -> Result<Array<'_, T>, Error> {
+    pub fn make_array<T>(&self, cap: u32) -> Result<Array32<'_, T>, Error> {
         assert!(u32::try_from(cap).is_ok(), "len exceeds u32::MAX");
 
-        let ptr = self.alloc(Layout::array::<T>(cap).unwrap())?;
+        let ptr = self.alloc(Layout::array::<T>(cap as usize).unwrap())?;
         debug_assert_eq!(ptr.as_ptr().align_offset(align_of::<T>()), 0, "alignment");
 
         let ptr = ptr.cast::<T>();
 
-        Ok(Array {
+        Ok(Array32 {
             ptr,
             len: 0,
-            cap: cap as u32,
+            cap,
             phantom: PhantomData,
         })
     }
 
-    pub fn make_array_with<T>(
-        &self,
-        len: usize,
-        f: impl Fn(usize) -> T,
-    ) -> Result<Array<T>, Error> {
+    pub fn make_array_with<T>(&self, len: u32, f: impl Fn(u32) -> T) -> Result<Array32<T>, Error> {
         assert!(u32::try_from(len).is_ok(), "len exceeds u32::MAX");
 
         let mut array = self.make_array::<T>(len)?;
 
         for i in 0..len {
-            unsafe { array.ptr.as_ptr().add(i).write(f(i)) }
+            unsafe { array.ptr.as_ptr().add(i as usize).write(f(i)) }
         }
 
-        array.len = len as u32;
+        array.len = len;
 
         Ok(array)
     }
@@ -198,23 +197,23 @@ impl Arena {
     ///
     /// This function returns true if the array was the most recent allocation
     /// in the arena and so was able to shrink in place.
-    pub fn shrink_array<T>(&self, new_cap: usize, array: &mut Array<T>) -> bool {
-        if new_cap < array.len as usize {
-            for i in new_cap..array.len as usize {
-                unsafe { array.ptr.as_ptr().add(i).drop_in_place() }
+    pub fn shrink_array<T>(&self, new_cap: u32, array: &mut Array32<T>) -> bool {
+        if new_cap < array.len {
+            for i in new_cap..array.len {
+                unsafe { array.ptr.as_ptr().add(i as usize).drop_in_place() }
             }
 
-            array.len = new_cap as u32;
+            array.len = new_cap;
         }
 
-        array.cap = new_cap as u32;
+        array.cap = new_cap;
 
         let is_last_alloc =
             unsafe { array.ptr.as_ptr().add(array.len as usize) }.cast() == self.next.get();
 
         if is_last_alloc {
             self.next
-                .set(unsafe { array.ptr.as_ptr().add(new_cap) }.cast());
+                .set(unsafe { array.ptr.as_ptr().add(new_cap as usize) }.cast());
             true
         } else {
             true
@@ -235,18 +234,16 @@ impl Arena {
     ///
     /// This function will panic if the new capacity exceeds `u32::MAX` items,
     /// or if the size of the array would exceed `isize::MAX` bytes.
-    pub fn grow_array<T>(&self, new_cap: usize, array: &mut Array<T>) -> Result<bool, Error> {
+    pub fn grow_array<T>(&self, new_cap: u32, array: &mut Array32<T>) -> Result<bool, Error> {
         // todo: under-grow if insufficient capacity remaining but more than
         // array.cap, then return new capacity. allocate whatever's left in the
         // arena.
-
-        assert!(u32::try_from(new_cap).is_ok(), "len exceeds u32::MAX");
 
         let is_last_alloc =
             unsafe { array.ptr.as_ptr().add(array.len as usize) }.cast() == self.next.get();
 
         if is_last_alloc {
-            let extra = Layout::array::<T>(new_cap - array.cap as usize).unwrap();
+            let extra = Layout::array::<T>((new_cap - array.cap) as usize).unwrap();
 
             let save = self.next.get();
             let extra = self.alloc(extra)?;
@@ -257,12 +254,12 @@ impl Arena {
             Ok(true)
         } else {
             let ptr = self
-                .alloc(Layout::array::<T>(new_cap).unwrap())?
+                .alloc(Layout::array::<T>(new_cap as usize).unwrap())?
                 .cast::<T>();
 
             let ptr_ = ptr.as_ptr();
             debug_assert_eq!(ptr_.align_offset(align_of::<T>()), 0, "alignment");
-            unsafe { ptr_.copy_from_nonoverlapping(array.ptr.as_ptr(), array.len()) };
+            unsafe { ptr_.copy_from_nonoverlapping(array.ptr.as_ptr(), array.len() as usize) };
 
             array.ptr = ptr;
             array.cap = new_cap as u32;
@@ -344,45 +341,45 @@ impl<T> Drop for Box<'_, T> {
     }
 }
 
-pub struct Array<'arena, T: 'arena> {
+pub struct Array32<'arena, T: 'arena> {
     ptr: NonNull<T>,
     len: u32,
     cap: u32,
     phantom: PhantomData<&'arena mut T>,
 }
 
-impl<'arena, T> Array<'arena, T> {
+impl<'arena, T> Array32<'arena, T> {
     pub fn new(mem: &'arena Arena) -> Result<Self, Error> {
         mem.make_array(0)
     }
 
-    pub fn with_capacity(mem: &'arena Arena, cap: usize) -> Result<Self, Error> {
+    pub fn with_capacity(mem: &'arena Arena, cap: u32) -> Result<Self, Error> {
         mem.make_array(cap)
     }
 
     #[must_use]
-    pub fn cap(&self) -> usize {
-        self.cap as usize
+    pub fn cap(&self) -> u32 {
+        self.cap as u32
     }
 
     #[must_use]
-    pub fn len(&self) -> usize {
-        self.len as usize
+    pub fn len(&self) -> u32 {
+        self.len as u32
     }
 
     #[must_use]
-    pub fn get(&self, index: usize) -> Option<&T> {
+    pub fn get(&self, index: u32) -> Option<&T> {
         if index < self.len() {
-            unsafe { self.ptr.as_ptr().add(index).as_ref() }
+            unsafe { self.ptr.as_ptr().add(index as usize).as_ref() }
         } else {
             None
         }
     }
 
     #[must_use]
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut T> {
+    pub fn get_mut(&mut self, index: u32) -> Option<&mut T> {
         if index < self.len() {
-            unsafe { self.ptr.as_ptr().add(index).as_mut() }
+            unsafe { self.ptr.as_ptr().add(index as usize).as_mut() }
         } else {
             None
         }
@@ -408,9 +405,9 @@ impl<'arena, T> Array<'arena, T> {
         }
     }
 
-    pub fn push(&mut self, arena: &'arena Arena, value: T) -> Result<usize, Error> {
+    pub fn push(&mut self, arena: &'arena Arena, value: T) -> Result<u32, Error> {
         if self.len == self.cap {
-            arena.grow_array(self.cap as usize * 2, self)?;
+            arena.grow_array(self.cap as u32 * 2, self)?;
         }
 
         debug_assert!(self.len < self.cap, "grow failed");
@@ -418,22 +415,22 @@ impl<'arena, T> Array<'arena, T> {
         unsafe { self.ptr.as_ptr().add(self.len as usize).write(value) };
         self.len += 1;
 
-        Ok(self.len as usize)
+        Ok(self.len as u32)
     }
 
     pub fn extend(
         &mut self,
         arena: &'arena Arena,
         it: impl IntoIterator<Item = T>,
-    ) -> Result<usize, Error> {
+    ) -> Result<u32, Error> {
         let mut it = it.into_iter();
         let len = it.size_hint().1.unwrap_or(it.size_hint().0);
 
         // optimize for known size
         if len > 0 {
-            if let Ok(len) = u32::try_from(self.len as usize + len) {
+            if let Some(len) = self.len.checked_add(len as u32) {
                 if len > self.cap {
-                    arena.grow_array(len as usize, self)?;
+                    arena.grow_array(len as u32, self)?;
                 }
             } else {
                 return Err(Error::InsufficientCapacity);
@@ -473,37 +470,139 @@ impl<'arena, T> Array<'arena, T> {
     }
 }
 
-impl<T> Deref for Array<'_, T> {
+impl<T> Deref for Array32<'_, T> {
     type Target = [T];
 
     fn deref(&self) -> &Self::Target {
-        unsafe { from_raw_parts(self.ptr.as_ptr(), self.len()) }
+        unsafe { from_raw_parts(self.ptr.as_ptr(), self.len() as usize) }
     }
 }
 
-impl<T> DerefMut for Array<'_, T> {
+impl<T> DerefMut for Array32<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        unsafe { from_raw_parts_mut(self.ptr.as_ptr(), self.len()) }
+        unsafe { from_raw_parts_mut(self.ptr.as_ptr(), self.len() as usize) }
     }
 }
 
-impl<T> Index<usize> for Array<'_, T> {
+impl<T> Index<u32> for Array32<'_, T> {
     type Output = T;
 
-    fn index(&self, index: usize) -> &Self::Output {
+    fn index(&self, index: u32) -> &Self::Output {
         self.get(index).expect("index out of bounds")
     }
 }
 
-impl<T> IndexMut<usize> for Array<'_, T> {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+impl<T> Index<Range<u32>> for Array32<'_, T> {
+    type Output = [T];
+
+    fn index(&self, range: Range<u32>) -> &Self::Output {
+        &self.slice()[Range {
+            start: range.start as usize,
+            end: range.end as usize,
+        }]
+    }
+}
+
+impl<T> Index<RangeFrom<u32>> for Array32<'_, T> {
+    type Output = [T];
+
+    fn index(&self, range: RangeFrom<u32>) -> &Self::Output {
+        &self.slice()[RangeFrom {
+            start: range.start as usize,
+        }]
+    }
+}
+
+impl<T> Index<RangeTo<u32>> for Array32<'_, T> {
+    type Output = [T];
+
+    fn index(&self, range: RangeTo<u32>) -> &Self::Output {
+        &self.slice()[RangeTo {
+            end: range.end as usize,
+        }]
+    }
+}
+
+impl<T> Index<RangeToInclusive<u32>> for Array32<'_, T> {
+    type Output = [T];
+
+    fn index(&self, range: RangeToInclusive<u32>) -> &Self::Output {
+        &self.slice()[RangeToInclusive {
+            end: range.end as usize,
+        }]
+    }
+}
+
+impl<T> Index<RangeInclusive<u32>> for Array32<'_, T> {
+    type Output = [T];
+
+    fn index(&self, range: RangeInclusive<u32>) -> &Self::Output {
+        &self.slice()[RangeInclusive::new(*range.start() as usize, *range.end() as usize)]
+    }
+}
+
+impl<T> Index<RangeFull> for Array32<'_, T> {
+    type Output = [T];
+
+    fn index(&self, range: RangeFull) -> &Self::Output {
+        self.slice()
+    }
+}
+
+impl<T> IndexMut<u32> for Array32<'_, T> {
+    fn index_mut(&mut self, index: u32) -> &mut Self::Output {
         self.get_mut(index).expect("index out of bounds")
     }
 }
 
-impl<T> Drop for Array<'_, T> {
+impl<T> IndexMut<Range<u32>> for Array32<'_, T> {
+    fn index_mut(&mut self, range: Range<u32>) -> &mut Self::Output {
+        &mut self.slice_mut()[Range {
+            start: range.start as usize,
+            end: range.end as usize,
+        }]
+    }
+}
+
+impl<T> IndexMut<RangeFrom<u32>> for Array32<'_, T> {
+    fn index_mut(&mut self, range: RangeFrom<u32>) -> &mut Self::Output {
+        &mut self.slice_mut()[RangeFrom {
+            start: range.start as usize,
+        }]
+    }
+}
+
+impl<T> IndexMut<RangeTo<u32>> for Array32<'_, T> {
+    fn index_mut(&mut self, range: RangeTo<u32>) -> &mut Self::Output {
+        &mut self.slice_mut()[RangeTo {
+            end: range.end as usize,
+        }]
+    }
+}
+
+impl<T> IndexMut<RangeToInclusive<u32>> for Array32<'_, T> {
+    fn index_mut(&mut self, range: RangeToInclusive<u32>) -> &mut Self::Output {
+        &mut self.slice_mut()[RangeToInclusive {
+            end: range.end as usize,
+        }]
+    }
+}
+
+impl<T> IndexMut<RangeInclusive<u32>> for Array32<'_, T> {
+    fn index_mut(&mut self, range: RangeInclusive<u32>) -> &mut Self::Output {
+        &mut self.slice_mut()[RangeInclusive::new(*range.start() as usize, *range.end() as usize)]
+    }
+}
+
+impl<T> IndexMut<RangeFull> for Array32<'_, T> {
+    fn index_mut(&mut self, range: RangeFull) -> &mut Self::Output {
+        &mut self.slice_mut()[range]
+    }
+}
+
+impl<T> Drop for Array32<'_, T> {
     fn drop(&mut self) {
-        for i in 0..self.len() {
+        for i in 0..self.len() as usize {
             unsafe { self.ptr.as_ptr().add(i).drop_in_place() }
         }
     }
@@ -615,6 +714,6 @@ mod tests {
 
         // reset
 
-        todo!()
+        // todo
     }
 }

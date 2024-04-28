@@ -2,7 +2,7 @@ use plinth::{
     geometry::{Extent, Point, Rect},
     graphics::{
         Canvas, Color, FontOptions, FontWeight, Format, FrameInfo, GraphicsConfig, ImageExtent,
-        ImageInfo, Layout, Pt, RasterBuf, RoundRect, TextBox, TextWrapMode,
+        ImageInfo, Layout, Pt, RasterBuf, RoundRect, TextBox, TextLayout, TextWrapMode,
     },
     hashed_str,
     resource::StaticResource,
@@ -36,16 +36,44 @@ fn main() {
         ..Default::default()
     };
 
-    Application::new(&config).unwrap().run(App {}).unwrap();
+    // let text_engine = TextEngine::new();
+
+    // let glyph_cache = text_engine.create_glyph_cache();
+
+    Application::new(&config)
+        .unwrap()
+        .run(App {
+        //text_engine,
+    })
+        .unwrap();
 }
 
-pub struct AppWindow {}
+pub struct AppWindow {
+    hello_world: TextLayout,
+}
 
-pub struct App {}
+pub struct App {
+    // text_engine: TextEngine,
+}
 
 impl EventHandler<AppWindow> for App {
     fn start(&mut self, app: &mut AppContext<AppWindow>) {
-        app.create_window(WindowAttributes::default(), |_| AppWindow {})
+        let hello_world = app.layout_text(
+            "Hello, World!",
+            FontOptions {
+                name: hashed_str!("Arial"),
+                size: Pt(40),
+                weight: FontWeight::Bold,
+                ..Default::default()
+            },
+            TextBox {
+                wrap: TextWrapMode::Word,
+                extent: Extent::new(1000.0, 100.0),
+                line_spacing: 0.8,
+            },
+        );
+
+        app.create_window(WindowAttributes::default(), |_| AppWindow { hello_world })
             .unwrap();
     }
 
@@ -68,7 +96,7 @@ impl EventHandler<AppWindow> for App {
     fn repaint(
         &mut self,
         app: &mut AppContext<AppWindow>,
-        _window: &mut Window<AppWindow>,
+        window: &mut Window<AppWindow>,
         canvas: &mut Canvas,
         _frame: &FrameInfo,
     ) {
@@ -76,27 +104,30 @@ impl EventHandler<AppWindow> for App {
 
         canvas.clear(Color::WHITE);
         canvas.draw_rect(
-            &RoundRect::new(Rect::new(Point::new(50.0, 100.0), Extent::new(40.0, 70.0)))
+            RoundRect::new(Rect::new(Point::new(50.0, 100.0), Extent::new(40.0, 70.0)))
                 .with_image(image),
         );
         canvas.draw_rect(
-            &RoundRect::new(Rect::new(Point::new(100.0, 100.0), Extent::new(40.0, 70.0)))
+            RoundRect::new(Rect::new(Point::new(100.0, 100.0), Extent::new(40.0, 70.0)))
                 .with_color(Color::RED),
         );
 
+        canvas.draw_text_layout(&window.hello_world, Point::new(50.0, 150.0));
+
         canvas.draw_text(
             "Hello, World!",
-            FontOptions {
+            &FontOptions {
                 name: hashed_str!("Arial"),
                 size: Pt(40),
                 weight: FontWeight::Bold,
                 ..Default::default()
             },
-            TextBox {
+            &TextBox {
                 wrap: TextWrapMode::Word,
-                rect: Rect::new(Point::new(50.0, 150.0), Extent::new(1000.0, 100.0)),
+                extent: Extent::new(1000.0, 100.0),
                 line_spacing: 0.8,
             },
+            Point::new(50.0, 150.0),
         );
     }
 }

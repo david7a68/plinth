@@ -2,8 +2,8 @@ use std::hash::{BuildHasher, Hasher};
 
 pub mod arena;
 pub mod limit;
+pub mod slotmap;
 pub mod static_lru_cache;
-pub mod static_slot_map;
 
 pub struct PassthroughBuildHasher {}
 

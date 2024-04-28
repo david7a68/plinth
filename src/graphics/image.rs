@@ -2,7 +2,7 @@ use std::{fmt::Debug, ptr::addr_of};
 
 use crate::core::limit::Limit;
 
-use super::{limits::GFX_IMAGE_COUNT_MAX, ImageExtent};
+use super::{limits::GFX_IMAGE_COUNT_MAX, ImageExtent, ImageId};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -99,10 +99,10 @@ impl Info {
 /// A handle to an image.
 ///
 /// Once created, images are immutable.
-#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Image {
     pub(crate) info: PackedInfo,
-    pub(crate) key: PackedKey,
+    pub(crate) id: ImageId,
 }
 
 impl Image {
@@ -129,8 +129,8 @@ impl Debug for Image {
             .field("extent", &self.extent())
             .field("layout", &self.layout())
             .field("format", &self.format())
-            .field("index", &self.key.index())
-            .field("epoch", &self.key.epoch())
+            .field("index", &self.id.index())
+            .field("epoch", &self.id.epoch())
             .finish()
     }
 }
@@ -183,6 +183,21 @@ impl<'a> RasterBuf<'a> {
     }
 
     #[must_use]
+    pub const fn extent(&self) -> ImageExtent {
+        self.info.extent
+    }
+
+    #[must_use]
+    pub const fn format(&self) -> Format {
+        self.info.format
+    }
+
+    #[must_use]
+    pub const fn layout(&self) -> Layout {
+        self.info.layout
+    }
+
+    #[must_use]
     pub const fn data(&self) -> &[u8] {
         self.data
     }
@@ -220,13 +235,4 @@ pub(crate) struct PackedInfo {
     pub format: u8,
     #[bits(2)]
     _empty: u8,
-}
-
-#[bitfield_struct::bitfield(u32)]
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) struct PackedKey {
-    #[bits(12)] // max index: 4095
-    pub index: u32,
-    #[bits(20)] // max epoch: 1048576
-    pub epoch: u32,
 }

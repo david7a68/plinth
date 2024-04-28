@@ -2,7 +2,10 @@ use std::{collections::HashMap, marker::PhantomData};
 
 use crate::{
     core::{arena::Arena, PassthroughBuildHasher},
-    graphics::{Canvas, DrawList, FrameInfo, Graphics, GraphicsConfig, Image, Swapchain},
+    graphics::{
+        Canvas, DrawList, FontOptions, FrameInfo, Graphics, GraphicsConfig, Image, Swapchain,
+        TextBox, TextLayout,
+    },
     hash::HashedStr,
     limits::{ResourcePath, GFX_IMAGE_COUNT_MAX},
     resource::{Error as ResourceError, Resource, StaticResource},
@@ -132,6 +135,10 @@ impl<'a, UserWindowData> AppContext<'a, UserWindowData> {
             resources,
             event_loop: Some(event_loop),
         }
+    }
+
+    pub fn layout_text(&mut self, text: &str, font: FontOptions, rect: TextBox) -> TextLayout {
+        todo!()
     }
 
     /// Loads an image from a path.
@@ -483,19 +490,21 @@ impl<'a, UserData, Client: EventHandler<UserData>> Handler<(WindowState<'a>, Opt
 
                         let mut image = meta.swapchain.next_image();
 
-                        meta.draw_list.clear();
+                        meta.draw_list.reset();
 
                         // hacky
                         let scale = DpiScale::new(meta.dpi_scale.factor);
 
                         self.frame_arena.reset();
 
-                        let mut canvas = self.graphics.create_canvas(
-                            self.frame_arena,
-                            &image,
-                            &mut meta.draw_list,
+                        let mut canvas = Canvas {
+                            arena: &self.frame_arena,
                             scale,
-                        );
+                            target: &image,
+                            draw_list: &mut meta.draw_list,
+                        };
+
+                        canvas.begin();
 
                         self.client.repaint(
                             &mut cx,
@@ -507,7 +516,7 @@ impl<'a, UserData, Client: EventHandler<UserData>> Handler<(WindowState<'a>, Opt
                         // in case the client didn't call finish
                         canvas.finish();
 
-                        self.graphics.draw(&meta.draw_list, &mut image);
+                        self.graphics.draw(&mut meta.draw_list, &mut image);
 
                         image.present();
                     }

@@ -1,24 +1,20 @@
 use arrayvec::ArrayVec;
 
 use crate::{
-    core::static_slot_map::{new_key_type, SlotMap},
+    core::slotmap::SlotMap,
     graphics::{Format, Layout},
     limits::GFX_ATLAS_COUNT_MAX,
 };
 
 use super::{
-    gl::TextureId,
-    limits::GFX_IMAGE_COUNT_MAX,
-    {ImageExtent, TextureExtent, TexturePoint, TextureRect, UvRect},
+    gl::TextureId, ImageExtent, ImageId, TextureExtent, TexturePoint, TextureRect, UvRect,
 };
-
-new_key_type!(CachedTextureId);
 
 const ATLAS_TEXTURE_DIM: u16 = 1024;
 
 pub struct TextureCache {
     textures: ArrayVec<AtlasMap, GFX_ATLAS_COUNT_MAX>,
-    cache: Box<SlotMap<GFX_IMAGE_COUNT_MAX, CachedTexture, CachedTextureId>>,
+    cache: SlotMap<CachedTexture, ImageId>,
 }
 
 impl TextureCache {
@@ -30,17 +26,16 @@ impl TextureCache {
     ) -> Self {
         let mut this = Self {
             textures: ArrayVec::new(),
-            cache: Box::new(SlotMap::new()),
+            cache: SlotMap::new(),
         };
 
-        let _ = this.insert_rect(extent, layout, format, alloc_new);
+        let _ = Some(this.insert_rect(extent, layout, format, alloc_new).1);
 
         this
     }
 
-    pub fn default(&self) -> (CachedTextureId, TextureId) {
-        let id = CachedTextureId::new(0, 0);
-        (id, self.cache.get(id).unwrap().clone().texture)
+    pub fn default(&self) -> ImageId {
+        ImageId::new(0, 0)
     }
 
     pub fn insert_rect(
@@ -49,7 +44,7 @@ impl TextureCache {
         layout: Layout,
         format: Format,
         mut alloc_new: impl FnMut(TextureExtent, Layout, Format) -> TextureId,
-    ) -> (TextureId, CachedTextureId) {
+    ) -> (TextureId, ImageId) {
         // todo: actually calculate the required extent
         let texture = alloc_new(
             TextureExtent::new(ATLAS_TEXTURE_DIM, ATLAS_TEXTURE_DIM),
@@ -62,27 +57,24 @@ impl TextureCache {
             used: true,
         });
 
-        let cached_id = self
-            .cache
-            .insert(CachedTexture {
-                texture,
-                rect: TextureRect::new(TexturePoint::ORIGIN, extent.into()),
-            })
-            .unwrap();
+        let cached_id = self.cache.insert(CachedTexture {
+            texture,
+            rect: TextureRect::new(TexturePoint::ORIGIN, extent.into()),
+        });
 
         (texture, cached_id)
     }
 
-    pub fn remove_rect(&mut self, image: CachedTextureId) {
+    pub fn remove_rect(&mut self, image: ImageId) {
         todo!()
     }
 
-    pub fn get_rect(&self, image: CachedTextureId) -> (TextureId, TextureRect) {
+    pub fn get_rect(&self, image: ImageId) -> (TextureId, TextureRect) {
         let cached = self.cache.get(image).unwrap();
         (cached.texture, cached.rect)
     }
 
-    pub fn get_uv_rect(&self, image: CachedTextureId) -> (TextureId, UvRect) {
+    pub fn get_uv_rect(&self, image: ImageId) -> (TextureId, UvRect) {
         let cached = self.cache.get(image).unwrap();
 
         (

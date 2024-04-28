@@ -259,3 +259,17 @@ impl<'a, Data> Window<'a, Option<Data>> {
         self.window.extract_option().map(|window| Window { window })
     }
 }
+
+impl<User> std::ops::Deref for Window<'_, User> {
+    type Target = User;
+
+    fn deref(&self) -> &Self::Target {
+        self.window.data()
+    }
+}
+
+impl<User> std::ops::DerefMut for Window<'_, User> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.window.data_mut()
+    }
+}

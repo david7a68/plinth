@@ -42,7 +42,7 @@ use windows::{
 };
 
 use crate::{
-    core::static_slot_map::SlotMap,
+    core::slotmap::SlotMap,
     graphics::{
         draw_list::Command,
         gl::{dx12::image_barrier, SubmitId, TextureId},
@@ -66,7 +66,7 @@ pub struct Device {
     command_list: ID3D12GraphicsCommandList,
     frames: RefCell<VecDeque<Frame>>,
 
-    textures: RefCell<Box<SlotMap<1024, ID3D12Resource, TextureId>>>,
+    textures: RefCell<SlotMap<ID3D12Resource, TextureId>>,
     pub texture_descriptors: DescriptorHeap,
 }
 
@@ -161,7 +161,7 @@ impl Device {
             command_list,
             frames: RefCell::new(frames),
             uploader: RefCell::new(uploader),
-            textures: RefCell::new(Box::new(textures)),
+            textures: RefCell::new(textures),
             texture_descriptors,
         }
     }
@@ -226,18 +226,14 @@ impl Device {
         }
         .unwrap();
 
-        let id = self
-            .textures
-            .borrow_mut()
-            .create(|key| {
-                let image = image.unwrap();
-                let view = self.texture_descriptors.cpu(key.index());
+        let id = self.textures.borrow_mut().create(|key| {
+            let image = image.unwrap();
+            let view = self.texture_descriptors.cpu(key.index());
 
-                unsafe { self.handle.CreateShaderResourceView(&image, None, view) };
+            unsafe { self.handle.CreateShaderResourceView(&image, None, view) };
 
-                image
-            })
-            .unwrap();
+            image
+        });
 
         id
     }
@@ -270,7 +266,7 @@ impl Device {
                 frames.push_front(frame);
 
                 let size =
-                    DEFAULT_DRAW_BUFFER_SIZE.max(std::mem::size_of_val(&draw_list.prims) as u64);
+                    DEFAULT_DRAW_BUFFER_SIZE.max(std::mem::size_of_val(draw_list.prims()) as u64);
 
                 Frame::new(&self.handle, size)
             }
@@ -580,7 +576,7 @@ impl Frame {
         target: &RenderTarget,
         textures: &DescriptorHeap,
     ) {
-        let content_size = std::mem::size_of_val(draw_list.prims.as_slice());
+        let content_size = std::mem::size_of_val(draw_list.prims());
 
         if self.size < content_size {
             self.buffer = None;
@@ -599,7 +595,7 @@ impl Frame {
 
         unsafe {
             self.base
-                .copy_from_nonoverlapping(draw_list.prims.as_ptr().cast(), content_size);
+                .copy_from_nonoverlapping(draw_list.prims().as_ptr().cast(), content_size);
         }
 
         let viewport_scale = [
@@ -609,26 +605,8 @@ impl Frame {
 
         let mut it = draw_list.iter();
 
-        assert_eq!(it.next(), Some(Command::Begin(draw_list.areas[0])));
-
         unsafe {
             command_list.OMSetRenderTargets(1, Some(&target.descriptor), false, None);
-
-            command_list.RSSetViewports(&[D3D12_VIEWPORT {
-                TopLeftX: 0.0,
-                TopLeftY: 0.0,
-                Width: f32::from(target.extent().width),
-                Height: f32::from(target.extent().height),
-                MinDepth: 0.0,
-                MaxDepth: 1.0,
-            }]);
-
-            command_list.RSSetScissorRects(&[RECT {
-                left: 0,
-                top: 0,
-                right: i32::from(target.extent().width),
-                bottom: i32::from(target.extent().height),
-            }]);
 
             command_list.SetDescriptorHeaps(&[Some(textures.handle.clone())]);
         }
@@ -644,19 +622,41 @@ impl Frame {
         let mut rect_start = 0;
         for command in it.by_ref() {
             match command {
-                Command::Begin(_) => unreachable!(),
+                Command::Begin { view, clip } => unsafe {
+                    command_list.RSSetViewports(&[D3D12_VIEWPORT {
+                        TopLeftX: f32::from(view.origin.x),
+                        TopLeftY: f32::from(view.origin.y),
+                        Width: f32::from(view.extent.width),
+                        Height: f32::from(view.extent.height),
+                        MinDepth: 0.0,
+                        MaxDepth: 1.0,
+                    }]);
+
+                    command_list.RSSetScissorRects(&[RECT {
+                        left: i32::from(clip.origin.x),
+                        top: i32::from(clip.origin.y),
+                        right: i32::from(clip.extent.width),
+                        bottom: i32::from(clip.extent.height),
+                    }]);
+                },
                 Command::Close => break,
-                Command::Clear(color) => unsafe {
+                Command::Clear { color } => unsafe {
                     command_list.ClearRenderTargetView(
                         target.descriptor,
                         &color.to_array_f32(),
                         None,
                     );
                 },
-                Command::Rects(count) => {
+                Command::Rects { rects } => {
+                    let count = rects.len() as u32;
+
                     unsafe { command_list.DrawInstanced(4, count, 0, rect_start) };
                     rect_start += count;
                 }
+                Command::Chars {
+                    glyphs: _,
+                    layout: _,
+                } => unreachable!(),
             }
         }
     }

@@ -1,260 +1,321 @@
 use core::panic;
 
-use crate::{
-    core::arena::Arena,
-    geometry::Rect,
-    graphics::{color::Color, primitives::RoundRect, texture_atlas::CachedTextureId, UvRect},
-    system::DpiScale,
-};
+use crate::{geometry::Point, graphics::color::Color};
 
-use super::{text::TextEngine, texture_atlas::TextureCache, FontOptions, TextBox};
+use super::{
+    text::{LayoutId, TextLayout},
+    TextureRect,
+};
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum TextureFilter {
     #[default]
-    Point,
-    Linear,
+    Point = 0,
+    Linear = 1,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Sampler {
+impl TextureFilter {
+    pub const fn from_bits(bits: u32) -> Self {
+        match bits {
+            0 => Self::Point,
+            1 => Self::Linear,
+            _ => panic!("Invalid texture filter bits"),
+        }
+    }
+
+    pub const fn into_bits(self) -> u32 {
+        self as u32
+    }
+}
+
+#[bitfield_struct::bitfield(u32)]
+#[derive(PartialEq)]
+pub struct PrimitiveFlags {
+    #[bits(1)]
     pub filter: TextureFilter,
+    #[bits(31)]
+    _pad: u32,
 }
 
 #[repr(C)]
-#[repr(align(16))]
-#[derive(Copy, Clone, Debug, PartialEq)]
-pub struct RRect {
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Primitive {
     pub xywh: [f32; 4],
     pub uvwh: [f32; 4],
     pub color: [f32; 4],
     pub texture_id: u32,
-    pub sampler: Sampler,
+    pub flags: PrimitiveFlags,
+    pub empty: u64,
 }
 
-impl RRect {
-    pub fn new(rect: &RoundRect, uvwh: &UvRect, texture_id: u32, sampler: Sampler) -> Self {
-        Self {
-            xywh: rect.rect.to_xywh(),
-            uvwh: uvwh.to_uvwh(),
-            color: rect.color.to_array_f32(),
-            texture_id,
-            sampler,
-        }
-    }
+impl Primitive {
+    const DEFAULT: Self = Self {
+        xywh: [0.0; 4],
+        uvwh: [0.0; 4],
+        color: [0.0; 4],
+        texture_id: 0,
+        flags: PrimitiveFlags::new(),
+        empty: 0,
+    };
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub enum Command {
-    Begin(Rect),
+pub enum Command<'a> {
+    Begin {
+        view: TextureRect,
+        clip: TextureRect,
+    },
+    Close,
+    Clear {
+        color: Color,
+    },
+    Rects {
+        rects: &'a [Primitive],
+    },
+    Chars {
+        layout: LayoutId,
+        glyphs: &'a [Primitive],
+    },
+}
+
+pub enum CommandMut<'a> {
+    Begin {
+        view: TextureRect,
+        clip: TextureRect,
+    },
+    Close,
+    Clear {
+        color: Color,
+    },
+    Rects {
+        rects: &'a mut [Primitive],
+    },
+    Chars {
+        layout: LayoutId,
+        glyphs: &'a mut [Primitive],
+    },
+}
+
+#[derive(Clone)]
+enum Command_ {
+    Begin {
+        view: TextureRect,
+        clip: TextureRect,
+    },
     Close,
     Clear(Color),
-    Rects(u32),
+    Rects {
+        first: u32,
+        count: u32,
+    },
+    Chars {
+        first: u32,
+        count: u32,
+        layout: LayoutId,
+    },
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum DrawCommand {
-    Begin,
-    Close,
-    Clear,
-    Rects,
-}
-
-#[derive(Debug, Default)]
-#[repr(align(16))]
 pub struct DrawList {
-    pub(super) prims: Vec<RRect>,
-    pub(super) areas: Vec<Rect>,
-    pub(super) colors: Vec<Color>,
-    pub(super) commands: Vec<(DrawCommand, u32)>,
+    prims: Vec<Primitive>,
+    commands: Vec<Command_>,
+    prim_start: u32,
+    prim_count: u32,
+    closed: bool,
 }
 
 impl DrawList {
-    #[must_use]
     pub fn new() -> Self {
         Self {
             prims: Vec::new(),
-            areas: Vec::new(),
-            colors: Vec::new(),
             commands: Vec::new(),
+            prim_start: 0,
+            prim_count: 0,
+            closed: false,
         }
     }
 
-    pub fn clear(&mut self) {
-        self.prims.clear();
-        self.areas.clear();
-        self.colors.clear();
-        self.commands.clear();
-    }
-
-    pub(super) fn iter(&self) -> DrawIter<'_> {
-        DrawIter {
-            areas: &self.areas,
-            colors: &self.colors,
+    pub fn iter(&self) -> CommandIter {
+        CommandIter {
             commands: &self.commands,
-            index: 0,
-            draws: 0,
-        }
-    }
-}
-
-impl<'a> IntoIterator for &'a DrawList {
-    type Item = Command;
-    type IntoIter = DrawIter<'a>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.iter()
-    }
-}
-
-pub struct DrawIter<'a> {
-    areas: &'a [Rect],
-    colors: &'a [Color],
-    commands: &'a [(DrawCommand, u32)],
-    index: usize,
-    draws: usize,
-}
-
-impl Iterator for DrawIter<'_> {
-    type Item = Command;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.index == self.commands.len() {
-            return None;
-        }
-
-        let cmd = match self.commands[self.index] {
-            (DrawCommand::Begin, area_i) => {
-                debug_assert_eq!(area_i, 0);
-                Command::Begin(self.areas[0])
-            }
-            (DrawCommand::Close, _) => Command::Close,
-            (DrawCommand::Clear, color_i) => Command::Clear(self.colors[color_i as usize]),
-            (DrawCommand::Rects, count) => {
-                self.draws += 1;
-                Command::Rects(count)
-            }
-        };
-
-        self.index += 1;
-        Some(cmd)
-    }
-}
-
-pub struct Canvas<'a> {
-    arena: &'a mut Arena,
-    text_engine: &'a TextEngine,
-    textures: &'a TextureCache,
-    draw_list: &'a mut DrawList,
-    region: Rect,
-    rect_batch_start: usize,
-    rect_batch_count: usize,
-    state: DrawCommand,
-    dpi: DpiScale,
-}
-
-impl<'a> Canvas<'a> {
-    pub(super) fn new(
-        textures: &'a TextureCache,
-        text_engine: &'a TextEngine,
-        arena: &'a mut Arena,
-        draw_list: &'a mut DrawList,
-        region: Rect,
-        dpi: DpiScale,
-    ) -> Self {
-        draw_list.clear();
-        draw_list.areas.push(region);
-        draw_list.commands.push((DrawCommand::Begin, 0));
-
-        Self {
-            arena,
-            text_engine,
-            textures,
-            draw_list,
-            region,
-            rect_batch_start: 0,
-            rect_batch_count: 0,
-            state: DrawCommand::Begin,
-            dpi,
+            prims: &self.prims,
+            count: 0,
         }
     }
 
-    #[must_use]
-    pub fn region(&self) -> Rect {
-        self.region
+    pub fn iter_mut(&mut self) -> CommandIterMut {
+        CommandIterMut {
+            commands: &self.commands,
+            prims: &mut self.prims,
+            count: 0,
+        }
+    }
+
+    pub fn prims(&self) -> &[Primitive] {
+        &self.prims
+    }
+
+    pub fn reset(&mut self) {
+        self.prims.clear();
+        self.commands.clear();
+        self.prim_start = 0;
+        self.prim_count = 0;
+        self.closed = false;
+    }
+
+    pub fn begin(&mut self, view: TextureRect, clip: TextureRect) {
+        self.commands.push(Command_::Begin { view, clip });
     }
 
     pub fn clear(&mut self, color: Color) {
-        match self.state {
-            DrawCommand::Begin | DrawCommand::Clear => {}
-            DrawCommand::Rects => self.submit_batch(),
-            DrawCommand::Close => panic!("Canvas state Close -> Clear is a bug."),
+        assert!(!self.closed, "DrawList is closed");
+        self.flush_prims();
+        self.commands.push(Command_::Clear(color));
+    }
+
+    pub fn close(&mut self) {
+        if !self.closed {
+            self.flush_prims();
+            self.commands.push(Command_::Close);
+            self.closed = true;
+        }
+    }
+
+    pub fn draw_prim(&mut self, prim: &Primitive) {
+        assert!(!self.closed, "DrawList is closed");
+        self.prims.push(prim.clone());
+        self.prim_count += 1;
+    }
+
+    /// Adds a command to draw the characters of a text layout.
+    ///
+    /// Reserves space for the characters in the prims array but does not fill
+    /// them with data. A second pass is required to fill the prims array with
+    /// the actual glyphs to draw.
+    pub fn draw_chars(&mut self, layout: &TextLayout, at: Point) {
+        assert!(!self.closed, "DrawList is closed");
+        self.flush_prims();
+
+        let count = layout.glyph_count();
+
+        self.commands.push(Command_::Chars {
+            first: self.prim_start,
+            count,
+            layout: layout.id(),
+        });
+
+        self.prims.extend(
+            std::iter::once(Primitive {
+                xywh: [at.x, at.y, 0.0, 0.0],
+                ..Primitive::DEFAULT
+            })
+            .chain(std::iter::repeat(Primitive::DEFAULT))
+            .take(count as usize),
+        );
+
+        self.prim_start += count;
+    }
+
+    fn flush_prims(&mut self) {
+        if self.prim_count > 0 {
+            let command = Command_::Rects {
+                first: self.prim_start,
+                count: self.prim_count,
+            };
+
+            self.commands.push(command);
+            self.prim_start += self.prim_count;
+            self.prim_count = 0;
         }
 
-        self.draw_list
-            .commands
-            .push((DrawCommand::Clear, self.draw_list.colors.len() as u32));
-
-        self.draw_list.colors.push(color);
-        self.state = DrawCommand::Clear;
+        debug_assert_eq!(self.prim_count, 0);
     }
+}
 
-    pub fn draw_rect(&mut self, rect: &RoundRect) {
-        match self.state {
-            DrawCommand::Begin => {
-                debug_assert_eq!(self.rect_batch_start, 0);
-                debug_assert_eq!(self.rect_batch_count, 0);
-                debug_assert_eq!(self.draw_list.prims.len(), 0);
-            }
-            DrawCommand::Clear => {
-                debug_assert_eq!(self.rect_batch_count, 0);
-                self.rect_batch_start = self.draw_list.prims.len();
-            }
-            DrawCommand::Rects => {} // no-op
-            DrawCommand::Close => panic!("Canvas state Close -> DrawRect is a bug."),
+impl Default for DrawList {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+pub struct CommandIter<'a> {
+    commands: &'a [Command_],
+    prims: &'a [Primitive],
+    count: usize,
+}
+
+impl<'a> Iterator for CommandIter<'a> {
+    type Item = Command<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.count == self.commands.len() {
+            None
+        } else {
+            let cmd = self.commands[self.count].clone();
+            self.count += 1;
+
+            let r = match cmd {
+                Command_::Begin { view, clip } => Command::Begin { view, clip },
+                Command_::Close => Command::Close,
+                Command_::Clear(color) => Command::Clear { color },
+                Command_::Rects { first, count } => Command::Rects {
+                    rects: &self.prims[first as usize..(first + count) as usize],
+                },
+                Command_::Chars {
+                    first,
+                    count,
+                    layout,
+                } => Command::Chars {
+                    layout,
+                    glyphs: &self.prims[first as usize..(first + count) as usize],
+                },
+            };
+
+            Some(r)
         }
-
-        let cache_id = CachedTextureId::new(rect.image.key.index(), rect.image.key.epoch());
-        let (texture_id, uvwh) = self.textures.get_uv_rect(cache_id);
-
-        self.draw_list.prims.push(RRect::new(
-            rect,
-            &uvwh,
-            texture_id.index(),
-            Sampler::default(),
-        ));
-
-        self.rect_batch_count += 1;
-
-        self.state = DrawCommand::Rects;
     }
+}
 
-    pub fn draw_text(&mut self, text: &str, font: FontOptions, rect: TextBox) {
-        let layout = self
-            .text_engine
-            .layout_text(self.arena, text, rect, font, self.dpi);
+pub struct CommandIterMut<'a> {
+    commands: &'a [Command_],
+    prims: &'a mut [Primitive],
+    count: usize,
+}
 
-        layout.draw(self.draw_list);
-    }
+impl<'a> Iterator for CommandIterMut<'a> {
+    type Item = CommandMut<'a>;
 
-    pub fn finish(&mut self) {
-        match self.state {
-            DrawCommand::Begin | DrawCommand::Clear => {}
-            DrawCommand::Rects => self.submit_batch(),
-            DrawCommand::Close => return,
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.count == self.commands.len() {
+            None
+        } else {
+            let cmd = self.commands[self.count].clone();
+            self.count += 1;
+
+            let r = match cmd {
+                Command_::Begin { view, clip } => CommandMut::Begin { view, clip },
+                Command_::Close => CommandMut::Close,
+                Command_::Clear(color) => CommandMut::Clear { color },
+                Command_::Rects { first: _, count } => {
+                    let slice = std::mem::take(&mut self.prims);
+                    let (rects, tail) = slice.split_at_mut(count as usize);
+                    self.prims = tail;
+
+                    CommandMut::Rects { rects }
+                }
+                Command_::Chars {
+                    first: _,
+                    count,
+                    layout,
+                } => {
+                    let slice = std::mem::take(&mut self.prims);
+                    let (glyphs, tail) = slice.split_at_mut(count as usize);
+                    self.prims = tail;
+
+                    CommandMut::Chars { layout, glyphs }
+                }
+            };
+
+            Some(r)
         }
-
-        self.draw_list.commands.push((DrawCommand::Close, 0));
-        self.state = DrawCommand::Close;
-    }
-
-    fn submit_batch(&mut self) {
-        self.draw_list
-            .commands
-            .push((DrawCommand::Rects, self.rect_batch_count as u32));
-
-        self.rect_batch_start = self.draw_list.prims.len();
-        self.rect_batch_count = 0;
     }
 }

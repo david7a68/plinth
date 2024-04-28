@@ -8,6 +8,7 @@ macro_rules! new_point {
         }
 
         impl $name {
+            #[allow(unused)]
             pub const ORIGIN: Self = Self { $x: $zero, $y: $zero };
 
             pub fn new($x: $element_ty, $y: $element_ty) -> Self {
@@ -66,8 +67,10 @@ macro_rules! new_extent {
         }
 
         impl $name {
+            #[allow(unused)]
             pub const ZERO: Self = Self { width: $zero, height: $zero };
 
+            #[allow(unused)]
             pub fn new(width: $element_ty, height: $element_ty) -> Self {
                 Self { width, height }
             }
@@ -124,8 +127,10 @@ macro_rules! new_rect {
         }
 
         impl $name {
+            #[allow(unused)]
             pub const ZERO: Self = Self { origin: <$point_ty>::ORIGIN, extent: <$extent_ty>::ZERO };
 
+            #[allow(unused)]
             pub fn new(origin: $point_ty, extent: $extent_ty) -> Self {
                 Self { origin, extent }
             }

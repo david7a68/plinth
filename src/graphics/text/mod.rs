@@ -1,6 +1,6 @@
 #![allow(unused)]
 
-use std::{cell::RefCell, ffi::c_void, iter::once, marker::PhantomData};
+use std::{cell::RefCell, collections::HashMap, ffi::c_void, iter::once, marker::PhantomData};
 
 use smallvec::SmallVec;
 use windows::{
@@ -20,14 +20,21 @@ use windows::{
 };
 
 use crate::{
-    core::{arena::Arena, static_lru_cache::LruCache},
+    core::{
+        arena::Arena,
+        slotmap::{new_key_type, SlotMap},
+        static_lru_cache::LruCache,
+        PassthroughBuildHasher,
+    },
     geometry::{Extent, Point, Rect},
     hashed_str,
     system::DpiScale,
     Hash, HashedStr,
 };
 
-use super::{gl::TextureId, Color, DrawList, TextureExtent};
+use super::{draw_list::Primitive, gl::TextureId, Color, DrawList, RasterBuf, TextureExtent};
+
+new_key_type!(LayoutId);
 
 pub const CACHE_SIZE: usize = 32;
 
@@ -55,6 +62,16 @@ impl Pt {
     }
 }
 
+pub fn layout_text(
+    temp: &mut Arena,
+    text: &str,
+    block: TextBox,
+    style: FontOptions,
+    scale: DpiScale,
+) -> TextLayout {
+    todo!()
+}
+
 pub struct TextEngine {
     factory: IDWriteFactory,
     default_format: IDWriteTextFormat,
@@ -76,6 +93,10 @@ impl TextEngine {
         }
     }
 
+    pub fn get(&self, id: LayoutId) -> Option<&TextLayout> {
+        todo!()
+    }
+
     pub fn layout_text(
         &self,
         temp: &mut Arena,
@@ -85,7 +106,9 @@ impl TextEngine {
         scale: DpiScale,
     ) -> TextLayout {
         let chars = {
-            let mut arr = temp.make_array(text.len()).expect("Out of temp memory");
+            let mut arr = temp
+                .make_array(u32::try_from(text.len()).unwrap())
+                .expect("Out of temp memory");
             arr.extend(temp, text.encode_utf16());
             arr
         };
@@ -96,23 +119,28 @@ impl TextEngine {
         });
 
         let inner = unsafe {
-            self.factory.CreateTextLayout(
-                &chars,
-                style,
-                block.rect.extent.width,
-                block.rect.extent.height,
-            )
+            self.factory
+                .CreateTextLayout(&chars, style, block.extent.width, block.extent.height)
         }
         .unwrap();
 
         TextLayout { inner }
     }
 
-    pub fn glyph_cache_compact(&self) {
+    pub fn tick(&self) {
+        // update layout cache, evicting entries that have not been used in the
+        // past N ticks.
+
         todo!()
     }
 
-    pub fn glyph_cache_add_texture(&self, texture: TextureId, size: TextureExtent) {
+    pub fn rasterize<'a>(
+        &self,
+        arena: &'a mut Arena,
+        font_id: u32,
+        glyph: u16,
+        size: f32,
+    ) -> RasterBuf<'a> {
         todo!()
     }
 }
@@ -164,14 +192,96 @@ pub struct TextLayout {
 }
 
 impl TextLayout {
-    pub fn draw(&self, draw_list: &mut DrawList) {
-        // no-op for now
+    pub fn id(&self) -> LayoutId {
+        todo!()
+    }
+
+    /// The number of drawn rectangles in the layout.
+    ///
+    /// This may be different from the number of characters in the string that
+    /// created the layout due to combining characters, emoji, and other factors
+    /// that affect how text is drawn.
+    ///
+    /// Determining the number of rects in a layout may be expensive, so the
+    /// value is cached after the first time it is called.
+    pub fn glyph_count(&self) -> u32 {
+        todo!()
+    }
+
+    pub fn write(&self, out: &mut [Primitive]) {
+        todo!()
     }
 }
 
+pub struct LayoutCache {
+    layouts: SlotMap<CachedLayout, LayoutId>,
+    hashmap: HashMap<u64, LayoutId, PassthroughBuildHasher>,
+
+    epoch: u64,
+    time_to_live: u64,
+}
+
+impl LayoutCache {
+    pub fn new() -> Self {
+        Self {
+            layouts: SlotMap::new(),
+            hashmap: HashMap::with_hasher(PassthroughBuildHasher::new()),
+            epoch: 0,
+            time_to_live: 4,
+        }
+    }
+
+    pub fn get_or_create(
+        &mut self,
+        arena: &Arena,
+        text: &str,
+        font: FontOptions,
+        area: TextBox,
+        size: DpiScale,
+    ) -> LayoutId {
+        // let key = hash text, font, area
+
+        /*
+        if let Some(id) = self.hashmap.get(&key) {
+            *id
+        } else {
+            let layout = layout_text(arena, text, area, font, size);
+            let id = self.layouts.insert(layout);
+            self.hashmap.insert(key, id);
+            id
+        }
+        */
+
+        todo!()
+    }
+
+    pub fn get(&self, id: LayoutId) -> Option<&TextLayout> {
+        self.layouts.get(id).map(|cached| &cached.layout)
+    }
+
+    pub fn tick(&mut self) {
+        self.epoch += 1;
+
+        self.layouts.retain(|_, cached| {
+            let keep = cached.epoch + self.time_to_live >= self.epoch;
+            if !keep {
+                // self.hashmap.remove(&cached.hash);
+            }
+            keep
+        })
+    }
+}
+
+struct CachedLayout {
+    layout: TextLayout,
+    epoch: u64,
+    hash: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TextBox {
     pub wrap: TextWrapMode,
-    pub rect: Rect,
+    pub extent: Extent,
     pub line_spacing: f32,
 }
 

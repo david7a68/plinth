@@ -5,6 +5,7 @@ mod power;
 pub(crate) mod time;
 mod window;
 
+pub use event_loop::InputEvent;
 pub use input::*;
 pub use power::*;
 pub use window::*;

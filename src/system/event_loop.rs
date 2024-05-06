@@ -37,6 +37,7 @@ pub enum EventLoopError {
 pub enum Event<'a, WindowData> {
     App(AppEvent),
     Window(Window<'a, WindowData>, WindowEvent),
+    Input(Window<'a, WindowData>, InputEvent),
 }
 
 pub enum AppEvent {
@@ -67,6 +68,10 @@ pub enum WindowEvent {
     Wake,
     Repaint(PaintReason),
     Destroy,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum InputEvent {
     Key(KeyCode, ButtonState, ModifierKeys),
     MouseButton(MouseButton, ButtonState, WindowPoint, ModifierKeys),
     MouseScrolled(f32, ScrollAxis, ModifierKeys),

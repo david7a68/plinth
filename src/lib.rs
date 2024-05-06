@@ -11,5 +11,7 @@ pub mod time;
 mod application;
 mod core;
 
-pub use application::{AppContext, Application, Config, EventHandler};
+pub use application::{
+    AppContext, Application, Config, EventHandler, PowerStateHandler, WindowFrameHandler,
+};
 pub use hash::{Hash, HashedStr};

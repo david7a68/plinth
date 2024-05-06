@@ -25,7 +25,7 @@ use crate::{
     core::limit::Limit,
     limits,
     system::{
-        event_loop::{Event, Handler, WindowEvent},
+        event_loop::{Event, Handler, InputEvent, WindowEvent},
         input::{ButtonState, ModifierKeys, MouseButton, ScrollAxis},
         window::{PaintReason, RefreshRateRequest},
         DpiScale, WindowExtent, WindowPoint,
@@ -356,7 +356,7 @@ impl<'a, WindowData, H: Handler<WindowData>> HandlerContext<'a, WindowData, H> {
         });
 
         if entered {
-            self.event(WindowEvent::PointerEntered(position));
+            self.input(InputEvent::PointerEntered(position));
 
             unsafe {
                 TrackMouseEvent(&mut TRACKMOUSEEVENT {
@@ -369,16 +369,16 @@ impl<'a, WindowData, H: Handler<WindowData>> HandlerContext<'a, WindowData, H> {
             .unwrap();
         }
 
-        self.event(WindowEvent::PointerMoved(position));
+        self.input(InputEvent::PointerMoved(position));
     }
 
     pub fn mouse_leave(&mut self) {
         self.with_state(|window| window.flags.set(WindowFlags::HAS_POINTER, false));
-        self.event(WindowEvent::PointerLeft);
+        self.input(InputEvent::PointerLeft);
     }
 
     pub fn mouse_wheel(&mut self, axis: ScrollAxis, delta: f32, mods: ModifierKeys) {
-        self.event(WindowEvent::MouseScrolled(delta, axis, mods));
+        self.input(InputEvent::MouseScrolled(delta, axis, mods));
     }
 
     pub fn mouse_button(
@@ -388,7 +388,7 @@ impl<'a, WindowData, H: Handler<WindowData>> HandlerContext<'a, WindowData, H> {
         position: WindowPoint,
         mods: ModifierKeys,
     ) {
-        self.event(WindowEvent::MouseButton(button, state, position, mods));
+        self.input(InputEvent::MouseButton(button, state, position, mods));
     }
 
     #[inline]
@@ -415,6 +415,23 @@ impl<'a, WindowData, H: Handler<WindowData>> HandlerContext<'a, WindowData, H> {
         };
 
         (*handler).handle(&self.event_loop, Event::Window(window, event));
+    }
+
+    fn input(&mut self, event: InputEvent) {
+        assert_ne!(self.hwnd.get(), HWND::default(), "Window not initialized.");
+
+        let (state, mut data) = (self.state.borrow(), self.data.borrow_mut());
+        let mut handler = self.event_handler.borrow_mut();
+        let window = api::Window {
+            window: Window {
+                hwnd: self.hwnd.get(),
+                state: unsafe { state.assume_init_ref() },
+                data: unsafe { data.assume_init_mut() },
+                _phantom: PhantomData,
+            },
+        };
+
+        (*handler).handle(&self.event_loop, Event::Input(window, event));
     }
 }
 

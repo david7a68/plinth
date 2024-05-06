@@ -42,7 +42,7 @@ impl EventHandler<AppWindow> for App {
         // no-op
     }
 
-    fn wake_requested(
+    fn window_wake_requested(
         &mut self,
         _app: &mut AppContext<AppWindow>,
         _window: &mut Window<AppWindow>,
@@ -50,11 +50,11 @@ impl EventHandler<AppWindow> for App {
         // no-op
     }
 
-    fn destroyed(&mut self, _app: &mut AppContext<AppWindow>, _window_data: AppWindow) {
+    fn window_destroyed(&mut self, _app: &mut AppContext<AppWindow>, _window_data: AppWindow) {
         // no-op
     }
 
-    fn repaint(
+    fn window_frame(
         &mut self,
         _app: &mut AppContext<AppWindow>,
         window: &mut Window<AppWindow>,

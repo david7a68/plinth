@@ -1,10 +1,10 @@
 use plinth::{
     graphics::{Canvas, FrameInfo, GraphicsConfig},
     system::{
-        ButtonState, DpiScale, KeyCode, ModifierKeys, MonitorState, MouseButton, PowerPreference,
-        PowerSource, ScrollAxis, Window, WindowAttributes, WindowExtent, WindowPoint,
+        InputEvent, MonitorState, PowerPreference, PowerSource, Window, WindowAttributes,
+        WindowPoint,
     },
-    AppContext, Application, Config, EventHandler,
+    AppContext, Application, Config, EventHandler, PowerStateHandler, WindowFrameHandler,
 };
 
 pub fn main() {
@@ -52,6 +52,49 @@ impl EventHandler<()> for App {
         println!("Low memory event");
     }
 
+    fn window_close_requested(&mut self, _app: &mut AppContext<()>, window: &mut Window<()>) {
+        println!("Window close request");
+        window.destroy();
+    }
+
+    fn window_wake_requested(&mut self, app: &mut AppContext<()>, window: &mut Window<()>) {
+        println!("Window wake requested");
+    }
+
+    fn window_frame(
+        &mut self,
+        app: &mut AppContext<()>,
+        window: &mut Window<()>,
+        canvas: &mut Canvas,
+        frame_info: &FrameInfo,
+    ) {
+        println!("Window needs repaint");
+    }
+
+    fn window_destroyed(&mut self, _app: &mut AppContext<()>, _window_data: ()) {
+        println!("Window destroyed");
+    }
+
+    fn window_input(
+        &mut self,
+        app: &mut AppContext<()>,
+        window: &mut Window<()>,
+        event: InputEvent,
+    ) {
+        println!("Window input event: {:?}", event);
+    }
+
+    fn power_state_handler(&mut self) -> Option<&mut dyn PowerStateHandler<()>> {
+        Some(self)
+    }
+
+    fn window_frame_handler(&mut self) -> Option<&mut dyn WindowFrameHandler<()>> {
+        Some(self)
+    }
+}
+
+#[allow(unused_variables)]
+impl PowerStateHandler<()> for App {
     fn power_source_changed(&mut self, app: &mut AppContext<()>, power_source: PowerSource) {
         println!("Power source changed: {:?}", power_source);
     }
@@ -67,7 +110,10 @@ impl EventHandler<()> for App {
     ) {
         println!("Power preference changed: {:?}", power_preference);
     }
+}
 
+#[allow(unused_variables)]
+impl WindowFrameHandler<()> for App {
     fn activated(&mut self, app: &mut AppContext<()>, window: &mut Window<()>) {
         println!("Window activated");
     }
@@ -82,26 +128,6 @@ impl EventHandler<()> for App {
 
     fn drag_resize_ended(&mut self, app: &mut AppContext<()>, window: &mut Window<()>) {
         println!("Window drag resize ended");
-    }
-
-    fn resized(&mut self, app: &mut AppContext<()>, window: &mut Window<()>, size: WindowExtent) {
-        println!("Window resized: {:?}", size);
-    }
-
-    fn dpi_changed(
-        &mut self,
-        app: &mut AppContext<()>,
-        window: &mut Window<()>,
-        dpi: DpiScale,
-        size: WindowExtent,
-    ) {
-        println!("Window DPI changed: {:?}", dpi);
-        println!("Window size: {:?}", size);
-    }
-
-    fn close_requested(&mut self, _app: &mut AppContext<()>, window: &mut Window<()>) {
-        println!("Window close request");
-        window.destroy();
     }
 
     fn shown(&mut self, app: &mut AppContext<()>, window: &mut Window<()>) {
@@ -126,82 +152,5 @@ impl EventHandler<()> for App {
 
     fn moved(&mut self, app: &mut AppContext<()>, window: &mut Window<()>, position: WindowPoint) {
         println!("Window moved: {:?}", position);
-    }
-
-    fn wake_requested(&mut self, app: &mut AppContext<()>, window: &mut Window<()>) {
-        println!("Window wake requested");
-    }
-
-    fn repaint(
-        &mut self,
-        app: &mut AppContext<()>,
-        window: &mut Window<()>,
-        canvas: &mut Canvas,
-        frame_info: &FrameInfo,
-    ) {
-        println!("Window needs repaint");
-    }
-
-    fn destroyed(&mut self, _app: &mut AppContext<()>, _window_data: ()) {
-        println!("Window destroyed");
-    }
-
-    fn key(
-        &mut self,
-        app: &mut AppContext<()>,
-        window: &mut Window<()>,
-        code: KeyCode,
-        state: ButtonState,
-        modifiers: ModifierKeys,
-    ) {
-        println!("Key input: {:?} {:?} {:?}", code, state, modifiers);
-    }
-
-    fn mouse_button(
-        &mut self,
-        app: &mut AppContext<()>,
-        window: &mut Window<()>,
-        button: MouseButton,
-        state: ButtonState,
-        position: WindowPoint,
-        modifiers: ModifierKeys,
-    ) {
-        println!(
-            "Mouse button input: {:?} {:?} {:?} {:?}",
-            button, state, position, modifiers
-        );
-    }
-
-    fn pointer_moved(
-        &mut self,
-        app: &mut AppContext<()>,
-        window: &mut Window<()>,
-        position: WindowPoint,
-    ) {
-        println!("Mouse moved: {:?}", position);
-    }
-
-    fn pointer_entered(
-        &mut self,
-        app: &mut AppContext<()>,
-        window: &mut Window<()>,
-        position: WindowPoint,
-    ) {
-        println!("Mouse entered: {:?}", position);
-    }
-
-    fn pointer_left(&mut self, app: &mut AppContext<()>, window: &mut Window<()>) {
-        println!("Mouse left");
-    }
-
-    fn mouse_scrolled(
-        &mut self,
-        app: &mut AppContext<()>,
-        window: &mut Window<()>,
-        delta: f32,
-        axis: ScrollAxis,
-        modifiers: ModifierKeys,
-    ) {
-        println!("Mouse scrolled: {:?} {:?} {:?}", delta, axis, modifiers);
     }
 }

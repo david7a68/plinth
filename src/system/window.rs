@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::{arch::x86_64, borrow::Cow};
 
 use super::{
     platform_impl, {DpiScale, WindowExtent, WindowPoint},
@@ -116,6 +116,30 @@ impl Waker {
     }
 }
 
+bitflags::bitflags! {
+    pub(super) struct WindowFlags: u8 {
+        const IS_VISIBLE = 0b0000_0001;
+        const IS_RESIZABLE = 0b0000_0010;
+        const HAS_FOCUS = 0b0000_0100;
+        const HAS_POINTER = 0b0000_1000;
+        const IS_RESIZING = 0b0001_0000;
+        /// Keep this per-window, not per-event-loop because a different window
+        /// might get a resize event while this one is still resizing. If that
+        /// happens, we don't want the other window to get resize begin/end events.
+        const IN_DRAG_RESIZE = 0b0010_0000;
+    }
+}
+
+pub(super) struct WindowState {
+    pub title: Cow<'static, str>,
+    pub size: WindowExtent,
+    pub min_size: WindowExtent,
+    pub max_size: WindowExtent,
+    pub position: WindowPoint,
+    pub dpi: f32,
+    pub flags: WindowFlags,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct RefreshRateRequest {
     pub min: FramesPerSecond,
@@ -124,7 +148,9 @@ pub struct RefreshRateRequest {
 }
 
 pub struct Window<'a, User> {
-    pub(crate) window: platform_impl::Window<'a, User>,
+    pub(super) user: &'a mut User,
+    pub(super) state: &'a WindowState,
+    pub(super) window: platform_impl::Window,
 }
 
 impl<'a, Data> Window<'a, Data> {
@@ -145,17 +171,17 @@ impl<'a, Data> Window<'a, Data> {
 
     #[must_use]
     pub fn data(&self) -> &Data {
-        self.window.data()
+        self.user
     }
 
     #[must_use]
     pub fn data_mut(&mut self) -> &mut Data {
-        self.window.data_mut()
+        self.user
     }
 
     #[must_use]
     pub fn title(&self) -> &str {
-        self.window.title()
+        &self.state.title
     }
 
     pub fn set_title(&mut self, title: &str) {
@@ -164,7 +190,7 @@ impl<'a, Data> Window<'a, Data> {
 
     #[must_use]
     pub fn size(&self) -> WindowExtent {
-        self.window.size()
+        self.state.size
     }
 
     pub fn set_size(&mut self, size: WindowExtent) {
@@ -174,7 +200,7 @@ impl<'a, Data> Window<'a, Data> {
 
     #[must_use]
     pub fn min_size(&self) -> WindowExtent {
-        self.window.min_size()
+        self.state.min_size
     }
 
     pub fn set_min_size(&mut self, min_size: WindowExtent) {
@@ -184,7 +210,7 @@ impl<'a, Data> Window<'a, Data> {
 
     #[must_use]
     pub fn max_size(&self) -> WindowExtent {
-        self.window.max_size()
+        self.state.max_size
     }
 
     pub fn set_max_size(&mut self, max_size: WindowExtent) {
@@ -194,7 +220,7 @@ impl<'a, Data> Window<'a, Data> {
 
     #[must_use]
     pub fn position(&self) -> WindowPoint {
-        self.window.position()
+        self.state.position
     }
 
     pub fn set_position(&mut self, position: WindowPoint) {
@@ -203,7 +229,7 @@ impl<'a, Data> Window<'a, Data> {
 
     #[must_use]
     pub fn is_visible(&self) -> bool {
-        self.window.is_visible()
+        self.state.flags.contains(WindowFlags::IS_VISIBLE)
     }
 
     pub fn show(&mut self) {
@@ -216,22 +242,22 @@ impl<'a, Data> Window<'a, Data> {
 
     #[must_use]
     pub fn is_resizable(&self) -> bool {
-        self.window.is_resizable()
+        self.state.flags.contains(WindowFlags::IS_RESIZABLE)
     }
 
     #[must_use]
     pub fn dpi_scale(&self) -> DpiScale {
-        self.window.dpi_scale()
+        DpiScale::new(self.state.dpi)
     }
 
     #[must_use]
     pub fn has_focus(&self) -> bool {
-        self.window.has_focus()
+        self.state.flags.contains(WindowFlags::HAS_FOCUS)
     }
 
     #[must_use]
     pub fn has_pointer(&self) -> bool {
-        self.window.has_pointer()
+        self.state.flags.contains(WindowFlags::HAS_POINTER)
     }
 
     #[must_use]
@@ -250,13 +276,29 @@ impl<'a, Data> Window<'a, Data> {
 
 impl<'a, Meta, User> Window<'a, (Meta, User)> {
     pub(crate) fn split(self) -> (&'a mut Meta, Window<'a, User>) {
-        self.window.split()
+        let (meta, user) = self.user;
+        (
+            meta,
+            Window {
+                user,
+                state: self.state,
+                window: self.window,
+            },
+        )
     }
 }
 
 impl<'a, Data> Window<'a, Option<Data>> {
     pub fn extract_option(self) -> Option<Window<'a, Data>> {
-        self.window.extract_option().map(|window| Window { window })
+        if let Some(user) = self.user {
+            Some(Window {
+                user,
+                state: self.state,
+                window: self.window,
+            })
+        } else {
+            None
+        }
     }
 }
 
@@ -264,12 +306,12 @@ impl<User> std::ops::Deref for Window<'_, User> {
     type Target = User;
 
     fn deref(&self) -> &Self::Target {
-        self.window.data()
+        self.user
     }
 }
 
 impl<User> std::ops::DerefMut for Window<'_, User> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        self.window.data_mut()
+        self.user
     }
 }

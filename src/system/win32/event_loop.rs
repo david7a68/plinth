@@ -46,8 +46,8 @@ use crate::{
 use super::{
     api, input,
     window::{
-        from_defer_show, post_defer_show, CreateStruct, HandlerContext, WindowError, WindowState,
-        UM_DEFER_DESTROY, UM_DEFER_PAINT, UM_DEFER_SHOW, UM_WAKE,
+        from_defer_show, post_defer_show, CreateStruct, HandlerContext, Win32WindowState,
+        WindowError, UM_DEFER_DESTROY, UM_DEFER_PAINT, UM_DEFER_SHOW, UM_WAKE,
     },
 };
 
@@ -238,7 +238,7 @@ struct WndProcState<WindowData, H: Handler<WindowData>> {
 
     hwnds: [Cell<HWND>; SYS_WINDOW_COUNT_MAX],
     window_data: [RefCell<MaybeUninit<WindowData>>; SYS_WINDOW_COUNT_MAX],
-    window_states: [RefCell<MaybeUninit<WindowState>>; SYS_WINDOW_COUNT_MAX],
+    window_states: [RefCell<MaybeUninit<Win32WindowState>>; SYS_WINDOW_COUNT_MAX],
 }
 
 impl<WindowData, H: Handler<WindowData>> WndProcState<WindowData, H> {
@@ -260,7 +260,7 @@ impl<WindowData, H: Handler<WindowData>> WndProcState<WindowData, H> {
     fn get_context_by_index(&self, index: usize) -> HandlerContext<WindowData, H> {
         HandlerContext {
             hwnd: &self.hwnds[index],
-            data: &self.window_data[index],
+            user: &self.window_data[index],
             state: &self.window_states[index],
             event_handler: &self.event_handler,
             event_loop: self.as_active_event_loop(),

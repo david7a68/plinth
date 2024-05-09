@@ -1,7 +1,6 @@
 use std::{
     borrow::Cow,
     cell::{Cell, RefCell},
-    marker::PhantomData,
     mem::MaybeUninit,
 };
 
@@ -28,7 +27,7 @@ use crate::{
         event_loop::{Event, Handler, InputEvent, WindowEvent},
         input::{ButtonState, ModifierKeys, MouseButton, ScrollAxis},
         window::{PaintReason, RefreshRateRequest},
-        DpiScale, WindowExtent, WindowPoint,
+        DpiScale, WindowExtent, WindowFlags, WindowPoint, WindowState,
     },
     time::FramesPerSecond,
 };
@@ -80,35 +79,16 @@ pub struct CreateStruct<'a, WindowData> {
     pub is_resizable: bool,
 }
 
-bitflags::bitflags! {
-    pub(crate) struct WindowFlags: u8 {
-        const IS_VISIBLE = 0b0000_0001;
-        const IS_RESIZABLE = 0b0000_0010;
-        const HAS_FOCUS = 0b0000_0100;
-        const HAS_POINTER = 0b0000_1000;
-        const IS_RESIZING = 0b0001_0000;
-        /// Keep this per-window, not per-event-loop because a different window
-        /// might get a resize event while this one is still resizing. If that
-        /// happens, we don't want the other window to get resize begin/end events.
-        const IN_DRAG_RESIZE = 0b0010_0000;
-    }
-}
-
-pub(crate) struct WindowState {
-    pub title: Cow<'static, str>,
-    pub size: WindowExtent,
-    pub min_size: WindowExtent,
-    pub max_size: WindowExtent,
-    pub position: WindowPoint,
-    pub dpi: u16,
-    pub flags: WindowFlags,
-    pub paint_reason: Option<PaintReason>,
+pub(super) struct Win32WindowState {
+    pub state: WindowState,
+    pub paint: Option<PaintReason>,
+    pub raw_dpi: u16,
 }
 
 pub(crate) struct HandlerContext<'a, WindowData, H: Handler<WindowData>> {
     pub hwnd: &'a Cell<HWND>,
-    pub data: &'a RefCell<MaybeUninit<WindowData>>,
-    pub state: &'a RefCell<MaybeUninit<WindowState>>,
+    pub user: &'a RefCell<MaybeUninit<WindowData>>,
+    pub state: &'a RefCell<MaybeUninit<Win32WindowState>>,
     pub event_handler: &'a RefCell<H>,
     pub event_loop: api::ActiveEventLoop<WindowData>,
 }
@@ -148,27 +128,27 @@ impl<'a, WindowData, H: Handler<WindowData>> HandlerContext<'a, WindowData, H> {
                 flags |= WindowFlags::IS_RESIZABLE;
             }
 
-            WindowState {
-                title: unsafe { create_struct.title.take().unwrap_unchecked() },
-                size,
-                max_size: create_struct.max_size,
-                min_size: create_struct.min_size,
-                position,
-                dpi: u16::try_from(dpi).unwrap(),
-                flags,
-                paint_reason: None,
+            Win32WindowState {
+                state: WindowState {
+                    title: unsafe { create_struct.title.take().unwrap_unchecked() },
+                    size,
+                    max_size: create_struct.max_size,
+                    min_size: create_struct.min_size,
+                    position,
+                    dpi: dpi as f32 / DEFAULT_DPI as f32,
+                    flags,
+                },
+                paint: None,
+                raw_dpi: u16::try_from(dpi).unwrap(),
             }
         });
 
-        self.data.borrow_mut().write({
+        self.user.borrow_mut().write({
             let state = self.state.borrow();
             let window = api::Window {
-                window: Window {
-                    hwnd,
-                    state: unsafe { state.assume_init_ref() },
-                    data: &mut (),
-                    _phantom: PhantomData,
-                },
+                user: &mut (),
+                state: unsafe { &state.assume_init_ref().state },
+                window: Window { hwnd },
             };
 
             unsafe { (*create_struct.constructor).borrow_mut()(window) }
@@ -198,7 +178,7 @@ impl<'a, WindowData, H: Handler<WindowData>> HandlerContext<'a, WindowData, H> {
     }
 
     pub fn show(&mut self, is_visible: bool) {
-        self.with_state(|window| window.flags.set(WindowFlags::IS_VISIBLE, is_visible));
+        self.with_state(|window| window.state.flags.set(WindowFlags::IS_VISIBLE, is_visible));
 
         if is_visible {
             self.event(WindowEvent::Shown);
@@ -213,15 +193,15 @@ impl<'a, WindowData, H: Handler<WindowData>> HandlerContext<'a, WindowData, H> {
         // idempotent. Not sure _why_ it's called more than once.
         //
         // -dz (2024-03-03)
-        self.with_state(|window| window.flags.set(WindowFlags::IN_DRAG_RESIZE, true));
+        self.with_state(|window| window.state.flags.set(WindowFlags::IN_DRAG_RESIZE, true));
     }
 
     pub fn modal_loop_leave(&mut self) {
         let resize_ended: bool = self.with_state(|window| {
-            window.flags.remove(WindowFlags::IN_DRAG_RESIZE);
+            window.state.flags.remove(WindowFlags::IN_DRAG_RESIZE);
 
-            let ended = window.flags.contains(WindowFlags::IS_RESIZING);
-            window.flags.set(WindowFlags::IS_RESIZING, false);
+            let ended = window.state.flags.contains(WindowFlags::IS_RESIZING);
+            window.state.flags.set(WindowFlags::IS_RESIZING, false);
             ended
         });
 
@@ -234,9 +214,10 @@ impl<'a, WindowData, H: Handler<WindowData>> HandlerContext<'a, WindowData, H> {
         let (size, _) = unpack_rect(rect);
 
         self.with_state(|window| {
-            window.dpi = dpi;
-            window.size = size; // update size to suppress resize event in WM_WINDOWPOSCHANGED
-            window.paint_reason = Some(PaintReason::Commanded);
+            window.state.dpi = dpi as f32 / DEFAULT_DPI as f32;
+            window.state.size = size; // update size to suppress resize event in WM_WINDOWPOSCHANGED
+            window.paint = Some(PaintReason::Commanded);
+            window.raw_dpi = dpi;
         });
 
         unsafe {
@@ -258,11 +239,16 @@ impl<'a, WindowData, H: Handler<WindowData>> HandlerContext<'a, WindowData, H> {
     }
 
     pub fn get_min_max_info(&mut self, mmi: &mut MINMAXINFO) {
-        let (min, max, dpi) =
-            self.with_state(|window| (window.min_size, window.max_size, u32::from(window.dpi)));
+        let (min, max, dpi) = self.with_state(|window| {
+            (
+                window.state.min_size,
+                window.state.max_size,
+                window.raw_dpi as u32,
+            )
+        });
 
         debug_assert!(min.width <= max.width && min.height <= max.height);
-        debug_assert!(dpi >= DEFAULT_DPI as u32);
+        debug_assert!(dpi >= DEFAULT_DPI.into());
 
         let min_x = (min.width as i32).max(unsafe { GetSystemMetricsForDpi(SM_CXMINTRACK, dpi) });
         let min_y = (min.height as i32).max(unsafe { GetSystemMetricsForDpi(SM_CYMINTRACK, dpi) });
@@ -285,22 +271,23 @@ impl<'a, WindowData, H: Handler<WindowData>> HandlerContext<'a, WindowData, H> {
 
         let (resized, moved) = self.with_state(|window| {
             let resized = {
-                let resized = width != window.size.width || height != window.size.height;
-                let is_start = resized && window.flags.contains(WindowFlags::IN_DRAG_RESIZE);
+                let resized =
+                    width != window.state.size.width || height != window.state.size.height;
+                let is_start = resized && window.state.flags.contains(WindowFlags::IN_DRAG_RESIZE);
 
-                window.size = WindowExtent::new(width, height);
-                window.flags.set(WindowFlags::IS_RESIZING, true);
-                window.paint_reason = resized
+                window.state.size = WindowExtent::new(width, height);
+                window.state.flags.set(WindowFlags::IS_RESIZING, true);
+                window.paint = resized
                     .then_some(PaintReason::Commanded) // override if resized
-                    .or(window.paint_reason); // else keep the current reason
+                    .or(window.paint); // else keep the current reason
 
-                resized.then_some((is_start, window.size))
+                resized.then_some((is_start, window.state.size))
             };
 
             let moved = {
-                let moved = x != window.position.x || y != window.position.y;
-                window.position = WindowPoint { x, y };
-                moved.then_some(window.position)
+                let moved = x != window.state.position.x || y != window.state.position.y;
+                window.state.position = WindowPoint { x, y };
+                moved.then_some(window.state.position)
             };
 
             (resized, moved)
@@ -321,7 +308,7 @@ impl<'a, WindowData, H: Handler<WindowData>> HandlerContext<'a, WindowData, H> {
 
     pub fn paint_defer(&mut self) {
         self.with_state(|window| {
-            window.paint_reason = if let Some(reason) = window.paint_reason {
+            window.paint = if let Some(reason) = window.paint {
                 Some(reason.max(PaintReason::Requested))
             } else {
                 Some(PaintReason::Requested)
@@ -342,7 +329,7 @@ impl<'a, WindowData, H: Handler<WindowData>> HandlerContext<'a, WindowData, H> {
         let _ = unsafe { EndPaint(self.hwnd.get(), &ps) };
 
         let reason = self
-            .with_state(|window| window.paint_reason.take())
+            .with_state(|window| window.paint.take())
             .unwrap_or(PaintReason::Commanded); // assume no reason means it's from the OS
 
         self.event(WindowEvent::Repaint(reason));
@@ -350,8 +337,8 @@ impl<'a, WindowData, H: Handler<WindowData>> HandlerContext<'a, WindowData, H> {
 
     pub fn mouse_move(&mut self, position: WindowPoint) {
         let entered = self.with_state(|window| {
-            let has_pointer = window.flags.contains(WindowFlags::HAS_POINTER);
-            window.flags.set(WindowFlags::HAS_POINTER, true);
+            let has_pointer = window.state.flags.contains(WindowFlags::HAS_POINTER);
+            window.state.flags.set(WindowFlags::HAS_POINTER, true);
             !has_pointer
         });
 
@@ -373,7 +360,7 @@ impl<'a, WindowData, H: Handler<WindowData>> HandlerContext<'a, WindowData, H> {
     }
 
     pub fn mouse_leave(&mut self) {
-        self.with_state(|window| window.flags.set(WindowFlags::HAS_POINTER, false));
+        self.with_state(|window| window.state.flags.set(WindowFlags::HAS_POINTER, false));
         self.input(InputEvent::PointerLeft);
     }
 
@@ -392,7 +379,7 @@ impl<'a, WindowData, H: Handler<WindowData>> HandlerContext<'a, WindowData, H> {
     }
 
     #[inline]
-    pub fn with_state<T>(&mut self, f: impl FnOnce(&mut WindowState) -> T) -> T {
+    pub fn with_state<T>(&mut self, f: impl FnOnce(&mut Win32WindowState) -> T) -> T {
         assert_ne!(self.hwnd.get(), HWND::default(), "Window not initialized.");
 
         let mut state = self.state.borrow_mut();
@@ -403,14 +390,13 @@ impl<'a, WindowData, H: Handler<WindowData>> HandlerContext<'a, WindowData, H> {
     pub fn event(&mut self, event: WindowEvent) {
         assert_ne!(self.hwnd.get(), HWND::default(), "Window not initialized.");
 
-        let (state, mut data) = (self.state.borrow(), self.data.borrow_mut());
+        let (state, mut user) = (self.state.borrow(), self.user.borrow_mut());
         let mut handler = self.event_handler.borrow_mut();
         let window = api::Window {
+            user: unsafe { user.assume_init_mut() },
+            state: unsafe { &state.assume_init_ref().state },
             window: Window {
                 hwnd: self.hwnd.get(),
-                state: unsafe { state.assume_init_ref() },
-                data: unsafe { data.assume_init_mut() },
-                _phantom: PhantomData,
             },
         };
 
@@ -420,14 +406,13 @@ impl<'a, WindowData, H: Handler<WindowData>> HandlerContext<'a, WindowData, H> {
     fn input(&mut self, event: InputEvent) {
         assert_ne!(self.hwnd.get(), HWND::default(), "Window not initialized.");
 
-        let (state, mut data) = (self.state.borrow(), self.data.borrow_mut());
+        let (state, mut user) = (self.state.borrow(), self.user.borrow_mut());
         let mut handler = self.event_handler.borrow_mut();
         let window = api::Window {
+            user: unsafe { user.assume_init_mut() },
+            state: unsafe { &state.assume_init_ref().state },
             window: Window {
                 hwnd: self.hwnd.get(),
-                state: unsafe { state.assume_init_ref() },
-                data: unsafe { data.assume_init_mut() },
-                _phantom: PhantomData,
             },
         };
 
@@ -435,14 +420,11 @@ impl<'a, WindowData, H: Handler<WindowData>> HandlerContext<'a, WindowData, H> {
     }
 }
 
-pub struct Window<'a, Data> {
+pub struct Window {
     hwnd: HWND,
-    state: &'a WindowState,
-    data: &'a mut Data,
-    _phantom: std::marker::PhantomData<&'a ()>,
 }
 
-impl<'a, Data> Window<'a, Data> {
+impl Window {
     pub fn waker(&self) -> api::Waker {
         api::Waker {
             waker: Waker { target: self.hwnd },
@@ -457,25 +439,9 @@ impl<'a, Data> Window<'a, Data> {
         self.hwnd
     }
 
-    pub fn data(&self) -> &Data {
-        self.data
-    }
-
-    pub fn data_mut(&mut self) -> &mut Data {
-        self.data
-    }
-
-    pub fn title(&self) -> &str {
-        &self.state.title
-    }
-
     #[allow(unused_variables)]
     pub fn set_title(&mut self, title: &str) {
         todo!()
-    }
-
-    pub fn size(&self) -> WindowExtent {
-        self.state.size
     }
 
     #[allow(unused_variables)]
@@ -483,17 +449,9 @@ impl<'a, Data> Window<'a, Data> {
         todo!()
     }
 
-    pub fn min_size(&self) -> WindowExtent {
-        self.state.min_size
-    }
-
     pub fn set_min_size(&mut self, min_size: WindowExtent) {
         let _ = min_size;
         todo!()
-    }
-
-    pub fn max_size(&self) -> WindowExtent {
-        self.state.max_size
     }
 
     pub fn set_max_size(&mut self, max_size: WindowExtent) {
@@ -501,17 +459,9 @@ impl<'a, Data> Window<'a, Data> {
         todo!()
     }
 
-    pub fn position(&self) -> WindowPoint {
-        self.state.position
-    }
-
     #[allow(unused_variables)]
     pub fn set_position(&mut self, position: WindowPoint) {
         todo!()
-    }
-
-    pub fn is_visible(&self) -> bool {
-        self.state.flags.contains(WindowFlags::IS_VISIBLE)
     }
 
     pub fn show(&mut self) {
@@ -520,23 +470,6 @@ impl<'a, Data> Window<'a, Data> {
 
     pub fn hide(&mut self) {
         post_defer_show(self.hwnd, SW_HIDE);
-    }
-
-    pub fn is_resizable(&self) -> bool {
-        self.state.flags.contains(WindowFlags::IS_RESIZABLE)
-    }
-
-    pub fn dpi_scale(&self) -> DpiScale {
-        let factor = f32::from(self.state.dpi) / f32::from(DEFAULT_DPI);
-        DpiScale::new(factor)
-    }
-
-    pub fn has_focus(&self) -> bool {
-        self.state.flags.contains(WindowFlags::HAS_FOCUS)
-    }
-
-    pub fn has_pointer(&self) -> bool {
-        self.state.flags.contains(WindowFlags::HAS_POINTER)
     }
 
     pub fn frame_rate(&self) -> FramesPerSecond {
@@ -550,37 +483,6 @@ impl<'a, Data> Window<'a, Data> {
 
     pub fn request_repaint(&mut self) {
         unsafe { PostMessageW(self.hwnd, UM_DEFER_PAINT, None, None) }.unwrap();
-    }
-}
-
-impl<'a, Meta, User> Window<'a, (Meta, User)> {
-    pub fn split(self) -> (&'a mut Meta, api::Window<'a, User>) {
-        let (meta, user) = self.data;
-        (
-            meta,
-            api::Window {
-                window: Window {
-                    hwnd: self.hwnd,
-                    state: self.state,
-                    data: user,
-                    _phantom: PhantomData,
-                },
-            },
-        )
-    }
-}
-
-impl<'a, Data> Window<'a, Option<Data>> {
-    pub fn extract_option(self) -> Option<Window<'a, Data>> {
-        match self.data {
-            Some(data) => Some(Window {
-                hwnd: self.hwnd,
-                state: self.state,
-                data,
-                _phantom: PhantomData,
-            }),
-            None => None,
-        }
     }
 }
 

@@ -7,7 +7,6 @@ mod image;
 pub(crate) mod limits;
 mod primitives;
 mod text;
-mod texture_atlas;
 
 use windows::Win32::Foundation::HWND;
 
@@ -21,11 +20,11 @@ use crate::{
 use self::{
     draw_list::CommandMut,
     gl::Device,
+    image::AtlasMap,
     limits::{
         GFX_ATLAS_EXTENT_MAX, GFX_ATLAS_EXTENT_MIN, GFX_IMAGE_EXTENT_MAX, GFX_IMAGE_EXTENT_MIN,
     },
     text::TextEngine,
-    texture_atlas::TextureCache,
 };
 
 pub(crate) use self::gl::Swapchain;
@@ -35,7 +34,7 @@ pub use self::{
     color::Color,
     draw_list::DrawList,
     gl::RenderTarget,
-    image::{Error as ImageError, Format, Image, Info as ImageInfo, Layout, RasterBuf},
+    image::{Error as ImageError, Format, Image, ImageInfo, Layout, RasterBuf},
     primitives::RoundRect,
     text::{
         Error as TextError, FontOptions, Pt, Shape as FontShape, TextBox, TextLayout, TextWrapMode,
@@ -58,6 +57,18 @@ new_rect! {
 }
 
 impl UvRect {
+    pub const ONE: Self = Self {
+        origin: UvPoint { u: 0.0, v: 0.0 },
+        extent: UvExtent {
+            width: 1.0,
+            height: 1.0,
+        },
+    };
+
+    pub fn from_texture_rect(texture_rect: TextureRect, texture: TextureExtent) -> Self {
+        texture_rect.uv_in(texture)
+    }
+
     pub fn to_uvwh(&self) -> [f32; 4] {
         [
             self.origin.u,
@@ -122,7 +133,7 @@ new_rect! {
     ImageRect(u16, ImagePoint, ImageExtent),
 }
 
-new_key_type!(TextureId);
+pub use gl::TextureId;
 
 new_point! {
     #[derive(Eq)]
@@ -131,7 +142,7 @@ new_point! {
 }
 
 new_extent! {
-    #[derive(Eq)]
+    #[derive(Eq, Hash)]
     TextureExtent(u16, 0),
     { limit: GFX_ATLAS_EXTENT_MIN, GFX_ATLAS_EXTENT_MAX, "Texture extent out of limits" },
 }
@@ -215,7 +226,7 @@ pub struct FrameInfo {
 
 pub struct Graphics {
     device: Device,
-    texture_cache: TextureCache,
+    images: AtlasMap,
     text_engine: TextEngine,
 }
 
@@ -223,26 +234,25 @@ impl Graphics {
     pub(crate) fn new(config: &GraphicsConfig) -> Self {
         let device = Device::new(config);
 
-        let textures = TextureCache::new(
-            ImageExtent::new(1, 1),
-            Layout::Rgba8,
-            Format::Linear,
-            |extent, layout, format| device.create_texture(extent, layout, format),
-        );
+        let mut images = AtlasMap::new(TextureExtent::new(1024, 1024));
 
-        let id = textures.default();
-        let (white_pixel_texture, white_pixel) = textures.get_rect(id);
+        let white_pixel_info = ImageInfo {
+            extent: ImageExtent::new(1, 1),
+            layout: Layout::Rgba8,
+            format: Format::Linear,
+        };
+
+        let white_pixel = images
+            .insert(white_pixel_info, &mut |info| {
+                device.create_texture(info.extent, info.layout, info.format)
+            })
+            .unwrap();
+
+        assert_eq!(white_pixel.image, ImageId::from_raw(0));
 
         device.copy_raster_to_texture(
-            white_pixel_texture,
-            &RasterBuf::new(
-                ImageInfo {
-                    extent: white_pixel.extent.into(),
-                    layout: Layout::Rgba8,
-                    format: Format::Linear,
-                },
-                &[0xFF, 0xFF, 0xFF, 0xFF],
-            ),
+            white_pixel.store,
+            &RasterBuf::new(white_pixel_info, &[0xFF, 0xFF, 0xFF, 0xFF]),
             TexturePoint::new(0, 0),
         );
 
@@ -252,7 +262,7 @@ impl Graphics {
 
         Self {
             device,
-            texture_cache: textures,
+            images,
             text_engine,
         }
     }
@@ -263,16 +273,14 @@ impl Graphics {
     }
 
     pub fn create_raster_image(&mut self, info: ImageInfo) -> Result<Image, ImageError> {
-        let (_, texture_id) = self.texture_cache.insert_rect(
-            info.extent,
-            info.layout,
-            info.format,
-            |extent, layout, format| self.device.create_texture(extent, layout, format),
-        );
+        let mapping = self.images.insert(info, &mut |info| {
+            self.device
+                .create_texture(info.extent, info.layout, info.format)
+        })?;
 
         let image = Image {
             info: info.pack(),
-            id: texture_id,
+            id: mapping.image,
         };
 
         Ok(image)
@@ -286,10 +294,10 @@ impl Graphics {
         image: Image,
         pixels: &RasterBuf,
     ) -> Result<(), ImageError> {
-        let (texture, rect) = self.texture_cache.get_rect(image.id);
+        let mapping = self.images.get(image.id)?;
 
         self.device
-            .copy_raster_to_texture(texture, pixels, rect.origin);
+            .copy_raster_to_texture(mapping.store, pixels, mapping.place.origin);
 
         Ok(())
     }
@@ -315,12 +323,9 @@ impl Graphics {
             match cmd {
                 CommandMut::Rects { rects } => {
                     for rect in rects {
-                        let (texture_id, uvwh) = self
-                            .texture_cache
-                            .get_uv_rect(ImageId::from_raw(rect.texture_id));
-
-                        rect.uvwh = uvwh.to_uvwh();
-                        rect.texture_id = texture_id.to_raw();
+                        let mapping = self.images.get(ImageId::from_raw(rect.texture_id)).unwrap();
+                        rect.uvwh = mapping.uvwh.to_uvwh();
+                        rect.texture_id = mapping.store.to_raw();
                     }
                 }
                 CommandMut::Chars { layout, glyphs } => {

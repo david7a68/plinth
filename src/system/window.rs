@@ -1,4 +1,4 @@
-use std::{arch::x86_64, borrow::Cow};
+use std::borrow::Cow;
 
 use super::{
     platform_impl, {DpiScale, WindowExtent, WindowPoint},

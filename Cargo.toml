@@ -7,6 +7,7 @@ edition = "2021"
 default = []
 
 [dependencies]
+allocator-api2 = "0.2.18"
 arrayvec = "0.7"
 bitfield-struct = "0.6"
 bitflags = "2.5"

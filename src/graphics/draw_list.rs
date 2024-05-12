@@ -1,11 +1,8 @@
 use core::panic;
 
-use crate::{geometry::Point, graphics::color::Color};
+use crate::graphics::color::Color;
 
-use super::{
-    text::{LayoutId, TextLayout},
-    TextureRect,
-};
+use super::TextureRect;
 
 #[repr(u32)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -72,10 +69,6 @@ pub enum Command<'a> {
     Rects {
         rects: &'a [Primitive],
     },
-    Chars {
-        layout: LayoutId,
-        glyphs: &'a [Primitive],
-    },
 }
 
 pub enum CommandMut<'a> {
@@ -90,10 +83,6 @@ pub enum CommandMut<'a> {
     Rects {
         rects: &'a mut [Primitive],
     },
-    Chars {
-        layout: LayoutId,
-        glyphs: &'a mut [Primitive],
-    },
 }
 
 #[derive(Clone)]
@@ -107,11 +96,6 @@ enum Command_ {
     Rects {
         first: u32,
         count: u32,
-    },
-    Chars {
-        first: u32,
-        count: u32,
-        layout: LayoutId,
     },
 }
 
@@ -186,35 +170,6 @@ impl DrawList {
         self.prim_count += 1;
     }
 
-    /// Adds a command to draw the characters of a text layout.
-    ///
-    /// Reserves space for the characters in the prims array but does not fill
-    /// them with data. A second pass is required to fill the prims array with
-    /// the actual glyphs to draw.
-    pub fn draw_chars(&mut self, layout: &TextLayout, at: Point) {
-        assert!(!self.closed, "DrawList is closed");
-        self.flush_prims();
-
-        let count = layout.glyph_count();
-
-        self.commands.push(Command_::Chars {
-            first: self.prim_start,
-            count,
-            layout: layout.id(),
-        });
-
-        self.prims.extend(
-            std::iter::once(Primitive {
-                xywh: [at.x, at.y, 0.0, 0.0],
-                ..Primitive::DEFAULT
-            })
-            .chain(std::iter::repeat(Primitive::DEFAULT))
-            .take(count as usize),
-        );
-
-        self.prim_start += count;
-    }
-
     fn flush_prims(&mut self) {
         if self.prim_count > 0 {
             let command = Command_::Rects {
@@ -260,14 +215,6 @@ impl<'a> Iterator for CommandIter<'a> {
                 Command_::Rects { first, count } => Command::Rects {
                     rects: &self.prims[first as usize..(first + count) as usize],
                 },
-                Command_::Chars {
-                    first,
-                    count,
-                    layout,
-                } => Command::Chars {
-                    layout,
-                    glyphs: &self.prims[first as usize..(first + count) as usize],
-                },
             };
 
             Some(r)
@@ -301,17 +248,6 @@ impl<'a> Iterator for CommandIterMut<'a> {
                     self.prims = tail;
 
                     CommandMut::Rects { rects }
-                }
-                Command_::Chars {
-                    first: _,
-                    count,
-                    layout,
-                } => {
-                    let slice = std::mem::take(&mut self.prims);
-                    let (glyphs, tail) = slice.split_at_mut(count as usize);
-                    self.prims = tail;
-
-                    CommandMut::Chars { layout, glyphs }
                 }
             };
 

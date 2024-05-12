@@ -653,10 +653,6 @@ impl Frame {
                     unsafe { command_list.DrawInstanced(4, count, 0, rect_start) };
                     rect_start += count;
                 }
-                Command::Chars {
-                    glyphs: _,
-                    layout: _,
-                } => unreachable!(),
             }
         }
     }

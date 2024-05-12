@@ -21,7 +21,7 @@ use windows::{
 
 use crate::{
     core::{
-        arena::Arena,
+        arena::{Arena, Array},
         slotmap::{new_key_type, SlotMap},
         static_lru_cache::LruCache,
         PassthroughBuildHasher,
@@ -62,16 +62,6 @@ impl Pt {
     }
 }
 
-pub fn layout_text(
-    temp: &mut Arena,
-    text: &str,
-    block: TextBox,
-    style: FontOptions,
-    scale: DpiScale,
-) -> TextLayout {
-    todo!()
-}
-
 pub struct TextEngine {
     factory: IDWriteFactory,
     default_format: IDWriteTextFormat,
@@ -93,10 +83,6 @@ impl TextEngine {
         }
     }
 
-    pub fn get(&self, id: LayoutId) -> Option<&TextLayout> {
-        todo!()
-    }
-
     pub fn layout_text(
         &self,
         temp: &mut Arena,
@@ -106,10 +92,8 @@ impl TextEngine {
         scale: DpiScale,
     ) -> TextLayout {
         let chars = {
-            let mut arr = temp
-                .make_array(u32::try_from(text.len()).unwrap())
-                .expect("Out of temp memory");
-            arr.extend(temp, text.encode_utf16());
+            let mut arr = Array::with_capacity_in(text.len(), temp);
+            arr.extend(text.encode_utf16());
             arr
         };
 
@@ -125,13 +109,6 @@ impl TextEngine {
         .unwrap();
 
         TextLayout { inner }
-    }
-
-    pub fn tick(&self) {
-        // update layout cache, evicting entries that have not been used in the
-        // past N ticks.
-
-        todo!()
     }
 
     pub fn rasterize<'a>(

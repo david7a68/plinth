@@ -2,10 +2,7 @@ use std::{collections::HashMap, marker::PhantomData};
 
 use crate::{
     core::{arena::Arena, PassthroughBuildHasher},
-    graphics::{
-        Canvas, DrawList, FontOptions, FrameInfo, Graphics, GraphicsConfig, Image, Swapchain,
-        TextBox, TextLayout,
-    },
+    graphics::{DrawList, FrameInfo, Graphics, GraphicsConfig, Image, Swapchain},
     hash::HashedStr,
     limits::{ResourcePath, GFX_IMAGE_COUNT_MAX},
     resource::{Error as ResourceError, Resource, StaticResource},
@@ -14,9 +11,11 @@ use crate::{
             ActiveEventLoop, AppEvent, Event, EventLoop, EventLoopError, Handler, InputEvent,
             WindowEvent,
         },
-        DpiScale, MonitorState, PowerPreference, PowerSource, Window, WindowAttributes,
+        Dpi, DpiScale, MonitorState, PowerPreference, PowerSource, Window, WindowAttributes,
         WindowError, WindowExtent, WindowPoint,
     },
+    text::{GlyphCache, TextEngine},
+    Canvas,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -25,7 +24,7 @@ pub enum Error {
     EventLoop(#[from] EventLoopError),
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Config {
     pub resources: &'static [StaticResource],
     pub graphics: GraphicsConfig,
@@ -43,10 +42,7 @@ impl Default for Config {
 }
 
 pub struct Application {
-    event_loop: EventLoop,
-    frame_arena: Arena,
-    resources: HashMap<u64, Resource, PassthroughBuildHasher>,
-    graphics: Graphics,
+    config: Config,
 }
 
 impl Application {
@@ -59,36 +55,8 @@ impl Application {
     /// This will fail if the event loop could not be initialized, or if an
     /// application has already been initialized.
     pub fn new(config: &Config) -> Result<Self, Error> {
-        assert!(config.resources.len() <= GFX_IMAGE_COUNT_MAX);
-
-        let frame_arena = Arena::new(config.frame_arena_size).unwrap();
-
-        let mut graphics = Graphics::new(&config.graphics);
-
-        let mut resources =
-            HashMap::with_capacity_and_hasher(GFX_IMAGE_COUNT_MAX, PassthroughBuildHasher::new());
-
-        // todo: use a thread pool a la rayon to load resources in parallel
-
-        for resource in config.resources {
-            match resource {
-                StaticResource::Raster(name, pixels) => {
-                    let image = graphics.create_raster_image(pixels.info()).unwrap();
-                    graphics.upload_raster_image(image, pixels).unwrap();
-                    resources.insert(name.hash.0, Resource::Image(image));
-                }
-            }
-        }
-
-        graphics.flush_upload_buffer();
-
-        let event_loop = EventLoop::new()?;
-
         Ok(Self {
-            event_loop,
-            frame_arena,
-            resources,
-            graphics,
+            config: config.clone(),
         })
     }
 
@@ -103,12 +71,42 @@ impl Application {
         &mut self,
         event_handler: H,
     ) -> Result<(), Error> {
-        self.event_loop
+        assert!(self.config.resources.len() <= GFX_IMAGE_COUNT_MAX);
+
+        let frame_arena = Arena::new(self.config.frame_arena_size);
+
+        let mut graphics = Graphics::new(&self.config.graphics);
+
+        let mut resources =
+            HashMap::with_capacity_and_hasher(GFX_IMAGE_COUNT_MAX, PassthroughBuildHasher::new());
+
+        // todo: use a thread pool a la rayon to load resources in parallel
+
+        for resource in self.config.resources {
+            match resource {
+                StaticResource::Raster(name, pixels) => {
+                    let image = graphics.create_raster_image(pixels.info()).unwrap();
+                    graphics.upload_raster_image(image, pixels).unwrap();
+                    resources.insert(name.hash.0, Resource::Image(image));
+                }
+            }
+        }
+
+        graphics.flush_upload_buffer();
+
+        let mut event_loop = EventLoop::new()?;
+
+        let text_engine = TextEngine::new("en-us");
+        let glyph_cache = GlyphCache::new();
+
+        event_loop
             .run(ApplicationEventHandler {
                 client: event_handler,
-                frame_arena: &mut self.frame_arena,
-                resources: &mut self.resources,
-                graphics: &self.graphics,
+                frame_arena,
+                resources,
+                graphics,
+                text_engine,
+                glyph_cache,
                 phantom: PhantomData,
             })
             .map_err(Error::EventLoop)
@@ -136,10 +134,6 @@ impl<'a, UserWindowData> AppContext<'a, UserWindowData> {
             resources,
             event_loop: Some(event_loop),
         }
-    }
-
-    pub fn layout_text(&mut self, text: &str, font: FontOptions, rect: TextBox) -> TextLayout {
-        todo!()
     }
 
     /// Loads an image from a path.
@@ -344,23 +338,25 @@ struct WindowState<'a> {
     to_resize: WindowExtent,
 }
 
-struct ApplicationEventHandler<'a, UserData, Client: EventHandler<UserData>> {
+struct ApplicationEventHandler<UserData, Client: EventHandler<UserData>> {
     client: Client,
-    frame_arena: &'a mut Arena,
-    resources: &'a mut HashMap<u64, Resource, PassthroughBuildHasher>,
-    graphics: &'a Graphics,
+    frame_arena: Arena,
+    resources: HashMap<u64, Resource, PassthroughBuildHasher>,
+    graphics: Graphics,
+    text_engine: TextEngine,
+    glyph_cache: GlyphCache,
     phantom: PhantomData<UserData>,
 }
 
 impl<'a, UserData, Client: EventHandler<UserData>> Handler<(WindowState<'a>, Option<UserData>)>
-    for ApplicationEventHandler<'a, UserData, Client>
+    for ApplicationEventHandler<UserData, Client>
 {
     fn handle(
         &mut self,
         event_loop: &ActiveEventLoop<(WindowState, Option<UserData>)>,
         event: Event<(WindowState, Option<UserData>)>,
     ) {
-        let mut cx = AppContext::new(self.graphics, self.resources, event_loop);
+        let mut cx = AppContext::new(&self.graphics, &mut self.resources, event_loop);
 
         match event {
             Event::App(event) => match event {
@@ -464,17 +460,16 @@ impl<'a, UserData, Client: EventHandler<UserData>> Handler<(WindowState<'a>, Opt
                         let mut image = meta.swapchain.next_image();
 
                         meta.draw_list.reset();
-
-                        // hacky
-                        let scale = DpiScale::new(meta.dpi_scale.factor);
-
                         self.frame_arena.reset();
 
                         let mut canvas = Canvas {
-                            arena: self.frame_arena,
-                            scale,
+                            arena: &self.frame_arena,
+                            scale: Dpi(96),
                             target: &image,
+                            graphics: &self.graphics,
                             draw_list: &mut meta.draw_list,
+                            text_engine: &self.text_engine,
+                            glyph_cache: &mut self.glyph_cache,
                         };
 
                         canvas.begin();
@@ -486,11 +481,7 @@ impl<'a, UserData, Client: EventHandler<UserData>> Handler<(WindowState<'a>, Opt
                             &image.frame_info(),
                         );
 
-                        // in case the client didn't call finish
-                        canvas.finish();
-
                         self.graphics.draw(&mut meta.draw_list, &mut image);
-
                         image.present();
                     }
                     WindowEvent::Destroy => {

@@ -34,6 +34,9 @@ new_rect! {
     WindowRect(i16, WindowPoint, WindowExtent),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct Dpi(pub u16);
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DpiScale {
     pub factor: f32,

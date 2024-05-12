@@ -1,4 +1,3 @@
-mod canvas;
 mod color;
 mod draw_list;
 mod gl;
@@ -24,22 +23,17 @@ use self::{
     limits::{
         GFX_ATLAS_EXTENT_MAX, GFX_ATLAS_EXTENT_MIN, GFX_IMAGE_EXTENT_MAX, GFX_IMAGE_EXTENT_MIN,
     },
-    text::TextEngine,
 };
 
 pub(crate) use self::gl::Swapchain;
+pub(crate) use self::i16q3::*;
 
 pub use self::{
-    canvas::Canvas,
     color::Color,
     draw_list::DrawList,
     gl::RenderTarget,
     image::{Error as ImageError, Format, Image, ImageInfo, Layout, RasterBuf},
     primitives::RoundRect,
-    text::{
-        Error as TextError, FontOptions, Pt, Shape as FontShape, TextBox, TextLayout, TextWrapMode,
-        Weight as FontWeight,
-    },
 };
 
 new_point! {
@@ -190,7 +184,7 @@ pub enum Backend {
     Dx12,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct GraphicsConfig {
     pub power_preference: PowerPreference,
     pub debug_mode: bool,
@@ -227,7 +221,6 @@ pub struct FrameInfo {
 pub struct Graphics {
     device: Device,
     images: AtlasMap,
-    text_engine: TextEngine,
 }
 
 impl Graphics {
@@ -258,13 +251,7 @@ impl Graphics {
 
         device.flush_upload_buffer();
 
-        let text_engine = TextEngine::default();
-
-        Self {
-            device,
-            images,
-            text_engine,
-        }
+        Self { device, images }
     }
 
     #[cfg(target_os = "windows")]
@@ -319,127 +306,18 @@ impl Graphics {
     }
 
     pub fn draw(&self, draw_list: &mut DrawList, target: &mut RenderTarget) {
+        draw_list.close();
+
         for cmd in draw_list.iter_mut() {
-            match cmd {
-                CommandMut::Rects { rects } => {
-                    for rect in rects {
-                        let mapping = self.images.get(ImageId::from_raw(rect.texture_id)).unwrap();
-                        rect.uvwh = mapping.uvwh.to_uvwh();
-                        rect.texture_id = mapping.store.to_raw();
-                    }
+            if let CommandMut::Rects { rects } = cmd {
+                for rect in rects {
+                    let mapping = self.images.get(ImageId::from_raw(rect.texture_id)).unwrap();
+                    rect.uvwh = mapping.uvwh.to_uvwh();
+                    rect.texture_id = mapping.store.to_raw();
                 }
-                CommandMut::Chars { layout, glyphs } => {
-                    // todo
-                }
-                _ => {}
             }
         }
 
         self.device.draw(draw_list, target);
     }
-
-    // pub fn draw2(&self, content: &[Canvas2]) {
-    //     for canvas in content {
-    //         for cmd in canvas.draw_list.iter_mut() {
-    //             match cmd {
-    //                 CommandMut2::Rects { rects } => {
-    //                     for rect in rects {
-    //                         let (texture_id, uvwh) =
-    //                             self.texture_cache.get_uv_rect(rect.texture_id);
-    //                         rect.uvwh = uvwh.to_uvwh();
-    //                         rect.texture_id = texture_id;
-    //                     }
-    //                 }
-    //                 CommandMut2::Chars { layout, glyphs } => {
-    //                     let layout = self.text_engine.get(layout).unwrap();
-    //                     layout.write(glyphs);
-
-    //                     for glyph in glyphs {
-    //                         let image_id = self.glyph_cache.get_or_insert(glyph, |glyph| {
-    //                             let bitmap = self.text_engine.rasterize(arena, glyph);
-
-    //                             let (texture, image) = self.texture_cache.insert_rect(
-    //                                 bitmap.extent(),
-    //                                 bitmap.layout(),
-    //                                 bitmap.format(),
-    //                                 |extent, layout, format| {
-    //                                     self.device.create_texture(extent, layout, format)
-    //                                 },
-    //                             );
-
-    //                             let (_, rect) = self.texture_cache.get_rect(image);
-
-    //                             self.device
-    //                                 .copy_raster_to_texture(texture, &bitmap, rect.origin);
-
-    //                             image
-    //                         });
-
-    //                         let (texture_id, uvwh) = self.texture_cache.get_uv_rect(image_id);
-
-    //                         glyph.uvwh = uvwh.to_uvwh();
-    //                         glyph.texture_id = texture_id;
-    //                     }
-    //                 }
-    //                 _ => {}
-    //             }
-    //         }
-    //     }
-
-    //     // todo:
-    //     // 32-bit TextureId (and TextureCache)
-    //     // GlyphCache (takes a glyph and returns a texture id)
-    //     // allow slotmap to be heap allocated
-
-    //     // self.device.draw2(content);
-    // }
 }
-
-// struct TextureManager {
-//     atlas_textures: [ArrayVec<AtlasTexture, 8>; 4],
-//     // slotmap: SlotMap<ImageId, ImageLocation>,
-// }
-
-// impl TextureManager {
-//     fn new(max_images: usize, max_atlas_textures: usize) -> Self {
-//         todo!()
-//     }
-
-//     fn get(&self, id: ImageId) -> (TextureRect, UvRect) {
-//         todo!()
-//     }
-
-//     fn insert(
-//         &mut self,
-//         info: ImageInfo,
-//         alloc: impl FnMut(Layout, Format, Extent) -> TextureId,
-//     ) -> (ImageId, TextureRect) {
-//         todo!()
-//     }
-
-//     fn remove(&mut self, id: ImageId) {
-//         todo!()
-//     }
-// }
-
-// enum ImageLocation {
-//     Atlas { index: u16, location: UvRect },
-//     Owned { texture: TextureId },
-// }
-
-// struct AtlasTexture {
-//     extent: TextureExtent,
-//     images: ArrayVec<ImageId, 1024>,
-//     texture: TextureId,
-//     // other stuff
-// }
-
-// impl AtlasTexture {
-//     pub fn new(texture: TextureId, extent: TextureExtent) -> Self {
-//         Self {
-//             extent,
-//             images: ArrayVec::new(),
-//             texture,
-//         }
-//     }
-// }

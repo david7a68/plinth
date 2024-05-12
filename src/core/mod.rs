@@ -38,3 +38,5 @@ impl Hasher for PassthroughHasher {
         self.val = i;
     }
 }
+
+pub type PassthroughHashMap<T> = std::collections::HashMap<u64, T, PassthroughBuildHasher>;
